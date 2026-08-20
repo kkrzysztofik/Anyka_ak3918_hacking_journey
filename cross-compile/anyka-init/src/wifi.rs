@@ -597,7 +597,10 @@ fn try_bring_up_with(sys: &dyn Sys, cfg: &WifiCfg, layout: &FsLayout) -> Result<
 
     // 10-12: address, resolv.conf, verification.
     let addr = assign_address(sys, cfg, layout)?;
-    if !cfg.dns.is_empty() {
+    // Static configs must rewrite resolv.conf even when dns is empty (an
+    // overlay `dns = []` clears prior nameservers). DHCP with an empty list
+    // leaves resolv.conf alone so udhcpc can own it.
+    if !cfg.dhcp || !cfg.dns.is_empty() {
         std::fs::write(&layout.resolv_conf, resolv_conf(&cfg.dns))
             .map_err(|e| format!("write {}: {e}", layout.resolv_conf))?;
     }
@@ -1240,6 +1243,31 @@ Local:
         assert!(wpa.contains(r#"ssid="testnet""#));
         let resolv = std::fs::read_to_string(&layout.resolv_conf).expect("resolv conf written");
         assert_eq!(resolv, "nameserver 192.168.2.1\n");
+    }
+
+    #[test]
+    fn test_try_bring_up_with_clears_resolv_conf_when_static_dns_is_empty() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let layout = test_layout(dir.path());
+        std::fs::create_dir_all(format!("{}/wlan0", layout.sys_class_net)).expect("iface dir");
+        std::fs::write(format!("{}/wlan0/carrier", layout.sys_class_net), "1").expect("carrier");
+        std::fs::write(&layout.proc_route, HAPPY_ROUTE).expect("route");
+        std::fs::write(&layout.proc_fib_trie, HAPPY_FIB_TRIE).expect("fib_trie");
+        std::fs::write(&layout.resolv_conf, "nameserver 8.8.8.8\n").expect("seed resolv");
+
+        let mut cfg = happy_cfg();
+        cfg.dhcp = false;
+        cfg.address = Some("192.168.2.198/24".into());
+        cfg.gateway = Some("192.168.2.1".into());
+        cfg.dns = vec![];
+        let sys = happy_mock_sys();
+
+        try_bring_up_with(&sys, &cfg, &layout).expect("bring-up must succeed");
+        let resolv = std::fs::read_to_string(&layout.resolv_conf).expect("resolv conf written");
+        assert_eq!(
+            resolv, "",
+            "an explicit empty DNS list must clear prior nameservers"
+        );
     }
 
     #[test]

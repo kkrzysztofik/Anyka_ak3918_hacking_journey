@@ -390,11 +390,18 @@ pub async fn handle_set_dns(
     let servers: Vec<String> = if request.from_dhcp {
         Vec::new()
     } else {
-        request
-            .dns_manual
-            .iter()
-            .filter_map(|a| a.ipv4_address.clone())
-            .collect()
+        let mut servers = Vec::with_capacity(request.dns_manual.len());
+        for entry in &request.dns_manual {
+            match &entry.ipv4_address {
+                Some(addr) => servers.push(addr.clone()),
+                None => {
+                    return Err(unsupported_network_config(
+                        "IPv6 DNS servers are not supported; provide IPv4Address",
+                    ));
+                }
+            }
+        }
+        servers
     };
     for s in &servers {
         validate_ipv4(s)?;
@@ -600,6 +607,12 @@ pub async fn handle_set_network_protocols(
     let mut rtsp_port: Option<i32> = None;
 
     for proto in &request.network_protocols {
+        if !proto.enabled {
+            return Err(OnvifError::invalid_arg_val(
+                "NoConfig",
+                "disabling HTTP/RTSP listeners is not supported",
+            ));
+        }
         let port = *proto.port.first().ok_or_else(|| {
             OnvifError::invalid_arg_val("NoConfig", "protocol entry carries no port")
         })?;
@@ -918,6 +931,21 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_set_dns_rejects_ipv6_only_entries() {
+        let platform = None;
+        let request = SetDNS {
+            from_dhcp: false,
+            search_domain: vec![],
+            dns_manual: vec![IPAddress::ipv6("2001:db8::1")],
+        };
+
+        assert!(matches!(
+            handle_set_dns(&platform, request).await,
+            Err(OnvifError::InvalidArgVal { .. })
+        ));
+    }
+
+    #[tokio::test]
     async fn test_set_dns_rejects_a_malformed_server() {
         let platform = None;
         let request = SetDNS {
@@ -1061,6 +1089,25 @@ mod tests {
                 .is_err(),
             "there is no TLS listener"
         );
+    }
+
+    #[tokio::test]
+    async fn test_set_network_protocols_rejects_disabled_listener() {
+        let config = create_test_config();
+        let before = config.read().server.port;
+        let request = SetNetworkProtocols {
+            network_protocols: vec![NetworkProtocol {
+                name: NetworkProtocolType::HTTP,
+                enabled: false,
+                port: vec![8080],
+            }],
+        };
+        assert!(
+            handle_set_network_protocols(&config, request)
+                .await
+                .is_err()
+        );
+        assert_eq!(config.read().server.port, before);
     }
 
     #[tokio::test]

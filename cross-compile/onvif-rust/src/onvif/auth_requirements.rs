@@ -334,6 +334,22 @@ mod tests {
     }
 
     #[test]
+    fn test_get_required_level_network_write_requires_administrator() {
+        for op in [
+            "SetNetworkInterfaces",
+            "SetDNS",
+            "SetNetworkDefaultGateway",
+            "SetNetworkProtocols",
+        ] {
+            assert_eq!(
+                get_required_level("device", op),
+                AuthLevel::Administrator,
+                "{op} must require Administrator"
+            );
+        }
+    }
+
+    #[test]
     fn test_get_required_level_ptz_operations() {
         // User level
         assert_eq!(get_required_level("ptz", "GetStatus"), AuthLevel::User);

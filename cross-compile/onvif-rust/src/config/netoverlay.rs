@@ -187,4 +187,25 @@ mod tests {
             "onvif-rust and anyka-init NetworkOverlay field sets diverged"
         );
     }
+
+    #[test]
+    fn test_update_at_preserves_fields_across_sequential_edits() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("network.toml");
+
+        NetworkOverlay::update_at(&path, |o| {
+            o.dhcp = Some(false);
+            o.address = Some("192.168.2.50/24".into());
+        })
+        .expect("first edit");
+        NetworkOverlay::update_at(&path, |o| {
+            o.dns = Some(vec!["1.1.1.1".into()]);
+        })
+        .expect("second edit");
+
+        let overlay = NetworkOverlay::read(&path).expect("read");
+        assert_eq!(overlay.dhcp, Some(false));
+        assert_eq!(overlay.address.as_deref(), Some("192.168.2.50/24"));
+        assert_eq!(overlay.dns, Some(vec!["1.1.1.1".into()]));
+    }
 }

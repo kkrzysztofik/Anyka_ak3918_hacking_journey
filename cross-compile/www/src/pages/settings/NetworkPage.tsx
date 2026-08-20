@@ -73,12 +73,12 @@ const ipRegex = new RegExp(String.raw`^${octet}\.${octet}\.${octet}\.${octet}$`)
 
 const networkSchema = z
   .object({
-    ssid: z.string().min(1, 'SSID is required').max(32, 'SSID must be 32 characters or fewer'),
+    ssid: z.string().max(32, 'SSID must be 32 characters or fewer'),
     password: z.string().max(63, 'WPA passphrases are at most 63 characters'),
     security: z.enum(['wpa', 'wep', 'open']),
     dhcp: z.boolean(),
     address: z.string().regex(ipRegex, 'Invalid IP address').optional().or(z.literal('')),
-    prefixLength: z.number().min(0).max(32).optional(),
+    prefixLength: z.number().min(1).max(32).optional(),
     gateway: z.string().regex(ipRegex, 'Invalid IP address').optional().or(z.literal('')),
     dnsFromDHCP: z.boolean(),
     primaryDNS: z.string().regex(ipRegex, 'Invalid IP address').optional().or(z.literal('')),
@@ -112,7 +112,7 @@ function parseOverlayAddress(address?: string): { ip: string; prefix: number } |
   const [ip, prefixStr] = address.split('/');
   if (!ip || !prefixStr) return null;
   const prefix = Number(prefixStr);
-  if (!Number.isFinite(prefix) || prefix < 0 || prefix > 32) return null;
+  if (!Number.isFinite(prefix) || prefix < 1 || prefix > 32) return null;
   return { ip, prefix };
 }
 

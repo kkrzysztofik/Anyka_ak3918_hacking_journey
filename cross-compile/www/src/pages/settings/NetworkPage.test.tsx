@@ -234,6 +234,25 @@ describe('NetworkPage', () => {
     });
   });
 
+  it('should allow an IP-only save when no SSID is available', async () => {
+    vi.mocked(getDiagnostics).mockResolvedValue({
+      ...MOCK_DIAGNOSTICS,
+      wifi: { ...MOCK_DIAGNOSTICS.wifi!, ssid: '' },
+    });
+
+    const user = userEvent.setup();
+    await renderNetworkPage();
+
+    await makeFormDirty(user, 'network-ip-address-input', '192.168.1.200');
+    await user.click(screen.getByTestId('network-save-button'));
+    await user.click(await screen.findByTestId('network-confirm-save-button'));
+
+    await waitFor(() => {
+      expect(setNetworkInterface).toHaveBeenCalled();
+      expect(putNetworkOverlay).not.toHaveBeenCalled();
+    });
+  });
+
   it('should reject static IP save when address is empty with DHCP disabled', async () => {
     const user = userEvent.setup();
     await renderNetworkPage();
