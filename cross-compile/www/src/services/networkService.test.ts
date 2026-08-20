@@ -109,6 +109,33 @@ describe('networkService', () => {
 
       await expect(getNetworkProtocols()).resolves.toEqual({ http: 8080, rtsp: 8554 });
     });
+
+    it('should keep defaults when ports are empty, fractional, or out of range', async () => {
+      vi.mocked(apiClient.post).mockResolvedValueOnce(
+        createMockSOAPResponse(`
+        <GetNetworkProtocolsResponse>
+          <NetworkProtocols>
+            <Name>HTTP</Name>
+            <Port></Port>
+          </NetworkProtocols>
+          <NetworkProtocols>
+            <Name>RTSP</Name>
+            <Port>554.5</Port>
+          </NetworkProtocols>
+          <NetworkProtocols>
+            <Name>HTTP</Name>
+            <Port>0</Port>
+          </NetworkProtocols>
+          <NetworkProtocols>
+            <Name>RTSP</Name>
+            <Port>70000</Port>
+          </NetworkProtocols>
+        </GetNetworkProtocolsResponse>
+      `),
+      );
+
+      await expect(getNetworkProtocols()).resolves.toEqual({ http: 80, rtsp: 554 });
+    });
   });
 
   describe('getNetworkConfig', () => {

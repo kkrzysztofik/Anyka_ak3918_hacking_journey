@@ -500,6 +500,9 @@ impl Config {
         overlay_path: &std::path::Path,
     ) -> Result<Self, ConfigError> {
         let mut cfg = Self::parse_file(path)?;
+        // Validate the baseline first so non-network failures never quarantine
+        // a valid overlay.
+        cfg.validate()?;
         Self::merge_network_overlay(&mut cfg, overlay_path)?;
         cfg.validate()?;
         Ok(cfg)
@@ -1089,5 +1092,46 @@ password = "operatorpass"
             "broken overlay must be quarantined away from the next boot"
         );
         assert!(dir.path().join("network.toml.bad").exists());
+    }
+
+    #[test]
+    fn test_load_with_overlay_rejects_invalid_baseline_without_quarantining() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let base = dir.path().join("anyka.toml");
+        let overlay = dir.path().join("network.toml");
+        std::fs::write(
+            &base,
+            r#"
+[wifi]
+ssid = "OperatorNet"
+password = "operatorpass"
+
+[services.broken]
+enabled = true
+exec = ""
+log = "/mnt/logs/broken.log"
+"#,
+        )
+        .expect("write base");
+        std::fs::write(
+            &overlay,
+            r#"
+ssid = "OverlayNet"
+password = "overlaypass"
+"#,
+        )
+        .expect("write overlay");
+
+        let err = Config::load_with_overlay(base.to_str().expect("utf8"), &overlay)
+            .expect_err("invalid baseline service must fail the load");
+        assert!(
+            matches!(err, ConfigError::Invalid(_)),
+            "expected Invalid, got {err:?}"
+        );
+        assert!(
+            overlay.exists(),
+            "valid overlay must not be quarantined for a baseline fault"
+        );
+        assert!(!dir.path().join("network.toml.bad").exists());
     }
 }

@@ -17,7 +17,7 @@ use crate::onvif::types::device::{
     DNSInformation, Duplex, GetDNS, GetDNSResponse, GetHostname, GetHostnameResponse, GetNTP,
     GetNTPResponse, GetNetworkDefaultGateway, GetNetworkDefaultGatewayResponse,
     GetNetworkInterfaces, GetNetworkInterfacesResponse, GetNetworkProtocols,
-    GetNetworkProtocolsResponse, HostnameInformation, IPAddress, IPv4Configuration,
+    GetNetworkProtocolsResponse, HostnameInformation, IPAddress, IPType, IPv4Configuration,
     IPv4NetworkInterface, NTPInformation, NetworkGateway, NetworkHost, NetworkInterface,
     NetworkInterfaceConnectionSetting, NetworkInterfaceInfo, NetworkInterfaceLink, NetworkProtocol,
     NetworkProtocolType, PrefixedIPv4Address, SetDNS, SetDNSResponse, SetHostname,
@@ -392,11 +392,16 @@ pub async fn handle_set_dns(
     } else {
         let mut servers = Vec::with_capacity(request.dns_manual.len());
         for entry in &request.dns_manual {
+            if entry.address_type != IPType::IPv4 {
+                return Err(unsupported_network_config(
+                    "IPv6 DNS servers are not supported; Type must be IPv4",
+                ));
+            }
             match &entry.ipv4_address {
                 Some(addr) => servers.push(addr.clone()),
                 None => {
                     return Err(unsupported_network_config(
-                        "IPv6 DNS servers are not supported; provide IPv4Address",
+                        "IPv4 DNS entries require IPv4Address",
                     ));
                 }
             }
@@ -937,6 +942,25 @@ mod tests {
             from_dhcp: false,
             search_domain: vec![],
             dns_manual: vec![IPAddress::ipv6("2001:db8::1")],
+        };
+
+        assert!(matches!(
+            handle_set_dns(&platform, request).await,
+            Err(OnvifError::InvalidArgVal { .. })
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_set_dns_rejects_ipv6_typed_entry_with_ipv4_address() {
+        let platform = None;
+        let request = SetDNS {
+            from_dhcp: false,
+            search_domain: vec![],
+            dns_manual: vec![IPAddress {
+                address_type: IPType::IPv6,
+                ipv4_address: Some("8.8.8.8".to_string()),
+                ipv6_address: None,
+            }],
         };
 
         assert!(matches!(

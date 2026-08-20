@@ -3,7 +3,7 @@
  *
  * Configure network interfaces, DNS, Wi-Fi, and ports.
  */
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -78,7 +78,7 @@ const networkSchema = z
     security: z.enum(['wpa', 'wep', 'open']),
     dhcp: z.boolean(),
     address: z.string().regex(ipRegex, 'Invalid IP address').optional().or(z.literal('')),
-    prefixLength: z.number().min(1).max(32).optional(),
+    prefixLength: z.number().int().min(1).max(32).optional(),
     gateway: z.string().regex(ipRegex, 'Invalid IP address').optional().or(z.literal('')),
     dnsFromDHCP: z.boolean(),
     primaryDNS: z.string().regex(ipRegex, 'Invalid IP address').optional().or(z.literal('')),
@@ -112,7 +112,7 @@ function parseOverlayAddress(address?: string): { ip: string; prefix: number } |
   const [ip, prefixStr] = address.split('/');
   if (!ip || !prefixStr) return null;
   const prefix = Number(prefixStr);
-  if (!Number.isFinite(prefix) || prefix < 1 || prefix > 32) return null;
+  if (!Number.isInteger(prefix) || prefix < 1 || prefix > 32) return null;
   return { ip, prefix };
 }
 
@@ -167,6 +167,7 @@ export default function NetworkPage() {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [pendingValues, setPendingValues] = useState<NetworkFormData | null>(null);
   const [failureDismissed, setFailureDismissed] = useState(false);
+  const dismissFailure = useCallback(() => setFailureDismissed(true), []);
 
   const { data: config, isLoading } = useQuery<NetworkConfig>({
     queryKey: ['networkConfig'],
@@ -236,7 +237,7 @@ export default function NetworkPage() {
         (overlay?.pending?.security as NetworkFormData['security'] | undefined) ?? 'wpa';
       const wifiPatch = buildWifiOverlayPatch(values, liveSsid, liveSecurity);
       if (wifiPatch) {
-        await putNetworkOverlay(wifiPatch);
+        await runNetworkStep('Wi-Fi configuration failed', () => putNetworkOverlay(wifiPatch));
       }
 
       await runNetworkStep('IP configuration failed', () =>
@@ -351,6 +352,7 @@ export default function NetworkPage() {
 
         {overlay?.last_failure && !failureDismissed && (
           <div
+            role="alert"
             className="mb-[24px] flex items-start justify-between gap-[12px] rounded-[8px] border border-[rgba(255,69,58,0.3)] bg-[rgba(255,69,58,0.08)] p-[16px]"
             data-testid="network-failure-banner"
           >
@@ -365,7 +367,7 @@ export default function NetworkPage() {
               size="icon"
               className="shrink-0 text-[#ff453a]"
               aria-label="Dismiss network failure"
-              onClick={() => setFailureDismissed(true)}
+              onClick={dismissFailure}
               data-testid="network-failure-dismiss"
             >
               <X className="size-4" />

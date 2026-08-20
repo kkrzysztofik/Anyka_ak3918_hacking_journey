@@ -169,7 +169,7 @@ export async function getNetworkProtocols(): Promise<NetworkProtocols> {
     const ports = entry.Port;
     const portValue = Array.isArray(ports) ? ports[0] : ports;
     const port = Number(portValue);
-    if (!Number.isFinite(port)) continue;
+    if (!Number.isInteger(port) || port < 1 || port > 65535) continue;
     if (name === 'HTTP') http = port;
     if (name === 'RTSP') rtsp = port;
   }

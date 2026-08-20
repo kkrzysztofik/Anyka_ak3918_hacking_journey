@@ -159,6 +159,20 @@ describe('NetworkPage', () => {
   });
 
   it('should show no badge when the overlay matches the live config', async () => {
+    const live = MOCK_DATA.network;
+    const iface = live.interfaces[0];
+    vi.mocked(getNetworkOverlay).mockResolvedValue({
+      pending: {
+        has_password: false,
+        dhcp: iface.dhcp,
+        address: `${iface.address}/${iface.prefixLength}`,
+        gateway: iface.gateway,
+        dns: [...live.dns.dnsServers],
+      },
+      has_pending: true,
+      last_failure: null,
+    });
+
     await renderNetworkPage();
     await waitFor(() => expect(screen.queryByTestId('network-ip-pending-badge')).toBeNull());
   });
