@@ -119,14 +119,13 @@ describe('NetworkPage', () => {
     expect(screen.getByTestId('network-gateway-input')).toHaveValue('192.168.1.1');
   });
 
-  it('should not render a hostname input; Identification owns it', async () => {
+  it.each([
+    ['network-hostname-input', 'hostname; Identification owns it'],
+    ['network-onvif-discovery-switch', 'ONVIF discovery; Identification owns it'],
+    ['network-https-port-input', 'HTTPS port; no TLS listener exists'],
+  ] as const)('should not render %s (%s)', async (testId) => {
     await renderNetworkPage();
-    expect(screen.queryByTestId('network-hostname-input')).toBeNull();
-  });
-
-  it('should not render an ONVIF discovery switch; Identification owns it', async () => {
-    await renderNetworkPage();
-    expect(screen.queryByTestId('network-onvif-discovery-switch')).toBeNull();
+    expect(screen.queryByTestId(testId)).toBeNull();
   });
 
   it('should link to the Identification pane instead', async () => {
@@ -135,11 +134,6 @@ describe('NetworkPage', () => {
       'href',
       '#/settings/identification',
     );
-  });
-
-  it('should not render an HTTPS port input; no TLS listener exists', async () => {
-    await renderNetworkPage();
-    expect(screen.queryByTestId('network-https-port-input')).toBeNull();
   });
 
   it('should badge IP Configuration as pending when the overlay differs from live', async () => {

@@ -26,7 +26,7 @@ pub struct Chip {
 }
 
 impl Chip {
-    pub const ALL: &'static [Chip] = &[
+    pub const ALL: &[Chip] = &[
         Chip {
             name: "ssv6x5x",
             module: "/tmp/ko/ssv6x5x.ko",

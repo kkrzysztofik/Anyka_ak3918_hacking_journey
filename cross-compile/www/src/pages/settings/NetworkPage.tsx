@@ -153,6 +153,15 @@ function buildWifiOverlayPatch(
   return Object.keys(patch).length > 0 ? patch : null;
 }
 
+async function runNetworkStep(label: string, step: () => Promise<void>): Promise<void> {
+  try {
+    await step();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'unknown error';
+    throw new Error(`${label}: ${message}`, { cause: error });
+  }
+}
+
 export default function NetworkPage() {
   const queryClient = useQueryClient();
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -230,36 +239,19 @@ export default function NetworkPage() {
         await putNetworkOverlay(wifiPatch);
       }
 
-      try {
-        await setNetworkInterface(iface.token, values.dhcp, values.address, values.prefixLength);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : 'unknown error';
-        throw new Error(`IP configuration failed: ${message}`, { cause: error });
-      }
+      await runNetworkStep('IP configuration failed', () =>
+        setNetworkInterface(iface.token, values.dhcp, values.address, values.prefixLength),
+      );
 
       if (!values.dhcp && values.gateway) {
-        try {
-          await setNetworkDefaultGateway(values.gateway);
-        } catch (error) {
-          const message = error instanceof Error ? error.message : 'unknown error';
-          throw new Error(`Gateway failed: ${message}`, { cause: error });
-        }
+        await runNetworkStep('Gateway failed', () => setNetworkDefaultGateway(values.gateway));
       }
 
-      try {
-        const dnsServers = [values.primaryDNS, values.secondaryDNS].filter(Boolean) as string[];
-        await setDNS(values.dnsFromDHCP, dnsServers);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : 'unknown error';
-        throw new Error(`DNS failed: ${message}`, { cause: error });
-      }
-
-      try {
-        await setNetworkProtocols(values.httpPort, values.rtspPort);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : 'unknown error';
-        throw new Error(`Port configuration failed: ${message}`, { cause: error });
-      }
+      const dnsServers = [values.primaryDNS, values.secondaryDNS].filter(Boolean) as string[];
+      await runNetworkStep('DNS failed', () => setDNS(values.dnsFromDHCP, dnsServers));
+      await runNetworkStep('Port configuration failed', () =>
+        setNetworkProtocols(values.httpPort, values.rtspPort),
+      );
     },
     onSuccess: () => {
       toast.success('Network settings saved', {
@@ -353,7 +345,7 @@ export default function NetworkPage() {
             >
               Settings › Identification
             </a>
-            .
+            {'.'}
           </p>
         </div>
 

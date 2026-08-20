@@ -41,6 +41,85 @@ struct Outcome {
 /// observe the background subshell mid-flight.
 ///
 /// `cp_fails` stubs `cp` to exit 1, exercising the restore-failure path.
+fn ifconfig_case_arms(ifconfig_addrs: &[Option<&str>]) -> String {
+    ifconfig_addrs
+        .iter()
+        .enumerate()
+        .map(|(i, addr)| match addr {
+            Some(a) => format!("{i}) echo 'inet addr:{a}' ;;"),
+            None => format!("{i}) echo '' ;;"),
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Poll until the deadman has made enough `ifconfig` calls and the restore/
+/// reboot side effects have settled (or the deadline expires).
+fn wait_until_deadman_settled(
+    counter: &Path,
+    self_path: &Path,
+    reboot_marker: &Path,
+    expected_ifconfig_calls: usize,
+) -> usize {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    let mut last = None;
+    let mut stable_count = 0usize;
+    let mut count_met_at = None;
+    loop {
+        let calls = fs::read_to_string(counter)
+            .ok()
+            .and_then(|s| s.trim().parse::<usize>().ok())
+            .unwrap_or(0);
+        let restored = fs::read_to_string(self_path)
+            .ok()
+            .map(|s| s.contains("VENDOR BOOT PATH"))
+            .unwrap_or(false);
+        let rebooted = reboot_marker.exists();
+        let state = (calls, restored, rebooted);
+        let now = std::time::Instant::now();
+
+        if calls >= expected_ifconfig_calls
+            && deadman_outcome_ready(now, &mut count_met_at, restored, rebooted)
+            && readings_stable(&mut last, &mut stable_count, state)
+        {
+            return calls;
+        }
+
+        last = Some(state);
+        if now >= deadline {
+            return calls;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+}
+
+fn deadman_outcome_ready(
+    now: std::time::Instant,
+    count_met_at: &mut Option<std::time::Instant>,
+    restored: bool,
+    rebooted: bool,
+) -> bool {
+    let met_at = *count_met_at.get_or_insert(now);
+    let grace_done = now.duration_since(met_at) >= std::time::Duration::from_millis(250);
+    restored || rebooted || grace_done
+}
+
+fn readings_stable(
+    last: &mut Option<(usize, bool, bool)>,
+    stable_count: &mut usize,
+    state: (usize, bool, bool),
+) -> bool {
+    if Some(state) == *last {
+        *stable_count += 1;
+        // Two consecutive identical readings (≥40 ms apart) mean the restore +
+        // reboot stubs have settled.
+        *stable_count >= 2
+    } else {
+        *stable_count = 0;
+        false
+    }
+}
+
 fn run(
     ifconfig_addrs: &[Option<&str>],
     binary_present: bool,
@@ -61,21 +140,13 @@ fn run(
     // A counter file turns successive `ifconfig` calls into a scripted sequence.
     let counter = dir.join("ifconfig-calls");
     fs::write(&counter, "0").expect("seed counter");
-    let cases: Vec<String> = ifconfig_addrs
-        .iter()
-        .enumerate()
-        .map(|(i, addr)| match addr {
-            Some(a) => format!("{i}) echo 'inet addr:{a}' ;;"),
-            None => format!("{i}) echo '' ;;"),
-        })
-        .collect();
     stub(
         dir,
         "ifconfig",
         &format!(
             "n=$(cat '{c}'); echo $((n + 1)) > '{c}'\ncase $n in\n{cases}\n*) echo '' ;;\nesac",
             c = counter.display(),
-            cases = cases.join("\n"),
+            cases = ifconfig_case_arms(ifconfig_addrs),
         ),
     );
 
@@ -123,57 +194,13 @@ fn run(
     let child_pid = child.id() as i32;
 
     // The deadman is a backgrounded subshell. Wait for the expected number of
-    // `ifconfig` calls (proving the watchdog actually ran, not just that a
-    // sleep elapsed), then wait until the outcome stops changing — the
-    // restore + reboot run right after the last call, and a loaded host must
-    // not observe the subshell mid-restore.
-    //
-    // After the final ifconfig the deadman may still be about to `cp`/`mv`/
-    // `reboot`. A stable `(count, false, false)` reading can therefore be
-    // mid-flight; require either a restore/reboot side effect *or* a short
-    // grace window after the count is met before treating the outcome as
-    // final. That covers both "vendor chain rescued the link" and "still
-    // dead, restore" on a loaded CI runner.
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-    let mut last = None;
-    let mut stable_count = 0usize;
-    let mut count_met_at = None;
-    let observed = loop {
-        let state = (
-            fs::read_to_string(&counter)
-                .ok()
-                .and_then(|s| s.trim().parse::<usize>().ok())
-                .unwrap_or(0),
-            fs::read_to_string(&self_path)
-                .ok()
-                .map(|s| s.contains("VENDOR BOOT PATH"))
-                .unwrap_or(false),
-            reboot_marker.exists(),
-        );
-        let now = std::time::Instant::now();
-        if state.0 >= expected_ifconfig_calls {
-            let met_at = *count_met_at.get_or_insert(now);
-            let grace_done = now.duration_since(met_at) >= std::time::Duration::from_millis(250);
-            let outcome_known = state.1 || state.2 || grace_done;
-            if outcome_known {
-                if Some(state) == last {
-                    stable_count += 1;
-                    // Two consecutive identical readings (≥40 ms apart) mean
-                    // the restore + reboot stubs have settled.
-                    if stable_count >= 2 {
-                        break state.0;
-                    }
-                } else {
-                    stable_count = 0;
-                }
-            }
-        }
-        last = Some(state);
-        if now >= deadline {
-            break state.0;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(20));
-    };
+    // `ifconfig` calls, then for restore/reboot side effects to settle.
+    let observed = wait_until_deadman_settled(
+        &counter,
+        &self_path,
+        &reboot_marker,
+        expected_ifconfig_calls,
+    );
     assert!(
         observed >= expected_ifconfig_calls,
         "deadman made {observed} ifconfig calls, expected {expected_ifconfig_calls}, within 10s"

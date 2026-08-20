@@ -98,12 +98,12 @@ export async function getNetworkInterfaces(): Promise<NetworkInterface[]> {
     const link = iface.Link as Record<string, unknown> | undefined;
     const operSettings = link?.OperSettings as Record<string, unknown> | undefined;
     const rawSpeed = operSettings?.Speed;
-    const parsedSpeed =
-      typeof rawSpeed === 'number'
-        ? rawSpeed
-        : typeof rawSpeed === 'string'
-          ? Number(rawSpeed)
-          : Number.NaN;
+    let parsedSpeed = Number.NaN;
+    if (typeof rawSpeed === 'number') {
+      parsedSpeed = rawSpeed;
+    } else if (typeof rawSpeed === 'string') {
+      parsedSpeed = Number(rawSpeed);
+    }
     const linkSpeedMbps =
       Number.isFinite(parsedSpeed) && parsedSpeed > 0 ? Math.trunc(parsedSpeed) : null;
 
@@ -153,7 +153,12 @@ export async function getNetworkProtocols(): Promise<NetworkProtocols> {
   );
 
   const protocols = data?.NetworkProtocols;
-  const list = Array.isArray(protocols) ? protocols : protocols ? [protocols] : [];
+  let list: unknown[] = [];
+  if (Array.isArray(protocols)) {
+    list = protocols;
+  } else if (protocols) {
+    list = [protocols];
+  }
 
   let http = 80;
   let rtsp = 554;

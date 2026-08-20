@@ -35,10 +35,10 @@ pub struct NetworkOverlay {
 
 impl NetworkOverlay {
     /// Production location of the overlay, alongside `anyka.toml`.
-    pub const DEFAULT_PATH: &'static str = "/mnt/anyka_hack/network.toml";
+    pub const DEFAULT_PATH: &str = "/mnt/anyka_hack/network.toml";
 
     /// Quarantine name used when a boot with this overlay fails to associate.
-    pub const QUARANTINE_SUFFIX: &'static str = ".bad";
+    pub const QUARANTINE_SUFFIX: &str = ".bad";
 
     /// Merge this overlay onto a baseline `[wifi]` config, in place.
     ///
