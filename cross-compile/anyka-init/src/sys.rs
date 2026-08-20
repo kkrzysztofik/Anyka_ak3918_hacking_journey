@@ -6,6 +6,7 @@
 
 use std::collections::BTreeMap;
 use std::fs::OpenOptions;
+use std::mem::ManuallyDrop;
 use std::os::unix::process::{CommandExt, ExitStatusExt};
 use std::path::Path;
 use std::process::{Command, Stdio};
@@ -165,10 +166,11 @@ impl Sys for RealSys {
             exec: spec.exec.clone(),
             source,
         })?;
-        let pid = child.id() as Pid;
         // The reaper thread owns reaping via waitpid(-1). Dropping Child would
-        // race that waitpid.
-        std::mem::forget(child);
+        // race that waitpid. Wrap in ManuallyDrop so Drop/wait never runs;
+        // do not into_inner — reaper owns waitpid(-1).
+        let child = ManuallyDrop::new(child);
+        let pid = child.id() as Pid;
         Ok(pid)
     }
 
@@ -308,9 +310,10 @@ impl Sys for RealSys {
             exec: prog.to_string(),
             source,
         })?;
+        // Same ManuallyDrop pattern as spawn(): the reaper owns waitpid.
+        // Do not into_inner / drop — reaper owns waitpid(-1).
+        let child = ManuallyDrop::new(child);
         let pid = child.id() as Pid;
-        // Same forget pattern as spawn(): the reaper owns waitpid.
-        std::mem::forget(child);
         Ok(pid)
     }
 }
@@ -357,7 +360,7 @@ mod tests {
             contents.trim(),
             d.path().display()
         );
-        // RealSys::spawn forgets the Child (the reaper owns waitpid in
+        // RealSys::spawn wraps Child in ManuallyDrop (the reaper owns waitpid in
         // production), so this test must reap the pid it spawned or a zombie
         // lingers for the whole test binary.
         // SAFETY: pid is the still-running child this test spawned.
