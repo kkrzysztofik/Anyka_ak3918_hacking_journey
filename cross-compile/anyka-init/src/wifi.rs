@@ -26,7 +26,7 @@ pub struct Chip {
 }
 
 impl Chip {
-    pub const ALL: &'static [Chip] = &[
+    pub const ALL: &[Chip] = &[
         Chip {
             name: "ssv6x5x",
             module: "/tmp/ko/ssv6x5x.ko",
@@ -413,6 +413,18 @@ pub fn resolve_chip(pinned: &str, hw_conf_path: &str) -> Result<(&'static Chip, 
     Ok((chip, Polarity::from_char(hw.polarity_char)))
 }
 
+/// Clear the Wi-Fi reboot counter after a successful association (B4).
+fn on_association_success(storm_state_path: &str, outcome: Outcome) -> Outcome {
+    if matches!(outcome, Outcome::Up { .. }) {
+        let mut storm = crate::storm::StormState::load(storm_state_path);
+        storm.wifi_reboots = 0;
+        if let Err(e) = storm.save(storm_state_path) {
+            tracing::warn!(error = %e, "failed to clear wifi reboot counter");
+        }
+    }
+    outcome
+}
+
 /// Full bring-up. Steps are numbered to match the design addendum.
 ///
 /// `storm_state_path` is where the wifi reboot counter lives; a successful
@@ -431,18 +443,55 @@ pub fn bring_up_with(
     layout: &FsLayout,
 ) -> Outcome {
     match try_bring_up_with(sys, cfg, layout) {
-        Ok(outcome) => {
-            if matches!(outcome, Outcome::Up { .. }) {
-                let mut storm = crate::storm::StormState::load(storm_state_path);
-                storm.wifi_reboots = 0;
-                if let Err(e) = storm.save(storm_state_path) {
-                    tracing::warn!(error = %e, "failed to clear wifi reboot counter");
-                }
-            }
-            outcome
-        }
+        Ok(outcome) => on_association_success(storm_state_path, outcome),
         Err(e) => {
             tracing::error!(error = %e, "wifi bring-up failed");
+            if cfg.fallback_to_vendor {
+                fall_back(sys, layout)
+            } else {
+                tracing::error!("fallback_to_vendor is disabled; the camera may be unreachable");
+                Outcome::Failed
+            }
+        }
+    }
+}
+
+/// [`bring_up_with`], plus rung 2 of the rescue ladder.
+///
+/// `gateway_reachable` already rescues a bad static address. It cannot rescue
+/// bad credentials: with no association there is no gateway to probe. So when
+/// bring-up fails outright *and* an overlay is what produced `cfg`, quarantine
+/// the overlay and retry once with the operator's baseline before falling
+/// through to the vendor chain.
+pub fn bring_up_with_overlay(
+    sys: &dyn Sys,
+    cfg: &WifiCfg,
+    baseline: &WifiCfg,
+    storm_state_path: &str,
+    layout: &FsLayout,
+    overlay_path: &std::path::Path,
+) -> Outcome {
+    match try_bring_up_with(sys, cfg, layout) {
+        Ok(outcome) => on_association_success(storm_state_path, outcome),
+        Err(e) => {
+            tracing::error!(error = %e, "wifi bring-up failed");
+
+            if overlay_path.exists() {
+                if crate::netoverlay::NetworkOverlay::load(overlay_path)
+                    .is_ok_and(|overlay| overlay.overrides_association())
+                {
+                    crate::netoverlay::NetworkOverlay::quarantine(overlay_path);
+                }
+
+                match try_bring_up_with(sys, baseline, layout) {
+                    Ok(outcome) => {
+                        tracing::warn!("recovered on the baseline config");
+                        return on_association_success(storm_state_path, outcome);
+                    }
+                    Err(e) => tracing::error!(error = %e, "baseline retry also failed"),
+                }
+            }
+
             if cfg.fallback_to_vendor {
                 fall_back(sys, layout)
             } else {
@@ -548,7 +597,10 @@ fn try_bring_up_with(sys: &dyn Sys, cfg: &WifiCfg, layout: &FsLayout) -> Result<
 
     // 10-12: address, resolv.conf, verification.
     let addr = assign_address(sys, cfg, layout)?;
-    if !cfg.dns.is_empty() {
+    // Static configs must rewrite resolv.conf even when dns is empty (an
+    // overlay `dns = []` clears prior nameservers). DHCP with an empty list
+    // leaves resolv.conf alone so udhcpc can own it.
+    if !cfg.dhcp || !cfg.dns.is_empty() {
         std::fs::write(&layout.resolv_conf, resolv_conf(&cfg.dns))
             .map_err(|e| format!("write {}: {e}", layout.resolv_conf))?;
     }
@@ -1194,6 +1246,31 @@ Local:
     }
 
     #[test]
+    fn test_try_bring_up_with_clears_resolv_conf_when_static_dns_is_empty() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let layout = test_layout(dir.path());
+        std::fs::create_dir_all(format!("{}/wlan0", layout.sys_class_net)).expect("iface dir");
+        std::fs::write(format!("{}/wlan0/carrier", layout.sys_class_net), "1").expect("carrier");
+        std::fs::write(&layout.proc_route, HAPPY_ROUTE).expect("route");
+        std::fs::write(&layout.proc_fib_trie, HAPPY_FIB_TRIE).expect("fib_trie");
+        std::fs::write(&layout.resolv_conf, "nameserver 8.8.8.8\n").expect("seed resolv");
+
+        let mut cfg = happy_cfg();
+        cfg.dhcp = false;
+        cfg.address = Some("192.168.2.198/24".into());
+        cfg.gateway = Some("192.168.2.1".into());
+        cfg.dns = vec![];
+        let sys = happy_mock_sys();
+
+        try_bring_up_with(&sys, &cfg, &layout).expect("bring-up must succeed");
+        let resolv = std::fs::read_to_string(&layout.resolv_conf).expect("resolv conf written");
+        assert_eq!(
+            resolv, "",
+            "an explicit empty DNS list must clear prior nameservers"
+        );
+    }
+
+    #[test]
     fn test_bring_up_with_clears_wifi_reboot_counter_on_successful_association() {
         let dir = tempfile::tempdir().expect("tempdir");
         let layout = test_layout(dir.path());
@@ -1223,6 +1300,69 @@ Local:
         assert_eq!(
             storm.fast_reboots, 1,
             "bring-up must not touch the unrelated crash-loop counter"
+        );
+    }
+
+    #[test]
+    fn test_a_failing_overlay_is_quarantined_and_the_baseline_is_retried() {
+        // Arrange: same tempdir layout as the happy-path test, but no carrier,
+        // so association fails and bring-up returns Err.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let layout = test_layout(dir.path());
+        std::fs::create_dir_all(format!("{}/wlan0", layout.sys_class_net)).expect("iface dir");
+        std::fs::write(&layout.proc_route, HAPPY_ROUTE).expect("route");
+        std::fs::write(&layout.proc_fib_trie, HAPPY_FIB_TRIE).expect("fib_trie");
+
+        let mut overlay_cfg = happy_cfg();
+        overlay_cfg.ssid = "TypoNet".into();
+        overlay_cfg.password = "password1".into();
+        overlay_cfg.connect_timeout_sec = 0;
+        overlay_cfg.fallback_to_vendor = false;
+
+        let mut baseline_cfg = happy_cfg();
+        baseline_cfg.ssid = "OperatorNet".into();
+        baseline_cfg.password = "password1".into();
+        baseline_cfg.connect_timeout_sec = 0;
+
+        let storm_path = dir.path().join("storm.json");
+
+        let overlay_path = dir.path().join("network.toml");
+        std::fs::write(&overlay_path, "ssid = \"TypoNet\"\n").expect("write");
+
+        let sys = happy_mock_sys();
+
+        // Act
+        let outcome = bring_up_with_overlay(
+            &sys,
+            &overlay_cfg,
+            &baseline_cfg,
+            storm_path.to_str().expect("utf8"),
+            &layout,
+            &overlay_path,
+        );
+
+        // Assert: quarantine + a visible baseline retry
+        assert_eq!(outcome, Outcome::Failed);
+        assert!(
+            !overlay_path.exists(),
+            "the failing overlay must be quarantined"
+        );
+
+        let bad = dir.path().join("network.toml.bad");
+        assert!(
+            bad.exists(),
+            "the quarantined overlay must be readable by the UI"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&bad).expect("read"),
+            "ssid = \"TypoNet\"\n",
+            "quarantine must preserve the content so the UI can show what failed"
+        );
+
+        let wpa = std::fs::read_to_string(&layout.wpa_conf).expect("wpa conf written");
+        assert!(
+            wpa.contains("ssid=\"OperatorNet\""),
+            "baseline retry must rewrite wpa_supplicant.conf"
         );
     }
 }

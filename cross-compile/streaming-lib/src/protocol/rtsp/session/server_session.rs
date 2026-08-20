@@ -816,13 +816,17 @@ impl RtspServerSession {
         Ok(())
     }
 
-    async fn handle_describe(&mut self, rtsp_request: &RtspRequest) -> Result<(), SessionError> {
+    /// Returns `true` when the DESCRIBE was rejected (401 already sent).
+    async fn reject_unauthorized_describe(
+        &mut self,
+        rtsp_request: &RtspRequest,
+    ) -> Result<bool, SessionError> {
         if self.auth.is_none() {
             let has_authorization_header = rtsp_request.get_header("Authorization").is_some();
             let has_userinfo_in_uri = rtsp_request.uri.host.contains('@');
             if has_authorization_header || has_userinfo_in_uri {
                 self.send_unauthorized_response(rtsp_request).await?;
-                return Ok(());
+                return Ok(true);
             }
         }
 
@@ -838,10 +842,18 @@ impl RtspServerSession {
             );
             if auth_result.is_err() {
                 self.send_unauthorized_response(rtsp_request).await?;
-                return Ok(());
+                return Ok(true);
             }
         }
 
+        Ok(false)
+    }
+
+    /// Poll the stream hub until SDP/tracks arrive or the play-ready budget expires.
+    async fn wait_for_describe_tracks(
+        &mut self,
+        rtsp_request: &RtspRequest,
+    ) -> Result<(), SessionError> {
         // Request the stream from the hub and wait for its SDP (populates
         // self.sdp and self.tracks).
         //
@@ -873,20 +885,44 @@ impl RtspServerSession {
             }
             tokio::time::sleep(Duration::from_millis(25)).await;
         }
+        Ok(())
+    }
 
+    /// Returns `true` when Accept was present and rejected (406 already sent).
+    async fn reject_unacceptable_describe_accept(
+        &mut self,
+        rtsp_request: &RtspRequest,
+    ) -> Result<bool, SessionError> {
         // M-02: RFC 2326 §12.1: honour Accept header in DESCRIBE
-        if let Some(accept) = rtsp_request.get_header("Accept") {
-            let dominated = accept.contains("application/sdp") || accept.contains("*/*");
-            if !dominated {
-                warn!(
-                    accept = %accept,
-                    remote_addr = %self.remote_addr,
-                    "rtsp_not_acceptable"
-                );
-                let response = Self::gen_response(http::StatusCode::NOT_ACCEPTABLE, rtsp_request);
-                self.send_response(&response).await?;
-                return Ok(());
-            }
+        let Some(accept) = rtsp_request.get_header("Accept") else {
+            return Ok(false);
+        };
+        let acceptable = accept.contains("application/sdp") || accept.contains("*/*");
+        if acceptable {
+            return Ok(false);
+        }
+        warn!(
+            accept = %accept,
+            remote_addr = %self.remote_addr,
+            "rtsp_not_acceptable"
+        );
+        let response = Self::gen_response(http::StatusCode::NOT_ACCEPTABLE, rtsp_request);
+        self.send_response(&response).await?;
+        Ok(true)
+    }
+
+    async fn handle_describe(&mut self, rtsp_request: &RtspRequest) -> Result<(), SessionError> {
+        if self.reject_unauthorized_describe(rtsp_request).await? {
+            return Ok(());
+        }
+
+        self.wait_for_describe_tracks(rtsp_request).await?;
+
+        if self
+            .reject_unacceptable_describe_accept(rtsp_request)
+            .await?
+        {
+            return Ok(());
         }
 
         if self.sdp.medias.is_empty() {

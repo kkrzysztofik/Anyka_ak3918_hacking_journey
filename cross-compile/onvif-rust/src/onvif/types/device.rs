@@ -1526,7 +1526,7 @@ pub struct IPv4NetworkInterface {
 }
 
 /// IPv4 configuration.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct IPv4Configuration {
     /// Manual addresses.
     #[serde(rename = "tt:Manual", default)]
@@ -1563,6 +1563,77 @@ pub struct PrefixedIPv4Address {
     /// Prefix length.
     #[serde(rename = "tt:PrefixLength", alias = "PrefixLength")]
     pub prefix_length: i32,
+}
+
+/// SetNetworkInterfaces request.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename = "SetNetworkInterfaces")]
+pub struct SetNetworkInterfaces {
+    /// Symbolic network interface token.
+    #[serde(rename = "InterfaceToken")]
+    pub interface_token: String,
+
+    /// Network interface configuration to apply.
+    #[serde(rename = "NetworkInterface")]
+    pub network_interface: NetworkInterfaceSetConfiguration,
+}
+
+/// Partial network interface configuration for SetNetworkInterfaces.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct NetworkInterfaceSetConfiguration {
+    /// IPv4 settings.
+    #[serde(rename = "tt:IPv4", default, skip_serializing_if = "Option::is_none")]
+    pub ipv4: Option<IPv4NetworkInterfaceSet>,
+}
+
+/// IPv4 settings for SetNetworkInterfaces.
+///
+/// Clients (including our WebUI) place DHCP and Manual directly under `tt:IPv4`,
+/// not under a `tt:Config` wrapper.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct IPv4NetworkInterfaceSet {
+    /// IPv4 enabled.
+    #[serde(rename = "tt:Enabled", alias = "Enabled", default = "default_true")]
+    pub enabled: bool,
+
+    /// Manual addresses.
+    #[serde(rename = "tt:Manual", alias = "Manual", default)]
+    pub manual: Vec<PrefixedIPv4Address>,
+
+    /// Link-local address.
+    #[serde(
+        rename = "tt:LinkLocal",
+        alias = "LinkLocal",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub link_local: Option<PrefixedIPv4Address>,
+
+    /// Address from DHCP.
+    #[serde(
+        rename = "tt:FromDHCP",
+        alias = "FromDHCP",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub from_dhcp: Option<PrefixedIPv4Address>,
+
+    /// DHCP enabled.
+    #[serde(rename = "tt:DHCP", alias = "DHCP")]
+    pub dhcp: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+/// SetNetworkInterfaces response.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename = "tds:SetNetworkInterfacesResponse")]
+pub struct SetNetworkInterfacesResponse {
+    /// Whether a reboot is required before the settings take effect.
+    #[serde(rename = "tds:RebootNeeded", alias = "RebootNeeded")]
+    pub reboot_needed: bool,
 }
 
 /// IPv6 network interface.

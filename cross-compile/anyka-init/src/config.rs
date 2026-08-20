@@ -107,7 +107,7 @@ pub struct SystemCfg {
     pub ftp: bool,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct WifiCfg {
     pub ssid: String,
@@ -480,21 +480,108 @@ impl std::str::FromStr for Config {
 
 impl Config {
     pub fn load(path: &str) -> Result<Self, ConfigError> {
-        let src = std::fs::read_to_string(path).map_err(|source| ConfigError::Read {
-            path: path.to_string(),
-            source,
-        })?;
-        let cfg: Self = src.parse()?;
+        Self::load_with_overlay(
+            path,
+            std::path::Path::new(crate::netoverlay::NetworkOverlay::DEFAULT_PATH),
+        )
+    }
+
+    /// Read, parse, and validate the base file only — no network overlay merge.
+    pub fn load_without_overlay(path: &str) -> Result<Self, ConfigError> {
+        let cfg = Self::parse_file(path)?;
         cfg.validate()?;
         Ok(cfg)
     }
 
+    /// `Config::load`, with the overlay path taken as an argument so tests can
+    /// point it at a tempdir.
+    pub fn load_with_overlay(
+        path: &str,
+        overlay_path: &std::path::Path,
+    ) -> Result<Self, ConfigError> {
+        let mut cfg = Self::parse_file(path)?;
+        // Validate the baseline first so non-network failures never quarantine
+        // a valid overlay.
+        cfg.validate()?;
+        Self::merge_network_overlay(&mut cfg, overlay_path)?;
+        cfg.validate()?;
+        Ok(cfg)
+    }
+
+    /// Merge `network.toml` onto `[wifi]`, quarantining a bad overlay instead of
+    /// parking the camera. Read errors other than TOML parse still fail loud.
+    fn merge_network_overlay(
+        cfg: &mut Self,
+        overlay_path: &std::path::Path,
+    ) -> Result<(), ConfigError> {
+        let overlay = match crate::netoverlay::NetworkOverlay::load(overlay_path) {
+            Ok(overlay) => overlay,
+            Err(ConfigError::Parse(err)) => {
+                tracing::warn!(error = %err, "unparseable network overlay; quarantining");
+                crate::netoverlay::NetworkOverlay::quarantine(overlay_path);
+                return Ok(());
+            }
+            Err(err) => return Err(err),
+        };
+        if !overlay.has_content() {
+            return Ok(());
+        }
+
+        let baseline_wifi = cfg.wifi.clone();
+        if let Err(err) = overlay.validate() {
+            tracing::warn!(error = %err, "invalid network overlay; quarantining");
+            crate::netoverlay::NetworkOverlay::quarantine(overlay_path);
+            return Ok(());
+        }
+
+        overlay.apply_to(&mut cfg.wifi);
+        if cfg.validate().is_err() {
+            tracing::warn!("merged network overlay failed validation; quarantining");
+            crate::netoverlay::NetworkOverlay::quarantine(overlay_path);
+            cfg.wifi = baseline_wifi;
+        }
+        Ok(())
+    }
+
+    fn parse_file(path: &str) -> Result<Self, ConfigError> {
+        let src = std::fs::read_to_string(path).map_err(|source| ConfigError::Read {
+            path: path.to_string(),
+            source,
+        })?;
+        src.parse()
+    }
+
     pub fn validate(&self) -> Result<(), ConfigError> {
+        self.validate_supervisor()?;
+        self.validate_time()?;
+        self.validate_monitor_and_reboot()?;
+        self.validate_update()?;
+        self.validate_wifi()?;
+        for (name, svc) in &self.services {
+            if svc.exec.is_empty() {
+                return Err(ConfigError::Invalid(format!(
+                    "services.{name}.exec is empty"
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_supervisor(&self) -> Result<(), ConfigError> {
         if self.supervisor.backoff_min_sec > self.supervisor.backoff_max_sec {
             return Err(ConfigError::Invalid(
                 "supervisor.backoff_min_sec exceeds backoff_max_sec".into(),
             ));
         }
+        if self.supervisor.crashloop_count == 0 {
+            return Err(ConfigError::Invalid(
+                "supervisor.crashloop_count must be non-zero".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    fn validate_time(&self) -> Result<(), ConfigError> {
         if self.time.min_plausible_unix >= self.time.max_plausible_unix {
             return Err(ConfigError::Invalid(
                 "time.min_plausible_unix must be below max_plausible_unix".into(),
@@ -512,6 +599,10 @@ impl Config {
                 "time.retry_interval_sec and time.resync_interval_sec must be non-zero".into(),
             ));
         }
+        Ok(())
+    }
+
+    fn validate_monitor_and_reboot(&self) -> Result<(), ConfigError> {
         if self.monitor.enabled && self.monitor.interval_sec == 0 {
             return Err(ConfigError::Invalid(
                 "monitor.interval_sec must be non-zero".into(),
@@ -522,11 +613,10 @@ impl Config {
                 "reboot.interval_min must be non-zero when reboot.enabled is true".into(),
             ));
         }
-        if self.supervisor.crashloop_count == 0 {
-            return Err(ConfigError::Invalid(
-                "supervisor.crashloop_count must be non-zero".into(),
-            ));
-        }
+        Ok(())
+    }
+
+    fn validate_update(&self) -> Result<(), ConfigError> {
         if self.update.trial_hold_sec == 0
             || self.update.trial_hold_sec >= self.update.trial_deadline_sec
         {
@@ -543,6 +633,10 @@ impl Config {
                 "update.trial_ports must contain at least one port".into(),
             ));
         }
+        Ok(())
+    }
+
+    fn validate_wifi(&self) -> Result<(), ConfigError> {
         if self.wifi.chip != "auto" && crate::wifi::Chip::from_name(&self.wifi.chip).is_none() {
             return Err(ConfigError::Invalid(format!(
                 "[wifi] chip = {:?} is not \"auto\" or a known chip name",
@@ -561,45 +655,44 @@ impl Config {
                 self.wifi.security
             )));
         }
-        if !self.wifi.dhcp {
-            if self.wifi.address.is_none() {
-                return Err(ConfigError::Invalid(
-                    "[wifi] address is required when dhcp = false".into(),
-                ));
-            }
-            if self.wifi.gateway.is_none() {
-                return Err(ConfigError::Invalid(
-                    "[wifi] gateway is required when dhcp = false".into(),
-                ));
-            }
-            if let Some(addr) = &self.wifi.address
-                && crate::wifi::parse_cidr(addr).is_none()
-            {
-                return Err(ConfigError::Invalid(format!(
-                    "[wifi] address = {addr:?} is not valid CIDR (expected a.b.c.d/prefix)"
-                )));
-            }
-            if let Some(gw) = &self.wifi.gateway
-                && gw.parse::<std::net::Ipv4Addr>().is_err()
-            {
-                return Err(ConfigError::Invalid(format!(
-                    "[wifi] gateway = {gw:?} is not a valid IPv4 address"
-                )));
-            }
-            if self.services.get("udhcpc").is_some_and(|s| s.enabled) {
-                return Err(ConfigError::Invalid(
-                    "[services.udhcpc] is enabled but [wifi] dhcp = false; \
-                     the renewer would overwrite the static address"
-                        .into(),
-                ));
-            }
+        self.validate_wifi_static()?;
+        Ok(())
+    }
+
+    fn validate_wifi_static(&self) -> Result<(), ConfigError> {
+        if self.wifi.dhcp {
+            return Ok(());
         }
-        for (name, svc) in &self.services {
-            if svc.exec.is_empty() {
-                return Err(ConfigError::Invalid(format!(
-                    "services.{name}.exec is empty"
-                )));
-            }
+        if self.wifi.address.is_none() {
+            return Err(ConfigError::Invalid(
+                "[wifi] address is required when dhcp = false".into(),
+            ));
+        }
+        if self.wifi.gateway.is_none() {
+            return Err(ConfigError::Invalid(
+                "[wifi] gateway is required when dhcp = false".into(),
+            ));
+        }
+        if let Some(addr) = &self.wifi.address
+            && crate::wifi::parse_cidr(addr).is_none()
+        {
+            return Err(ConfigError::Invalid(format!(
+                "[wifi] address = {addr:?} is not valid CIDR (expected a.b.c.d/prefix)"
+            )));
+        }
+        if let Some(gw) = &self.wifi.gateway
+            && gw.parse::<std::net::Ipv4Addr>().is_err()
+        {
+            return Err(ConfigError::Invalid(format!(
+                "[wifi] gateway = {gw:?} is not a valid IPv4 address"
+            )));
+        }
+        if self.services.get("udhcpc").is_some_and(|s| s.enabled) {
+            return Err(ConfigError::Invalid(
+                "[services.udhcpc] is enabled but [wifi] dhcp = false; \
+                 the renewer would overwrite the static address"
+                    .into(),
+            ));
         }
         Ok(())
     }
@@ -973,5 +1066,72 @@ dns = ["192.168.2.1", "8.8.8.8"]
 "#,
         )
         .expect("shipped-shaped static config must be accepted");
+    }
+
+    #[test]
+    fn test_load_with_overlay_quarantines_unparseable_overlay() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let base = dir.path().join("anyka.toml");
+        let overlay = dir.path().join("network.toml");
+        std::fs::write(
+            &base,
+            r#"
+[wifi]
+ssid = "OperatorNet"
+password = "operatorpass"
+"#,
+        )
+        .expect("write base");
+        std::fs::write(&overlay, "this is not toml {{{").expect("write broken overlay");
+
+        let cfg = Config::load_with_overlay(base.to_str().expect("utf8"), &overlay)
+            .expect("broken overlay must not park the baseline load");
+        assert_eq!(cfg.wifi.ssid, "OperatorNet");
+        assert!(
+            !overlay.exists(),
+            "broken overlay must be quarantined away from the next boot"
+        );
+        assert!(dir.path().join("network.toml.bad").exists());
+    }
+
+    #[test]
+    fn test_load_with_overlay_rejects_invalid_baseline_without_quarantining() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let base = dir.path().join("anyka.toml");
+        let overlay = dir.path().join("network.toml");
+        std::fs::write(
+            &base,
+            r#"
+[wifi]
+ssid = "OperatorNet"
+password = "operatorpass"
+
+[services.broken]
+enabled = true
+exec = ""
+log = "/mnt/logs/broken.log"
+"#,
+        )
+        .expect("write base");
+        std::fs::write(
+            &overlay,
+            r#"
+ssid = "OverlayNet"
+password = "overlaypass"
+"#,
+        )
+        .expect("write overlay");
+
+        let err = Config::load_with_overlay(base.to_str().expect("utf8"), &overlay)
+            .expect_err("invalid baseline service must fail the load");
+        assert!(
+            matches!(err, ConfigError::Invalid(_)),
+            "expected Invalid, got {err:?}"
+        );
+        assert!(
+            overlay.exists(),
+            "valid overlay must not be quarantined for a baseline fault"
+        );
+        assert!(!dir.path().join("network.toml.bad").exists());
     }
 }

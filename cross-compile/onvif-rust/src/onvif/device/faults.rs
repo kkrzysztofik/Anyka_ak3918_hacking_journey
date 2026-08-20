@@ -5,9 +5,9 @@
 
 #![cfg_attr(not(test), allow(dead_code))]
 
-pub use super::validation::validate_hostname;
 #[cfg(test)]
 use super::validation::validate_scope;
+pub use super::validation::{validate_hostname, validate_ipv4};
 use crate::onvif::error::OnvifError;
 
 // ============================================================================
@@ -27,6 +27,14 @@ pub fn invalid_hostname(reason: &str) -> OnvifError {
 // ============================================================================
 // Network Configuration Faults
 // ============================================================================
+
+/// Create an InvalidIPv4Address fault.
+pub fn invalid_ipv4_address(reason: &str) -> OnvifError {
+    OnvifError::InvalidArgVal {
+        subcode: "InvalidIPv4Address".to_string(),
+        reason: format!("Invalid IPv4 address: {reason}"),
+    }
+}
 
 /// Create an UnsupportedNetworkConfiguration fault.
 ///

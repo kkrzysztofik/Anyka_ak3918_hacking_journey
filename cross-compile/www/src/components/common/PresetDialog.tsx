@@ -41,7 +41,7 @@ const PRESET_TOKEN_PATTERN = /^Preset(\d+)$/;
  */
 function suggestPresetName(existing: readonly PTZPreset[]): string {
   const highest = existing.reduce((max, preset) => {
-    const suffix = preset.token.match(PRESET_TOKEN_PATTERN)?.[1];
+    const suffix = PRESET_TOKEN_PATTERN.exec(preset.token)?.[1];
     return suffix ? Math.max(max, Number(suffix)) : max;
   }, 0);
   return `Preset ${highest > 0 ? highest + 1 : existing.length + 1}`;

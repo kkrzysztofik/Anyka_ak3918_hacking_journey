@@ -35,10 +35,11 @@ function copyViaExecCommand(text: string): boolean {
   textarea.setSelectionRange(0, text.length);
 
   try {
-    return document.execCommand('copy');
+    // Legacy fallback for plain-HTTP camera UIs where Clipboard API is unavailable.
+    return document.execCommand('copy'); // NOSONAR -- intentional HTTP clipboard fallback
   } catch {
     return false;
   } finally {
-    document.body.removeChild(textarea);
+    textarea.remove();
   }
 }

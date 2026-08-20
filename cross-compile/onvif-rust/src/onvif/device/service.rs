@@ -20,9 +20,9 @@ use crate::onvif::types::device::{
     GetServiceCapabilitiesResponse, GetServices, GetServicesResponse, GetSystemBackup,
     GetSystemDateAndTime, GetSystemDateAndTimeResponse, GetUsers, GetUsersResponse,
     LoadCertificates, RemoveScopes, RemoveScopesResponse, RestoreSystem, SetDNS, SetDiscoveryMode,
-    SetDiscoveryModeResponse, SetHostname, SetHostnameResponse, SetNTP, SetNetworkProtocols,
-    SetScopes, SetScopesResponse, SetSystemDateAndTime, SetSystemFactoryDefault, SetUser,
-    SetUserResponse, SystemReboot,
+    SetDiscoveryModeResponse, SetHostname, SetHostnameResponse, SetNTP, SetNetworkDefaultGateway,
+    SetNetworkInterfaces, SetNetworkProtocols, SetScopes, SetScopesResponse, SetSystemDateAndTime,
+    SetSystemFactoryDefault, SetUser, SetUserResponse, SystemReboot,
 };
 use crate::platform::Platform;
 
@@ -491,6 +491,12 @@ impl ServiceHandler for DeviceService {
                 .await
             }
 
+            "SetNetworkInterfaces" => dispatch_async(body_xml, |request: SetNetworkInterfaces| {
+                let platform = platform.clone();
+                async move { network_ops::handle_set_network_interfaces(&platform, request).await }
+            })
+            .await,
+
             "GetNetworkDefaultGateway" => {
                 dispatch_async(body_xml, |request: GetNetworkDefaultGateway| {
                     let config = config.clone();
@@ -511,8 +517,19 @@ impl ServiceHandler for DeviceService {
             }
 
             "SetDNS" => {
-                dispatch_async(body_xml, |request: SetDNS| async move {
-                    network_ops::handle_set_dns(request).await
+                dispatch_async(body_xml, |request: SetDNS| {
+                    let platform = platform.clone();
+                    async move { network_ops::handle_set_dns(&platform, request).await }
+                })
+                .await
+            }
+
+            "SetNetworkDefaultGateway" => {
+                dispatch_async(body_xml, |request: SetNetworkDefaultGateway| {
+                    let platform = platform.clone();
+                    async move {
+                        network_ops::handle_set_network_default_gateway(&platform, request).await
+                    }
                 })
                 .await
             }
@@ -546,8 +563,11 @@ impl ServiceHandler for DeviceService {
             }
 
             "SetNetworkProtocols" => {
-                dispatch_async(body_xml, |request: SetNetworkProtocols| async move {
-                    network_ops::handle_set_network_protocols(request).await
+                dispatch_async(body_xml, |request: SetNetworkProtocols| async {
+                    let response =
+                        network_ops::handle_set_network_protocols(&config, request).await?;
+                    self.store.request_save();
+                    Ok(response)
                 })
                 .await
             }

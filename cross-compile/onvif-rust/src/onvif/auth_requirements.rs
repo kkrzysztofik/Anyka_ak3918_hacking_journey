@@ -99,6 +99,16 @@ fn build_auth_requirements() -> AuthMap {
     map.insert(("device", "GetSystemDateAndTime"), AuthLevel::Anonymous);
     map.insert(("device", "GetHostname"), AuthLevel::User);
     map.insert(("device", "GetNetworkInterfaces"), AuthLevel::User);
+    map.insert(("device", "GetDNS"), AuthLevel::User);
+    map.insert(("device", "GetNetworkDefaultGateway"), AuthLevel::User);
+    map.insert(("device", "GetNetworkProtocols"), AuthLevel::User);
+    map.insert(("device", "SetNetworkInterfaces"), AuthLevel::Administrator);
+    map.insert(("device", "SetDNS"), AuthLevel::Administrator);
+    map.insert(
+        ("device", "SetNetworkDefaultGateway"),
+        AuthLevel::Administrator,
+    );
+    map.insert(("device", "SetNetworkProtocols"), AuthLevel::Administrator);
     map.insert(("device", "GetScopes"), AuthLevel::User);
     map.insert(("device", "GetDiscoveryMode"), AuthLevel::User);
     map.insert(("device", "GetUsers"), AuthLevel::Administrator);
@@ -321,6 +331,22 @@ mod tests {
             get_required_level("device", "SystemReboot"),
             AuthLevel::Administrator
         );
+    }
+
+    #[test]
+    fn test_get_required_level_network_write_requires_administrator() {
+        for op in [
+            "SetNetworkInterfaces",
+            "SetDNS",
+            "SetNetworkDefaultGateway",
+            "SetNetworkProtocols",
+        ] {
+            assert_eq!(
+                get_required_level("device", op),
+                AuthLevel::Administrator,
+                "{op} must require Administrator"
+            );
+        }
     }
 
     #[test]

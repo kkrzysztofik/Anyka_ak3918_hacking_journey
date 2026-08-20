@@ -47,6 +47,17 @@ pub fn validate_hostname(name: &str) -> OnvifResult<()> {
     Ok(())
 }
 
+/// Validate an IPv4 address string.
+pub fn validate_ipv4(addr: &str) -> OnvifResult<()> {
+    if addr.parse::<std::net::Ipv4Addr>().is_ok() {
+        Ok(())
+    } else {
+        Err(super::faults::invalid_ipv4_address(&format!(
+            "invalid IPv4 address: {addr}"
+        )))
+    }
+}
+
 /// Validate a scope URI.
 ///
 /// Scopes must be valid URIs starting with "onvif://www.onvif.org/".
@@ -81,6 +92,20 @@ pub fn validate_scope(scope: &str) -> OnvifResult<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_validate_ipv4_valid() {
+        assert!(validate_ipv4("192.168.1.1").is_ok());
+        assert!(validate_ipv4("0.0.0.0").is_ok());
+        assert!(validate_ipv4("255.255.255.255").is_ok());
+    }
+
+    #[test]
+    fn test_validate_ipv4_invalid() {
+        assert!(validate_ipv4("not-an-ip").is_err());
+        assert!(validate_ipv4("999.1.1.1").is_err());
+        assert!(validate_ipv4("").is_err());
+    }
 
     #[test]
     fn test_validate_hostname_valid() {

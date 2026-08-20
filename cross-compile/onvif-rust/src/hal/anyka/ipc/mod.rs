@@ -448,6 +448,13 @@ fn configure_ctrl_timeouts(stream: &UnixStream) -> PlatformResult<()> {
     Ok(())
 }
 
+struct PushPollSetup {
+    poll_fds: [libc::pollfd; 2],
+    poll_count: usize,
+    main_idx: Option<usize>,
+    sub_idx: Option<usize>,
+}
+
 /// IPC client for Anyka vendor daemon communication.
 ///
 /// The control socket is owned exclusively by a dedicated OS thread (see
@@ -1604,20 +1611,10 @@ impl AnykaIpc {
         }
     }
 
-    /// Receive the next pushed frame from the daemon.
-    ///
-    /// In push mode, the daemon sends 20-byte notifications proactively.
-    /// This method blocks until a notification arrives (no polling needed).
-    /// The frame data is read from shared memory using the slot index in
-    /// the notification.
-    pub fn recv_pushed_frame(&self, pool: Option<&BytesMutPool>) -> PlatformResult<OwnedFrame> {
-        let mut frame_main_guard = self.frame_main_stream.lock().map_err(|e| {
-            PlatformError::HardwareFailure(format!("frame_main_stream mutex poisoned: {}", e))
-        })?;
-        let mut frame_sub_guard = self.frame_sub_stream.lock().map_err(|e| {
-            PlatformError::HardwareFailure(format!("frame_sub_stream mutex poisoned: {}", e))
-        })?;
-
+    fn setup_push_poll_fds(
+        frame_main: Option<&UnixStream>,
+        frame_sub: Option<&UnixStream>,
+    ) -> PlatformResult<PushPollSetup> {
         let mut poll_fds = [libc::pollfd {
             fd: -1,
             events: 0,
@@ -1627,13 +1624,13 @@ impl AnykaIpc {
         let mut main_idx = None;
         let mut sub_idx = None;
 
-        if let Some(stream) = frame_main_guard.as_ref() {
+        if let Some(stream) = frame_main {
             poll_fds[poll_count].fd = stream.as_raw_fd();
             poll_fds[poll_count].events = libc::POLLIN;
             main_idx = Some(poll_count);
             poll_count += 1;
         }
-        if let Some(stream) = frame_sub_guard.as_ref() {
+        if let Some(stream) = frame_sub {
             poll_fds[poll_count].fd = stream.as_raw_fd();
             poll_fds[poll_count].events = libc::POLLIN;
             sub_idx = Some(poll_count);
@@ -1644,7 +1641,20 @@ impl AnykaIpc {
                 "no frame notification sockets for push mode".into(),
             ));
         }
+        Ok(PushPollSetup {
+            poll_fds,
+            poll_count,
+            main_idx,
+            sub_idx,
+        })
+    }
 
+    fn poll_push_revents(
+        poll_fds: &mut [libc::pollfd; 2],
+        poll_count: usize,
+        main_idx: Option<usize>,
+        sub_idx: Option<usize>,
+    ) -> PlatformResult<(bool, bool, bool, bool)> {
         let timeout_ms = i32::try_from(PUSH_NOTIFICATION_TIMEOUT.as_millis()).unwrap_or(i32::MAX);
         // SAFETY: `poll_fds` points to a stack-allocated array of valid `pollfd`
         // entries, `poll_count` is bounded by that array length, and timeout is finite.
@@ -1662,10 +1672,7 @@ impl AnykaIpc {
             )));
         }
         if poll_ret == 0 {
-            // A daemon that shuts down cleanly sets VD_FLAG_SHUTDOWN but need not
-            // close the notification socket, so poll just keeps timing out. Without
-            // this check the caller would retry forever on a producer that is gone.
-            return Err(self.shutdown_or(PlatformError::Timeout));
+            return Err(PlatformError::Timeout);
         }
 
         let main_ready = main_idx
@@ -1680,33 +1687,30 @@ impl AnykaIpc {
         let sub_hup_err = sub_idx
             .map(|idx| (poll_fds[idx].revents & (libc::POLLHUP | libc::POLLERR)) != 0)
             .unwrap_or(false);
+        Ok((main_ready, sub_ready, main_hup_err, sub_hup_err))
+    }
 
-        let chosen_channel = self.choose_ready_channel(main_ready, sub_ready);
-        if is_ipc_debug_enabled() {
-            debug!(
-                event = "push_poll_result",
-                diag_monotonic_ms = monotonic_millis(),
-                main_ready,
-                sub_ready,
-                main_hup_err,
-                sub_hup_err,
-                chosen_channel = ?chosen_channel,
-                "push notification poll completed"
-            );
-        }
-        let (channel_name, notif) = if let Some(channel) = chosen_channel {
+    fn take_push_notification(
+        &self,
+        frame_main_guard: &mut Option<UnixStream>,
+        frame_sub_guard: &mut Option<UnixStream>,
+        chosen_channel: Option<&'static str>,
+        main_hup_err: bool,
+        sub_hup_err: bool,
+    ) -> PlatformResult<(&'static str, FrameNotification)> {
+        if let Some(channel) = chosen_channel {
             if channel == "main" {
                 let stream = frame_main_guard.as_mut().ok_or_else(|| {
                     PlatformError::HardwareFailure("main frame socket became unavailable".into())
                 })?;
-                (channel, Self::read_push_notification(stream, channel)?)
-            } else {
-                let stream = frame_sub_guard.as_mut().ok_or_else(|| {
-                    PlatformError::HardwareFailure("sub frame socket became unavailable".into())
-                })?;
-                (channel, Self::read_push_notification(stream, channel)?)
+                return Ok((channel, Self::read_push_notification(stream, channel)?));
             }
-        } else if main_hup_err || sub_hup_err {
+            let stream = frame_sub_guard.as_mut().ok_or_else(|| {
+                PlatformError::HardwareFailure("sub frame socket became unavailable".into())
+            })?;
+            return Ok((channel, Self::read_push_notification(stream, channel)?));
+        }
+        if main_hup_err || sub_hup_err {
             // A hang-up after the daemon flagged shutdown is orderly, not a failure.
             let err = self.shutdown_or(PlatformError::HardwareFailure(format!(
                 "push notification socket disconnected (main_hup_err={}, sub_hup_err={})",
@@ -1721,44 +1725,105 @@ impl AnykaIpc {
                 ));
             }
             return Err(err);
-        } else {
-            return Err(self.shutdown_or(PlatformError::Timeout));
+        }
+        Err(self.shutdown_or(PlatformError::Timeout))
+    }
+
+    fn reject_dropped_frame_notification(
+        &self,
+        channel_name: &str,
+        notif: &FrameNotification,
+    ) -> PlatformResult<()> {
+        if !notif.is_frame_dropped() {
+            return Ok(());
+        }
+        // Ring occupancy is the only thing that distinguishes a transient burst from a
+        // permanently wedged ring (`write_seq - read_seq` stuck at or above the slot
+        // count), and the periodic delivery telemetry stops firing once drops are total.
+        match self.shm_ring_sequences() {
+            Some((write_seq, read_seq)) => warn!(
+                event = "push_notification_frame_dropped",
+                diag_monotonic_ms = monotonic_millis(),
+                channel = channel_name,
+                slot_index = notif.slot_index,
+                flags = notif.flags,
+                write_seq,
+                read_seq,
+                in_flight = write_seq.wrapping_sub(read_seq),
+                slot_count = VD_SHM_SLOT_COUNT,
+                "daemon reported dropped frame notification"
+            ),
+            // Occupancy fields omitted rather than zeroed: unavailable is not "empty".
+            None => warn!(
+                event = "push_notification_frame_dropped",
+                diag_monotonic_ms = monotonic_millis(),
+                channel = channel_name,
+                slot_index = notif.slot_index,
+                flags = notif.flags,
+                ring_state = "unavailable",
+                slot_count = VD_SHM_SLOT_COUNT,
+                "daemon reported dropped frame notification"
+            ),
+        }
+        Err(PlatformError::ResourceBusy(
+            "frame dropped by daemon (P-frame during ring overflow)".into(),
+        ))
+    }
+
+    /// Receive the next pushed frame from the daemon.
+    ///
+    /// In push mode, the daemon sends 20-byte notifications proactively.
+    /// This method blocks until a notification arrives (no polling needed).
+    /// The frame data is read from shared memory using the slot index in
+    /// the notification.
+    pub fn recv_pushed_frame(&self, pool: Option<&BytesMutPool>) -> PlatformResult<OwnedFrame> {
+        let mut frame_main_guard = self.frame_main_stream.lock().map_err(|e| {
+            PlatformError::HardwareFailure(format!("frame_main_stream mutex poisoned: {}", e))
+        })?;
+        let mut frame_sub_guard = self.frame_sub_stream.lock().map_err(|e| {
+            PlatformError::HardwareFailure(format!("frame_sub_stream mutex poisoned: {}", e))
+        })?;
+
+        let mut setup =
+            Self::setup_push_poll_fds(frame_main_guard.as_ref(), frame_sub_guard.as_ref())?;
+
+        let (main_ready, sub_ready, main_hup_err, sub_hup_err) = match Self::poll_push_revents(
+            &mut setup.poll_fds,
+            setup.poll_count,
+            setup.main_idx,
+            setup.sub_idx,
+        ) {
+            Ok(revents) => revents,
+            // A daemon that shuts down cleanly sets VD_FLAG_SHUTDOWN but need not
+            // close the notification socket, so poll just keeps timing out. Without
+            // this check the caller would retry forever on a producer that is gone.
+            Err(PlatformError::Timeout) => return Err(self.shutdown_or(PlatformError::Timeout)),
+            Err(other) => return Err(other),
         };
 
-        // Check for dropped-frame notification (Fix 4 integration)
-        if notif.is_frame_dropped() {
-            // Ring occupancy is the only thing that distinguishes a transient burst from a
-            // permanently wedged ring (`write_seq - read_seq` stuck at or above the slot
-            // count), and the periodic delivery telemetry stops firing once drops are total.
-            match self.shm_ring_sequences() {
-                Some((write_seq, read_seq)) => warn!(
-                    event = "push_notification_frame_dropped",
-                    diag_monotonic_ms = monotonic_millis(),
-                    channel = channel_name,
-                    slot_index = notif.slot_index,
-                    flags = notif.flags,
-                    write_seq,
-                    read_seq,
-                    in_flight = write_seq.wrapping_sub(read_seq),
-                    slot_count = VD_SHM_SLOT_COUNT,
-                    "daemon reported dropped frame notification"
-                ),
-                // Occupancy fields omitted rather than zeroed: unavailable is not "empty".
-                None => warn!(
-                    event = "push_notification_frame_dropped",
-                    diag_monotonic_ms = monotonic_millis(),
-                    channel = channel_name,
-                    slot_index = notif.slot_index,
-                    flags = notif.flags,
-                    ring_state = "unavailable",
-                    slot_count = VD_SHM_SLOT_COUNT,
-                    "daemon reported dropped frame notification"
-                ),
-            }
-            return Err(PlatformError::ResourceBusy(
-                "frame dropped by daemon (P-frame during ring overflow)".into(),
-            ));
+        let chosen_channel = self.choose_ready_channel(main_ready, sub_ready);
+        if is_ipc_debug_enabled() {
+            debug!(
+                event = "push_poll_result",
+                diag_monotonic_ms = monotonic_millis(),
+                main_ready,
+                sub_ready,
+                main_hup_err,
+                sub_hup_err,
+                chosen_channel = ?chosen_channel,
+                "push notification poll completed"
+            );
         }
+
+        let (channel_name, notif) = self.take_push_notification(
+            &mut frame_main_guard,
+            &mut frame_sub_guard,
+            chosen_channel,
+            main_hup_err,
+            sub_hup_err,
+        )?;
+
+        self.reject_dropped_frame_notification(channel_name, &notif)?;
 
         // Read from shared memory
         let mut shm_guard = self.shm_reader.lock().map_err(|e| {

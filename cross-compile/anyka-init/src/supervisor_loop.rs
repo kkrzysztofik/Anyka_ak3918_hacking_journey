@@ -155,6 +155,197 @@ pub fn spawn_signal_thread(tx: Sender<Msg>) {
     }
 }
 
+fn build_enabled_services(
+    sys: &dyn Sys,
+    cfg: &Config,
+    update_root: &Path,
+    slots: &crate::update::Slots,
+) -> Vec<Service> {
+    cfg.services
+        .iter()
+        .filter(|(_, s)| s.enabled)
+        .map(|(name, s)| Service {
+            name: name.clone(),
+            spec: spec_of_slot(s, update_root, slots),
+            state: SvcState::Backoff {
+                until: sys.now(),
+                attempt: 0,
+            },
+            hist: RestartHistory::default(),
+        })
+        .collect()
+}
+
+fn try_start_service(
+    sys: &dyn Sys,
+    cfg: &Config,
+    svc: &mut Service,
+    svc_idx: usize,
+    by_pid: &mut BTreeMap<Pid, usize>,
+    policy: &Policy,
+) {
+    if let Err(e) = logging::rotate_if_needed(&svc.spec.log, cfg.log.max_bytes, cfg.log.keep) {
+        tracing::warn!(service = %svc.name, error = %e, "log rotate failed");
+    }
+    match sys.spawn(&svc.spec) {
+        Ok(pid) => {
+            tracing::info!(service = %svc.name, pid, "started");
+            svc.state = SvcState::Running {
+                pid,
+                since: sys.now(),
+            };
+            by_pid.insert(pid, svc_idx);
+        }
+        Err(e) => {
+            tracing::error!(service = %svc.name, error = %e, "start failed");
+            let d = decide(
+                &SvcState::Running {
+                    pid: -1,
+                    since: sys.now(),
+                },
+                &mut svc.hist,
+                Event::Exited,
+                sys.now(),
+                policy,
+            );
+            svc.state = d.next;
+            if let Action::Reboot(why) = d.action
+                && !do_reboot(sys, cfg, &why)
+            {
+                apply_failed_reboot_backoff(svc, sys.now(), policy.backoff_max);
+            }
+        }
+    }
+}
+
+fn tick_services(
+    sys: &dyn Sys,
+    cfg: &Config,
+    services: &mut [Service],
+    by_pid: &mut BTreeMap<Pid, usize>,
+    policy: &Policy,
+) -> Option<Instant> {
+    let mut next_deadline: Option<Instant> = None;
+
+    // Index loop: by_pid stores service indices; Start failure path also
+    // needs random-access mutation of hist/state by index.
+    #[allow(clippy::needless_range_loop)]
+    for i in 0..services.len() {
+        let now = sys.now();
+        let state = services[i].state;
+        let d = decide(&state, &mut services[i].hist, Event::Tick, now, policy);
+        services[i].state = d.next;
+
+        if matches!(d.action, Action::Start) {
+            try_start_service(sys, cfg, &mut services[i], i, by_pid, policy);
+        }
+
+        if let SvcState::Backoff { until, .. } = services[i].state {
+            next_deadline = Some(match next_deadline {
+                Some(d) if d < until => d,
+                _ => until,
+            });
+        }
+    }
+
+    next_deadline
+}
+
+fn handle_service_exited(
+    sys: &dyn Sys,
+    cfg: &Config,
+    services: &mut [Service],
+    by_pid: &mut BTreeMap<Pid, usize>,
+    policy: &Policy,
+    pid: Pid,
+    st: ExitStatus,
+) {
+    let Some(i) = by_pid.remove(&pid) else {
+        tracing::debug!(pid, ?st, "reaped an unknown child");
+        return;
+    };
+    tracing::warn!(service = %services[i].name, pid, ?st, "service exited");
+    let now = sys.now();
+    let state = services[i].state;
+    let d = decide(&state, &mut services[i].hist, Event::Exited, now, policy);
+    services[i].state = d.next;
+    if let Action::Reboot(why) = d.action
+        && !do_reboot(sys, cfg, &why)
+    {
+        apply_failed_reboot_backoff(&mut services[i], sys.now(), policy.backoff_max);
+    }
+}
+
+fn handle_restart_service(sys: &dyn Sys, services: &[Service], name: String) {
+    match services.iter().find(|s| s.name == name) {
+        Some(svc) => match svc.state.pid() {
+            Some(pid) => {
+                tracing::warn!(service = %name, pid, "restart requested by monitor");
+                let _ = sys.kill(pid, libc::SIGTERM);
+            }
+            None => tracing::info!(
+                service = %name,
+                "restart requested but the service is not running"
+            ),
+        },
+        None => {
+            tracing::warn!(service = %name, "restart requested for unknown service")
+        }
+    }
+}
+
+fn handle_kill_service(sys: &dyn Sys, services: &[Service], name: String) {
+    match services.iter().find(|s| s.name == name) {
+        Some(svc) => match svc.state.pid() {
+            Some(pid) => {
+                tracing::warn!(service = %name, pid, "SIGTERM did not take; sending SIGKILL");
+                let _ = sys.kill(pid, libc::SIGKILL);
+            }
+            None => tracing::info!(
+                service = %name,
+                "kill requested but the service is not running"
+            ),
+        },
+        None => tracing::warn!(service = %name, "kill requested for unknown service"),
+    }
+}
+
+/// Returns `true` when the supervisor loop should exit.
+fn dispatch_msg(
+    sys: &Arc<dyn Sys>,
+    cfg: &Config,
+    services: &mut [Service],
+    by_pid: &mut BTreeMap<Pid, usize>,
+    policy: &Policy,
+    rx: &Receiver<Msg>,
+    msg: Result<Msg, std::sync::mpsc::RecvTimeoutError>,
+) -> bool {
+    match msg {
+        Ok(Msg::Exited(pid, st)) => {
+            handle_service_exited(sys.as_ref(), cfg, services, by_pid, policy, pid, st);
+            false
+        }
+        Ok(Msg::RestartService(name)) => {
+            handle_restart_service(sys.as_ref(), services, name);
+            false
+        }
+        Ok(Msg::KillService(name)) => {
+            handle_kill_service(sys.as_ref(), services, name);
+            false
+        }
+        Ok(Msg::Shutdown) => {
+            tracing::info!("shutdown requested");
+            shutdown(sys.as_ref(), by_pid, rx);
+            true
+        }
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => false,
+        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+            tracing::error!("event channel closed");
+            true
+        }
+    }
+}
+
 pub fn run(sys: Arc<dyn Sys>, cfg: &Config, rx: Receiver<Msg>) {
     let policy = Policy {
         backoff_min: Duration::from_secs(cfg.supervisor.backoff_min_sec),
@@ -166,145 +357,25 @@ pub fn run(sys: Arc<dyn Sys>, cfg: &Config, rx: Receiver<Msg>) {
     let slots = crate::update::Slots::new(&cfg.update.root);
     let update_root = Path::new(&cfg.update.root);
 
-    let mut services: Vec<Service> = cfg
-        .services
-        .iter()
-        .filter(|(_, s)| s.enabled)
-        .map(|(name, s)| Service {
-            name: name.clone(),
-            spec: spec_of_slot(s, update_root, &slots),
-            state: SvcState::Backoff {
-                until: sys.now(),
-                attempt: 0,
-            },
-            hist: RestartHistory::default(),
-        })
-        .collect();
-
+    let mut services = build_enabled_services(sys.as_ref(), cfg, update_root, &slots);
     let mut by_pid: BTreeMap<Pid, usize> = BTreeMap::new();
 
     loop {
-        let mut next_deadline: Option<Instant> = None;
-
-        // Index loop: by_pid stores service indices; Start failure path also
-        // needs random-access mutation of hist/state by index.
-        #[allow(clippy::needless_range_loop)]
-        for i in 0..services.len() {
-            let now = sys.now();
-            let state = services[i].state;
-            let d = decide(&state, &mut services[i].hist, Event::Tick, now, &policy);
-            services[i].state = d.next;
-
-            if matches!(d.action, Action::Start) {
-                if let Err(e) = logging::rotate_if_needed(
-                    &services[i].spec.log,
-                    cfg.log.max_bytes,
-                    cfg.log.keep,
-                ) {
-                    tracing::warn!(service = %services[i].name, error = %e, "log rotate failed");
-                }
-                match sys.spawn(&services[i].spec) {
-                    Ok(pid) => {
-                        tracing::info!(service = %services[i].name, pid, "started");
-                        services[i].state = SvcState::Running {
-                            pid,
-                            since: sys.now(),
-                        };
-                        by_pid.insert(pid, i);
-                    }
-                    Err(e) => {
-                        tracing::error!(service = %services[i].name, error = %e, "start failed");
-                        let d = decide(
-                            &SvcState::Running {
-                                pid: -1,
-                                since: sys.now(),
-                            },
-                            &mut services[i].hist,
-                            Event::Exited,
-                            sys.now(),
-                            &policy,
-                        );
-                        services[i].state = d.next;
-                        if let Action::Reboot(why) = d.action
-                            && !do_reboot(sys.as_ref(), cfg, &why)
-                        {
-                            apply_failed_reboot_backoff(
-                                &mut services[i],
-                                sys.now(),
-                                policy.backoff_max,
-                            );
-                        }
-                    }
-                }
-            }
-
-            if let SvcState::Backoff { until, .. } = services[i].state {
-                next_deadline = Some(match next_deadline {
-                    Some(d) if d < until => d,
-                    _ => until,
-                });
-            }
-        }
-
+        let next_deadline = tick_services(sys.as_ref(), cfg, &mut services, &mut by_pid, &policy);
         let timeout = next_deadline
             .map(|d| d.saturating_duration_since(sys.now()))
             .unwrap_or(Duration::from_secs(3600));
 
-        match rx.recv_timeout(timeout) {
-            Ok(Msg::Exited(pid, st)) => {
-                let Some(i) = by_pid.remove(&pid) else {
-                    tracing::debug!(pid, ?st, "reaped an unknown child");
-                    continue;
-                };
-                tracing::warn!(service = %services[i].name, pid, ?st, "service exited");
-                let now = sys.now();
-                let state = services[i].state;
-                let d = decide(&state, &mut services[i].hist, Event::Exited, now, &policy);
-                services[i].state = d.next;
-                if let Action::Reboot(why) = d.action
-                    && !do_reboot(sys.as_ref(), cfg, &why)
-                {
-                    apply_failed_reboot_backoff(&mut services[i], sys.now(), policy.backoff_max);
-                }
-            }
-            Ok(Msg::RestartService(name)) => match services.iter().find(|s| s.name == name) {
-                Some(svc) => match svc.state.pid() {
-                    Some(pid) => {
-                        tracing::warn!(service = %name, pid, "restart requested by monitor");
-                        let _ = sys.kill(pid, libc::SIGTERM);
-                    }
-                    None => tracing::info!(
-                        service = %name,
-                        "restart requested but the service is not running"
-                    ),
-                },
-                None => {
-                    tracing::warn!(service = %name, "restart requested for unknown service")
-                }
-            },
-            Ok(Msg::KillService(name)) => match services.iter().find(|s| s.name == name) {
-                Some(svc) => match svc.state.pid() {
-                    Some(pid) => {
-                        tracing::warn!(service = %name, pid, "SIGTERM did not take; sending SIGKILL");
-                        let _ = sys.kill(pid, libc::SIGKILL);
-                    }
-                    None => tracing::info!(
-                        service = %name,
-                        "kill requested but the service is not running"
-                    ),
-                },
-                None => tracing::warn!(service = %name, "kill requested for unknown service"),
-            },
-            Ok(Msg::Shutdown) => {
-                tracing::info!("shutdown requested");
-                shutdown(sys.as_ref(), &by_pid, &rx);
-                return;
-            }
-            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
-            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
-                tracing::error!("event channel closed");
-                return;
-            }
+        if dispatch_msg(
+            &sys,
+            cfg,
+            &mut services,
+            &mut by_pid,
+            &policy,
+            &rx,
+            rx.recv_timeout(timeout),
+        ) {
+            return;
         }
     }
 }
