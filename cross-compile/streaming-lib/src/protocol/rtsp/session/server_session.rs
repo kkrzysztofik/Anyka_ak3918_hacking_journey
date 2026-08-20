@@ -1602,7 +1602,9 @@ impl RtspServerSession {
                         // Recover from poisoning rather than propagating it: the guarded region
                         // only pushes to a `Vec` and adds two integers, so a poisoned lock means
                         // an unrelated panic, and killing every later frame over it helps nobody.
-                        let mut guard = udp_accum.lock().unwrap_or_else(|e| e.into_inner());
+                        let mut guard = udp_accum
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner);
                         let (buffer, accumulated) = &mut *guard;
                         let incoming = msg.len();
                         let current = *accumulated;

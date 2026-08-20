@@ -157,7 +157,7 @@ fn get_runtime_config(validation_mode: bool) -> (usize, usize) {
     } else {
         // Host: use available parallelism
         let workers = std::thread::available_parallelism()
-            .map(|n| n.get())
+            .map(std::num::NonZeroUsize::get)
             .unwrap_or(4);
         (workers, 512) // (worker_threads, max_blocking_threads)
     }

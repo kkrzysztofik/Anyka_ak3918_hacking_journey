@@ -1123,11 +1123,11 @@ impl AnykaIpc {
         *self
             .frame_sub_stream
             .lock()
-            .unwrap_or_else(|e| e.into_inner()) = Some(frame_sub);
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(frame_sub);
         *self
             .frame_main_stream
             .lock()
-            .unwrap_or_else(|e| e.into_inner()) = Some(frame_main);
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(frame_main);
 
         // Control last of the three, per the documented order. `finish_attach`
         // issues CMD_HELLO through the owner thread, which replies
@@ -1158,7 +1158,10 @@ impl AnykaIpc {
             )));
         }
 
-        *self.shm_reader.lock().unwrap_or_else(|e| e.into_inner()) = Some(reader);
+        *self
+            .shm_reader
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(reader);
         // observed before attached: the gate reads attached first, so this ordering
         // can never leave a window where attached is set but observed is stale.
         self.observed_epoch.store(epoch, Ordering::Release);
@@ -1210,7 +1213,7 @@ impl AnykaIpc {
     pub(crate) fn take_loss_rx(&self) -> Option<mpsc::Receiver<PeerLoss>> {
         self.loss_rx
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .take()
     }
 
@@ -1258,7 +1261,10 @@ impl AnykaIpc {
                 .cast::<u32>()
                 .write_volatile(epoch);
         }
-        *self.shm_reader.lock().unwrap_or_else(|e| e.into_inner()) = Some(reader);
+        *self
+            .shm_reader
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(reader);
         self.observed_epoch.store(epoch, Ordering::Release);
         self.attached_epoch.store(epoch, Ordering::Release);
     }
@@ -1266,7 +1272,10 @@ impl AnykaIpc {
     /// Stamp a new generation into the mapped ring, standing in for a daemon restart.
     #[cfg(test)]
     pub(crate) fn stamp_ring_epoch_for_test(&self, epoch: u32) {
-        let guard = self.shm_reader.lock().unwrap_or_else(|e| e.into_inner());
+        let guard = self
+            .shm_reader
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let reader = guard.as_ref().expect("no ring mapped");
         // SAFETY: offset 48 is inside the validated 64-byte header.
         unsafe {
@@ -1295,18 +1304,21 @@ impl AnykaIpc {
         let mut main = self
             .frame_main_stream
             .lock()
-            .unwrap_or_else(|e| e.into_inner());
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         *main = None;
         drop(main);
 
         let mut sub = self
             .frame_sub_stream
             .lock()
-            .unwrap_or_else(|e| e.into_inner());
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         *sub = None;
         drop(sub);
 
-        let mut shm = self.shm_reader.lock().unwrap_or_else(|e| e.into_inner());
+        let mut shm = self
+            .shm_reader
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         *shm = None;
         drop(shm);
 

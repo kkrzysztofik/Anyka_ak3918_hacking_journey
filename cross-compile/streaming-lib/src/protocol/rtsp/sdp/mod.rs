@@ -171,7 +171,7 @@ impl Marshal for SdpMediaInfo {
         let fmts_str = self
             .fmts
             .iter()
-            .map(|b| b.to_string())
+            .map(ToString::to_string)
             .collect::<Vec<String>>()
             .join(" ");
 

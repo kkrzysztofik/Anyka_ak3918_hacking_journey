@@ -176,7 +176,10 @@ impl Sys for RealSys {
         // Hold the reap lock so a `run_to_completion` from the update path
         // cannot have its child's exit status stolen. The reaper and the
         // update thread are the only two `waitpid` callers in the process.
-        let _guard = self.reap_lock.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = self
+            .reap_lock
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut status: libc::c_int = 0;
         // SAFETY: waitpid(-1, WNOHANG) reaps any exited child; status is stack.
         let pid = unsafe { libc::waitpid(-1, &mut status, libc::WNOHANG) };
@@ -279,7 +282,10 @@ impl Sys for RealSys {
         // syscalls. Safe to call from any thread, unlike the older constraint
         // that this only run during P2 before the reaper starts — the lock
         // makes the update thread (which outlives the reaper) safe too.
-        let _guard = self.reap_lock.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = self
+            .reap_lock
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let status = Command::new(prog).args(args).status()?;
         if let Some(code) = status.code() {
             Ok(ExitStatus::Code(code))

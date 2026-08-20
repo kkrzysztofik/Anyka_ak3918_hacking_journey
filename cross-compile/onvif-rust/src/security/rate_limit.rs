@@ -151,7 +151,7 @@ impl RateLimiter {
     fn state(&self) -> MutexGuard<'_, RateLimitState> {
         self.state
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     /// Create a rate limiter with custom window duration.

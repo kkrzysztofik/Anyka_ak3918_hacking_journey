@@ -116,7 +116,7 @@ impl BruteForceProtection {
     fn records(&self) -> MutexGuard<'_, HashMap<IpAddr, FailureRecord>> {
         self.records
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     /// Check if an IP address is currently blocked.

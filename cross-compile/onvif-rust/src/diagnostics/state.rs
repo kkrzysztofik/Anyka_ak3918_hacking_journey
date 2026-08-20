@@ -137,7 +137,7 @@ impl DiagnosticsState {
         *self
             .degraded_services
             .lock()
-            .unwrap_or_else(|e| e.into_inner()) = degraded_services;
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = degraded_services;
         self.streaming_active
             .store(streaming_active, Ordering::Relaxed);
     }
@@ -180,7 +180,10 @@ impl DiagnosticsState {
         };
 
         let prev_sample = {
-            let mut guard = self.previous.lock().unwrap_or_else(|e| e.into_inner());
+            let mut guard = self
+                .previous
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             let prev = guard.as_ref().copied();
             let too_soon =
                 prev.is_some_and(|p| now_sample.taken_at.duration_since(p.taken_at) < MIN_DELTA);
@@ -231,7 +234,7 @@ impl DiagnosticsState {
         let degraded_services = self
             .degraded_services
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone();
         let health = compute_health(
             self.started_at.elapsed(),

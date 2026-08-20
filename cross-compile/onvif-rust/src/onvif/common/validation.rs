@@ -69,7 +69,7 @@ pub fn validate_reference_token(token: &str, kind: &str) -> OnvifResult<()> {
     validate_max_length(token, MAX_REFERENCE_TOKEN_CHARS, kind)?;
 
     // Check for whitespace which is invalid in ONVIF tokens
-    if token.chars().any(|c| c.is_whitespace()) {
+    if token.chars().any(char::is_whitespace) {
         return Err(OnvifError::invalid_arg(
             "InvalidToken",
             format!("{} token '{}' contains invalid whitespace", kind, token),

@@ -149,7 +149,7 @@ fn make_file_appender(file_path: &str) -> Option<tracing_appender::rolling::Roll
     let parent_dir = path.parent().unwrap_or(Path::new("."));
     let file_name = path
         .file_name()
-        .and_then(|n| n.to_str())
+        .and_then(std::ffi::OsStr::to_str)
         .unwrap_or("onvif.log");
 
     RollingFileAppender::builder()
