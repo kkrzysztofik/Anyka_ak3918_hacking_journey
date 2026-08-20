@@ -50,6 +50,14 @@ pub fn generate_test_h264_file(path: &str) -> std::io::Result<()> {
     Ok(())
 }
 
+fn main() {
+    let output_path = "tests/fixtures/test_video.h264";
+    match generate_test_h264_file(output_path) {
+        Ok(_) => println!("Generated test H264 file at {}", output_path),
+        Err(e) => eprintln!("Failed to generate test H264 file: {}", e),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -128,10 +136,3 @@ mod tests {
     }
 }
 
-fn main() {
-    let output_path = "tests/fixtures/test_video.h264";
-    match generate_test_h264_file(output_path) {
-        Ok(_) => println!("Generated test H264 file at {}", output_path),
-        Err(e) => eprintln!("Failed to generate test H264 file: {}", e),
-    }
-}

@@ -45,9 +45,9 @@ pub struct MockVideoPublisher {
 
 impl MockVideoPublisher {
     const DEFAULT_BOOTSTRAP_IDR_SCAN_MAX_BYTES: u64 = 4 * 1024 * 1024;
-    const BOOTSTRAP_IDR_SCAN_MAX_BYTES_ENV: &'static str = "ONVIF_BOOTSTRAP_IDR_SCAN_MAX_BYTES";
+    const BOOTSTRAP_IDR_SCAN_MAX_BYTES_ENV: &str = "ONVIF_BOOTSTRAP_IDR_SCAN_MAX_BYTES";
     const DEFAULT_ACCESS_UNITS_CACHE_MAX_BYTES: u64 = 8 * 1024 * 1024;
-    const ACCESS_UNITS_CACHE_MAX_BYTES_ENV: &'static str = "ONVIF_ACCESS_UNITS_CACHE_MAX_BYTES";
+    const ACCESS_UNITS_CACHE_MAX_BYTES_ENV: &str = "ONVIF_ACCESS_UNITS_CACHE_MAX_BYTES";
 
     /// Create a new mock video publisher from H264 file
     ///

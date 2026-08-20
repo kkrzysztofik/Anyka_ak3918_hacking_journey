@@ -389,15 +389,13 @@ async fn test_httpflv_connection_cleanup() {
         active: bool,
     }
 
-    let mut connections: Vec<Connection> = Vec::new();
-
-    connections.push(Connection {
+    let mut connections = vec![Connection {
         id: "conn1".to_string(),
         stream: StreamIdentifier::Rtsp {
             stream_path: "/live/stream1".to_string(),
         },
         active: true,
-    });
+    }];
 
     assert_eq!(connections.len(), 1);
     assert!(connections[0].active);
@@ -828,21 +826,20 @@ async fn test_httpflv_session_cleanup() {
         last_activity: u64,
     }
 
-    let mut sessions: Vec<Session> = Vec::new();
-
-    // Add some sessions
-    sessions.push(Session {
-        id: "s1".to_string(),
-        last_activity: 100,
-    });
-    sessions.push(Session {
-        id: "s2".to_string(),
-        last_activity: 50,
-    });
-    sessions.push(Session {
-        id: "s3".to_string(),
-        last_activity: 10,
-    });
+    let mut sessions = vec![
+        Session {
+            id: "s1".to_string(),
+            last_activity: 100,
+        },
+        Session {
+            id: "s2".to_string(),
+            last_activity: 50,
+        },
+        Session {
+            id: "s3".to_string(),
+            last_activity: 10,
+        },
+    ];
 
     // Simulate timeout - remove old sessions (last_activity < 30)
     let current_time = 100u64;

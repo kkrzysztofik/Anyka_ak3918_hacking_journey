@@ -73,6 +73,15 @@ pub fn generate_test_aac_file(path: &str, sample_rate: u32, num_frames: usize) -
     Ok(())
 }
 
+fn main() {
+    let output_path = "tests/fixtures/test_audio.aac";
+    match generate_test_aac_file(output_path, 48000, 100) {
+        Ok(_) => println!("Generated test AAC file at {} (100 frames @ 48kHz)", output_path),
+        Err(e) => eprintln!("Failed to generate test AAC file: {}", e),
+    }
+}
+
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -139,13 +148,5 @@ mod tests {
         assert_eq!((data[2] >> 2) & 0x0F, 4);
 
         let _ = fs::remove_file(test_file);
-    }
-}
-
-fn main() {
-    let output_path = "tests/fixtures/test_audio.aac";
-    match generate_test_aac_file(output_path, 48000, 100) {
-        Ok(_) => println!("Generated test AAC file at {} (100 frames @ 48kHz)", output_path),
-        Err(e) => eprintln!("Failed to generate test AAC file: {}", e),
     }
 }

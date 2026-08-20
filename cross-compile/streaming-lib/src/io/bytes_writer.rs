@@ -1110,9 +1110,7 @@ mod tests {
 
     #[test]
     fn test_write_vec() {
-        let mut v: Vec<u8> = Vec::new();
-
-        v.push(0x01);
+        let mut v: Vec<u8> = vec![0x01];
         assert_eq!(1, v.len());
         assert_eq!(0x01, v[0]);
 

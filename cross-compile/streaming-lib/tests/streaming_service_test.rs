@@ -122,21 +122,20 @@ async fn test_service_session_tracking() {
         active: bool,
     }
 
-    let mut sessions: Vec<Session> = Vec::new();
-
-    // Add sessions
-    sessions.push(Session {
-        id: "session1".to_string(),
-        active: true,
-    });
-    sessions.push(Session {
-        id: "session2".to_string(),
-        active: true,
-    });
-    sessions.push(Session {
-        id: "session3".to_string(),
-        active: true,
-    });
+    let mut sessions = vec![
+        Session {
+            id: "session1".to_string(),
+            active: true,
+        },
+        Session {
+            id: "session2".to_string(),
+            active: true,
+        },
+        Session {
+            id: "session3".to_string(),
+            active: true,
+        },
+    ];
 
     assert_eq!(sessions.len(), 3);
 

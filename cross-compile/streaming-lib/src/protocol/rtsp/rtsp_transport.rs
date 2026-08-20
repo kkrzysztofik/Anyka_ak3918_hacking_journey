@@ -3,7 +3,6 @@ use crate::protocol::rtsp::global_trait::Marshal;
 use super::global_trait::Unmarshal;
 
 #[derive(Debug, Clone, Default, PartialEq)]
-
 pub enum CastType {
     Multicast,
     #[default]
