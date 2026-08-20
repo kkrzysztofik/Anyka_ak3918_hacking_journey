@@ -7,8 +7,8 @@
  *
  * Usage: node scripts/analyze-bundle.mjs <dir-of-js-and-maps>
  */
-import { readFileSync, readdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
+import { isAbsolute, join, relative, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 /** Minimum raw size for a chunk to be worth reporting. */
@@ -27,6 +27,31 @@ export function attributeChunk(map) {
   return Object.entries(totals).sort((a, b) => b[1] - a[1]);
 }
 
+/** Resolve `dir` under the process cwd; reject traversal / non-directories. */
+export function resolveAnalyzedDir(dir, cwd = process.cwd()) {
+  if (typeof dir !== 'string' || dir.length === 0 || dir.includes('\0')) {
+    return null;
+  }
+  let real;
+  let cwdReal;
+  try {
+    real = realpathSync(resolve(cwd, dir));
+    cwdReal = realpathSync(cwd);
+  } catch {
+    return null;
+  }
+  const rel = relative(cwdReal, real);
+  if (rel.startsWith('..') || isAbsolute(rel)) {
+    return null;
+  }
+  try {
+    if (!statSync(real).isDirectory()) return null;
+  } catch {
+    return null;
+  }
+  return real;
+}
+
 /** Returns the process exit code rather than calling process.exit, so it is testable. */
 export function main(argv = process.argv) {
   const dir = argv[2];
@@ -35,14 +60,24 @@ export function main(argv = process.argv) {
     return 2;
   }
 
-  const maps = readdirSync(dir).filter((f) => f.endsWith('.map'));
+  const safeDir = resolveAnalyzedDir(dir);
+  if (!safeDir) {
+    console.error(
+      `analyze-bundle: refused path '${dir}' (must be an existing directory under cwd)`,
+    );
+    return 2;
+  }
+
+  const maps = readdirSync(safeDir).filter((f) => f.endsWith('.map') && !f.includes('..'));
   if (maps.length === 0) {
-    console.error(`analyze-bundle: no sourcemaps in ${dir} — was the build run with --sourcemap?`);
+    console.error(
+      `analyze-bundle: no sourcemaps in ${safeDir} — was the build run with --sourcemap?`,
+    );
     return 1;
   }
 
   for (const file of maps) {
-    const map = JSON.parse(readFileSync(join(dir, file), 'utf8'));
+    const map = JSON.parse(readFileSync(join(safeDir, file), 'utf8'));
     const rows = attributeChunk(map);
     const chunkTotal = rows.reduce((sum, [, n]) => sum + n, 0);
     if (chunkTotal < REPORT_THRESHOLD) continue;

@@ -1,10 +1,9 @@
 // @vitest-environment node
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { attributeChunk, main } from './analyze-bundle.mjs';
+import { attributeChunk, main, resolveAnalyzedDir } from './analyze-bundle.mjs';
 
 let dir;
 
@@ -16,7 +15,9 @@ function writeMap(name, sources, sourcesContent) {
 }
 
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), 'analyze-bundle-test-'));
+  // Keep fixtures under cwd so resolveAnalyzedDir accepts them.
+  mkdirSync(join(process.cwd(), '.tmp-analyze-bundle'), { recursive: true });
+  dir = mkdtempSync(join(process.cwd(), '.tmp-analyze-bundle', 'test-'));
 });
 
 afterEach(() => {
@@ -77,6 +78,14 @@ describe('main', () => {
 
     expect(main(['node', 'analyze-bundle.mjs'])).toBe(2);
     expect(err).toHaveBeenCalledWith(expect.stringContaining('usage:'));
+  });
+
+  it('exits 2 when the path escapes cwd', () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    expect(main(['node', 'analyze-bundle.mjs', '/tmp'])).toBe(2);
+    expect(err).toHaveBeenCalledWith(expect.stringContaining('refused path'));
+    expect(resolveAnalyzedDir('/tmp')).toBeNull();
   });
 
   it('exits 1 when the directory holds no sourcemaps', () => {

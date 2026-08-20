@@ -5,6 +5,7 @@
 
 # Testing
 /coverage
+.tmp-analyze-bundle/
 
 # Production
 /build

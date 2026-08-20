@@ -194,13 +194,13 @@ export function FirmwareUpgradeDialog({
       // Stay on uploading so the error is visible next to progress; retry allowed.
       // Prefer the backend's own detail (checksum, schema, authorization) over
       // the generic HTTP-status message when the response body carries one.
-      setError(
-        err instanceof ApiError && err.data.trim().length > 0
-          ? err.data
-          : err instanceof Error
-            ? err.message
-            : 'Upload failed',
-      );
+      let message = 'Upload failed';
+      if (err instanceof ApiError && err.data.trim().length > 0) {
+        message = err.data;
+      } else if (err instanceof Error) {
+        message = err.message;
+      }
+      setError(message);
     }
   }, [file, pollUntilBack]);
 

@@ -111,7 +111,7 @@ export function LiveVideoPlayer({
             const now = performance.now();
             const prev = fpsSample.current;
             if (prev && now > prev.at) {
-              const measured = ((decodedFrames - prev.frames) / ((now - prev.at) / 1000)) | 0;
+              const measured = Math.trunc((decodedFrames - prev.frames) / ((now - prev.at) / 1000));
               if (measured > 0) fps = measured;
             }
             fpsSample.current = { frames: decodedFrames, at: now };

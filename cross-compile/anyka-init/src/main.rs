@@ -82,43 +82,7 @@ fn main() {
     let (tx, rx) = supervisor_loop::make_channel();
     supervisor_loop::spawn_signal_thread(tx.clone());
 
-    if cfg.monitor.enabled {
-        let s = Arc::clone(&sysimpl);
-        let state_path = cfg.supervisor.storm_guard_state.clone();
-        let reset_after = Duration::from_secs(cfg.supervisor.storm_guard_reset_uptime_sec);
-        let mon = cfg.monitor.clone();
-        let iface = cfg.wifi.interface.clone();
-        let tx_mon = tx.clone();
-        let _ = std::thread::Builder::new()
-            .name("monitor".into())
-            .stack_size(supervisor_loop::thread_stack())
-            .spawn(move || {
-                monitor::run(s.as_ref(), &mon, &iface, &state_path, reset_after, tx_mon);
-            });
-    }
-
-    if cfg.time.enabled {
-        let s = Arc::clone(&sysimpl);
-        let tcfg = cfg.time.clone();
-        let _ = std::thread::Builder::new()
-            .name("timesync".into())
-            .stack_size(supervisor_loop::thread_stack())
-            .spawn(move || {
-                timesync::resync_loop(s.as_ref(), &tcfg);
-            });
-    }
-
-    if cfg.reboot.enabled && !safe_mode {
-        let s = Arc::clone(&sysimpl);
-        let interval_min = cfg.reboot.interval_min;
-        let jitter = cfg.reboot.jitter_max_sec;
-        let _ = std::thread::Builder::new()
-            .name("periodic-reboot".into())
-            .stack_size(supervisor_loop::thread_stack())
-            .spawn(move || {
-                supervisor_loop::periodic_reboot_loop(s.as_ref(), interval_min, jitter);
-            });
-    }
+    spawn_optional_threads(&sysimpl, &cfg, &tx, safe_mode);
 
     if safe_mode {
         // Reaching safe mode means repeated fast reboots. If an update is
@@ -221,6 +185,52 @@ fn main() {
 
     supervisor_loop::run(sysimpl, &cfg, rx);
     stop.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Spawn monitor / timesync / periodic-reboot threads when enabled.
+fn spawn_optional_threads(
+    sysimpl: &Arc<dyn sys::Sys>,
+    cfg: &config::Config,
+    tx: &std::sync::mpsc::Sender<supervisor_loop::Msg>,
+    safe_mode: bool,
+) {
+    if cfg.monitor.enabled {
+        let s = Arc::clone(sysimpl);
+        let state_path = cfg.supervisor.storm_guard_state.clone();
+        let reset_after = Duration::from_secs(cfg.supervisor.storm_guard_reset_uptime_sec);
+        let mon = cfg.monitor.clone();
+        let iface = cfg.wifi.interface.clone();
+        let tx_mon = tx.clone();
+        let _ = std::thread::Builder::new()
+            .name("monitor".into())
+            .stack_size(supervisor_loop::thread_stack())
+            .spawn(move || {
+                monitor::run(s.as_ref(), &mon, &iface, &state_path, reset_after, tx_mon);
+            });
+    }
+
+    if cfg.time.enabled {
+        let s = Arc::clone(sysimpl);
+        let tcfg = cfg.time.clone();
+        let _ = std::thread::Builder::new()
+            .name("timesync".into())
+            .stack_size(supervisor_loop::thread_stack())
+            .spawn(move || {
+                timesync::resync_loop(s.as_ref(), &tcfg);
+            });
+    }
+
+    if cfg.reboot.enabled && !safe_mode {
+        let s = Arc::clone(sysimpl);
+        let interval_min = cfg.reboot.interval_min;
+        let jitter = cfg.reboot.jitter_max_sec;
+        let _ = std::thread::Builder::new()
+            .name("periodic-reboot".into())
+            .stack_size(supervisor_loop::thread_stack())
+            .spawn(move || {
+                supervisor_loop::periodic_reboot_loop(s.as_ref(), interval_min, jitter);
+            });
+    }
 }
 
 /// Block forever without spinning. The recovery telnet started by the P0
