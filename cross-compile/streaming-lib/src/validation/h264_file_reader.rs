@@ -102,8 +102,8 @@ impl H264FileReader {
     // - Better SD card block alignment (512KB = typical erase block)
     // - Trade-off: Uses ~450KB more memory, acceptable for 24MB constraint
     const BUFFER_SIZE: usize = 524288;
-    const START_CODE_3: &'static [u8] = &[0x00, 0x00, 0x01];
-    const START_CODE_4: &'static [u8] = &[0x00, 0x00, 0x00, 0x01];
+    const START_CODE_3: &[u8] = &[0x00, 0x00, 0x01];
+    const START_CODE_4: &[u8] = &[0x00, 0x00, 0x00, 0x01];
     const MAX_PARAM_SET_LEN: usize = 4096;
 
     /// Create a new H264 file reader from file path

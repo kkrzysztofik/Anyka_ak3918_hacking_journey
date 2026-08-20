@@ -429,7 +429,9 @@ pub fn reconcile(
     // the marker, so the lock is taken there and held across the reboot.
     match evaluate_trial(&policy.ports, &policy, probe, sleep) {
         Outcome::Confirm => {
-            let _guard = lock.lock().unwrap_or_else(|e| e.into_inner());
+            let _guard = lock
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             // Heal the pointer against reality before clearing the marker.
             // If `config.sh` fell back to this slot because the pointed-at one
             // would not exec, `active` still names the broken slot; clearing
@@ -458,7 +460,9 @@ pub fn reconcile(
             // reboot: if power is lost between the first two the next boot
             // repeats a revert that is already correct, whereas clearing first
             // would boot the broken slot with no marker and no way back.
-            let _guard = lock.lock().unwrap_or_else(|e| e.into_inner());
+            let _guard = lock
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             if let Err(e) = slots.set_active(prev) {
                 tracing::error!(error = %e, "could not restore the previous slot");
                 return;
@@ -522,7 +526,9 @@ pub fn apply(
     device_schema: u32,
     lock: &std::sync::Mutex<()>,
 ) {
-    let _guard = lock.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = lock
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let slots = Slots::new(root);
     let target = slots.inactive();
     let dir = slots.dir(target);

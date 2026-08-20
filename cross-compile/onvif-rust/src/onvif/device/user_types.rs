@@ -148,7 +148,7 @@ pub fn validate_password(
                 return Err(UserValidationError::PasswordTooLong);
             }
             // Complexity requirement: at least one letter, one number, or one special char
-            let has_letter = pwd.chars().any(|c| c.is_alphabetic());
+            let has_letter = pwd.chars().any(char::is_alphabetic);
             let has_number = pwd.chars().any(|c| c.is_ascii_digit());
             let has_special = pwd.chars().any(|c| {
                 c.is_ascii_punctuation()

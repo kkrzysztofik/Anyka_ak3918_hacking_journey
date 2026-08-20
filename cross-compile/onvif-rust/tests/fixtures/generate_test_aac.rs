@@ -1,10 +1,13 @@
 use std::fs::File;
 use std::io::Write;
-use std::path::Path;
 
 /// Generates a minimal but valid AAC file in ADTS format for testing
 /// This creates a file with valid ADTS headers and some synthetic AAC frames
-pub fn generate_test_aac_file(path: &str, sample_rate: u32, num_frames: usize) -> std::io::Result<()> {
+pub fn generate_test_aac_file(
+    path: &str,
+    sample_rate: u32,
+    num_frames: usize,
+) -> std::io::Result<()> {
     let mut file = File::create(path)?;
 
     // Determine sampling frequency index
@@ -45,7 +48,8 @@ pub fn generate_test_aac_file(path: &str, sample_rate: u32, num_frames: usize) -
         adts_header[1] = 0xF1; // 0xF0 (sync continuation) + 0x01 (no CRC)
 
         // Byte 2: Profile + sampling_freq_index + channel (partial)
-        adts_header[2] = ((profile - 1) << 6) | (sampling_freq_index << 2) | ((channel_config >> 2) & 0x01);
+        adts_header[2] =
+            ((profile - 1) << 6) | (sampling_freq_index << 2) | ((channel_config >> 2) & 0x01);
 
         // Byte 3: Channel (partial) + frame_length (partial)
         adts_header[3] = ((channel_config & 0x03) << 6) | ((frame_length >> 11) & 0x03) as u8;
@@ -63,20 +67,42 @@ pub fn generate_test_aac_file(path: &str, sample_rate: u32, num_frames: usize) -
         file.write_all(&adts_header)?;
 
         // Write synthetic AAC payload
-        let mut payload = vec![0u8; payload_size];
-        for i in 0..payload_size {
-            payload[i] = ((frame_idx * 17 + i) & 0xFF) as u8;
-        }
+        let payload: Vec<u8> = (0..payload_size)
+            .map(|i| ((frame_idx * 17 + i) & 0xFF) as u8)
+            .collect();
         file.write_all(&payload)?;
     }
 
     Ok(())
 }
 
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    tracing_subscriber::fmt()
+        .with_writer(std::io::stderr)
+        .with_max_level(tracing::Level::INFO)
+        .init();
+
+    let output_path = "tests/fixtures/test_audio.aac";
+    match generate_test_aac_file(output_path, 48000, 100) {
+        Ok(()) => {
+            tracing::info!(
+                path = %output_path,
+                "Generated test AAC file (100 frames @ 48kHz)"
+            );
+            Ok(())
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to generate test AAC file");
+            Err(e.into())
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::fs;
+    use std::path::Path;
 
     #[test]
     fn test_generate_test_aac_file() {
@@ -115,11 +141,16 @@ mod tests {
         let data = fs::read(test_file).unwrap();
 
         // Find ADTS sync words (should have 5 frames)
-        let sync_count = data.windows(2).filter(|w| {
-            w[0] == 0xFF && (w[1] & 0xF0) == 0xF0
-        }).count();
+        let sync_count = data
+            .windows(2)
+            .filter(|w| w[0] == 0xFF && (w[1] & 0xF0) == 0xF0)
+            .count();
 
-        assert!(sync_count >= 5, "Expected at least 5 ADTS frames, found {}", sync_count);
+        assert!(
+            sync_count >= 5,
+            "Expected at least 5 ADTS frames, found {}",
+            sync_count
+        );
 
         let _ = fs::remove_file(test_file);
     }
@@ -133,19 +164,11 @@ mod tests {
         generate_test_aac_file(test_file, 44100, 3).unwrap();
 
         let data = fs::read(test_file).unwrap();
-        
+
         // Verify sampling frequency index in ADTS header
         // For 44.1kHz, index should be 4 (bits 2-5 of byte 2)
         assert_eq!((data[2] >> 2) & 0x0F, 4);
 
         let _ = fs::remove_file(test_file);
-    }
-}
-
-fn main() {
-    let output_path = "tests/fixtures/test_audio.aac";
-    match generate_test_aac_file(output_path, 48000, 100) {
-        Ok(_) => println!("Generated test AAC file at {} (100 frames @ 48kHz)", output_path),
-        Err(e) => eprintln!("Failed to generate test AAC file: {}", e),
     }
 }

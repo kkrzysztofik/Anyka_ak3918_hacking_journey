@@ -1,6 +1,5 @@
 use std::fs::File;
 use std::io::Write;
-use std::path::Path;
 
 /// Generates a minimal but valid H264 file in Annex-B format for testing
 /// This creates a file with SPS, PPS, and a few I-frames and P-frames
@@ -13,9 +12,7 @@ pub fn generate_test_h264_file(path: &str) -> std::io::Result<()> {
     // Minimal valid SPS (Sequence Parameter Set)
     // This is a simplified SPS that represents a baseline H264 profile
     // Profile: 42 (Baseline), Level: c0 (Level 3.0), Constraints: 10
-    let sps_data: &[u8] = &[
-        0x27, 0x42, 0xc0, 0x28, 0xd9, 0x05, 0x05, 0x14, 0x11, 0x00,
-    ];
+    let sps_data: &[u8] = &[0x27, 0x42, 0xc0, 0x28, 0xd9, 0x05, 0x05, 0x14, 0x11, 0x00];
 
     // Minimal valid PPS (Picture Parameter Set)
     let pps_data: &[u8] = &[0x28, 0xce, 0x06, 0xe2];
@@ -38,9 +35,7 @@ pub fn generate_test_h264_file(path: &str) -> std::io::Result<()> {
         let mut frame_data = vec![nal_unit_type];
 
         // Add some synthetic payload data based on frame index
-        for i in 0..64 {
-            frame_data.push(((frame_idx * 17 + i) & 0xff) as u8);
-        }
+        frame_data.extend((0..64).map(|i| ((frame_idx * 17 + i) & 0xff) as u8));
 
         // Write frame NAL unit with start code
         file.write_all(start_code_4)?;
@@ -50,10 +45,30 @@ pub fn generate_test_h264_file(path: &str) -> std::io::Result<()> {
     Ok(())
 }
 
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    tracing_subscriber::fmt()
+        .with_writer(std::io::stderr)
+        .with_max_level(tracing::Level::INFO)
+        .init();
+
+    let output_path = "tests/fixtures/test_video.h264";
+    match generate_test_h264_file(output_path) {
+        Ok(()) => {
+            tracing::info!(path = %output_path, "Generated test H264 file");
+            Ok(())
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to generate test H264 file");
+            Err(e.into())
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::fs;
+    use std::path::Path;
 
     #[test]
     fn test_generate_test_h264_file() {
@@ -91,14 +106,14 @@ mod tests {
         let data = fs::read(test_file).unwrap();
 
         // Find SPS (NAL type 7) - looks for pattern: start_code + 0x27
-        let sps_present = data.windows(5).any(|w| {
-            w[0..4] == [0x00, 0x00, 0x00, 0x01] && (w[4] & 0x1f) == 0x07
-        });
+        let sps_present = data
+            .windows(5)
+            .any(|w| w[0..4] == [0x00, 0x00, 0x00, 0x01] && (w[4] & 0x1f) == 0x07);
 
         // Find PPS (NAL type 8) - looks for pattern: start_code + 0x28
-        let pps_present = data.windows(5).any(|w| {
-            w[0..4] == [0x00, 0x00, 0x00, 0x01] && (w[4] & 0x1f) == 0x08
-        });
+        let pps_present = data
+            .windows(5)
+            .any(|w| w[0..4] == [0x00, 0x00, 0x00, 0x01] && (w[4] & 0x1f) == 0x08);
 
         assert!(sps_present, "SPS not found in generated file");
         assert!(pps_present, "PPS not found in generated file");
@@ -116,22 +131,13 @@ mod tests {
         let data = fs::read(test_file).unwrap();
 
         // Find IDR frames (NAL type 5)
-        let idr_frames = data.windows(5)
-            .filter(|w| {
-                w[0..4] == [0x00, 0x00, 0x00, 0x01] && (w[4] & 0x1f) == 0x05
-            })
+        let idr_frames = data
+            .windows(5)
+            .filter(|w| w[0..4] == [0x00, 0x00, 0x00, 0x01] && (w[4] & 0x1f) == 0x05)
             .count();
 
         assert!(idr_frames > 0, "No IDR frames found in generated file");
 
         let _ = fs::remove_file(test_file);
-    }
-}
-
-fn main() {
-    let output_path = "tests/fixtures/test_video.h264";
-    match generate_test_h264_file(output_path) {
-        Ok(_) => println!("Generated test H264 file at {}", output_path),
-        Err(e) => eprintln!("Failed to generate test H264 file: {}", e),
     }
 }

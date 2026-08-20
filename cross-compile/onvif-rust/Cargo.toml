@@ -11,6 +11,14 @@ doctest = false
 name = "onvif-rust"
 path = "src/main.rs"
 
+[[example]]
+name = "generate_test_aac"
+path = "tests/fixtures/generate_test_aac.rs"
+
+[[example]]
+name = "generate_test_h264"
+path = "tests/fixtures/generate_test_h264.rs"
+
 [dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "net", "sync", "time"] }
 axum = "0.8"
