@@ -119,6 +119,7 @@ where
         Err(_) => {
             tracing::error!("FFI call '{}' timed out after {:?}", name, timeout);
             // Detach the stuck thread
+            // NOSONAR rust:S9168 -- intentional leak: destructor would race/hang (stuck FFI join)
             std::mem::forget(join_handle);
             Err(())
         }

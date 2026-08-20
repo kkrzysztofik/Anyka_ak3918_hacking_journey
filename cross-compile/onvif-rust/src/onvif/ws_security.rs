@@ -202,6 +202,7 @@ impl WsSecurityValidator {
             .map_err(|e| WsSecurityError::InvalidNonceEncoding(e.to_string()))?;
 
         // Compute expected digest: SHA1(Nonce + Created + Password)
+        // NOSONAR rust:S4790 -- WS-Security UsernameToken PasswordDigest requires SHA-1(Nonce+Created+Password)
         let mut hasher = Sha1::new();
         hasher.update(&nonce_bytes);
         hasher.update(created.as_bytes());
@@ -328,6 +329,7 @@ impl WsSecurityValidator {
 ///
 /// Base64-encoded SHA1 digest.
 pub fn compute_digest(nonce: &[u8], created: &str, password: &str) -> String {
+    // NOSONAR rust:S4790 -- WS-Security UsernameToken PasswordDigest requires SHA-1(Nonce+Created+Password)
     let mut hasher = Sha1::new();
     hasher.update(nonce);
     hasher.update(created.as_bytes());

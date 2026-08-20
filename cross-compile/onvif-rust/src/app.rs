@@ -1772,6 +1772,7 @@ impl Application {
             tracing::error!(
                 "Unsafe teardown detected; leaking app_state to suppress destructor-driven SDK cleanup before hard exit"
             );
+            // NOSONAR rust:S9168 -- intentional leak: destructor would race/hang (hard shutdown)
             std::mem::forget(state);
         }
     }

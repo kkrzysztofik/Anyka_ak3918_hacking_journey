@@ -1073,9 +1073,11 @@ fn forget_stream_handles(
     sub_stream_handle: &mut Option<Arc<VideoStreamHandle>>,
 ) {
     if let Some(handle) = main_stream_handle.take() {
+        // NOSONAR rust:S9168 -- intentional leak: destructor would race/hang (hard shutdown)
         std::mem::forget(handle);
     }
     if let Some(handle) = sub_stream_handle.take() {
+        // NOSONAR rust:S9168 -- intentional leak: destructor would race/hang (hard shutdown)
         std::mem::forget(handle);
     }
 }
@@ -1231,9 +1233,11 @@ impl AnykaVideoEncoder {
 
     pub(super) fn leak_stream_handles_for_hard_shutdown(&self) {
         if let Some(handle) = self.main_stream_handle.write().take() {
+            // NOSONAR rust:S9168 -- intentional leak: destructor would race/hang (hard shutdown)
             std::mem::forget(handle);
         }
         if let Some(handle) = self.sub_stream_handle.write().take() {
+            // NOSONAR rust:S9168 -- intentional leak: destructor would race/hang (hard shutdown)
             std::mem::forget(handle);
         }
     }
@@ -1241,10 +1245,12 @@ impl AnykaVideoEncoder {
     pub(super) fn leak_encoder_handles_for_hard_shutdown(&self) {
         if let Some(handle) = self.main_handle.write().take() {
             *self.main_state.write() = EncoderState::Uninitialized;
+            // NOSONAR rust:S9168 -- intentional leak: destructor would race/hang (hard shutdown)
             std::mem::forget(handle);
         }
         if let Some(handle) = self.sub_handle.write().take() {
             *self.sub_state.write() = EncoderState::Uninitialized;
+            // NOSONAR rust:S9168 -- intentional leak: destructor would race/hang (hard shutdown)
             std::mem::forget(handle);
         }
     }
