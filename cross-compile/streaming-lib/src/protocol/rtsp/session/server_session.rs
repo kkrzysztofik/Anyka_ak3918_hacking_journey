@@ -1661,7 +1661,11 @@ impl RtspServerSession {
         )
     }
 
-    async fn handle_play(&mut self, rtsp_request: &RtspRequest) -> Result<(), SessionError> {
+    /// Returns `true` when PLAY was rejected (401 already sent).
+    async fn authenticate_play_or_reject(
+        &mut self,
+        rtsp_request: &RtspRequest,
+    ) -> Result<bool, SessionError> {
         if let Some(auth) = &self.auth {
             let stream_name = rtsp_request.uri.path.clone();
             let auth_result = auth.authenticate_request(
@@ -1674,8 +1678,78 @@ impl RtspServerSession {
             );
             if auth_result.is_err() {
                 self.send_unauthorized_response(rtsp_request).await?;
-                return Ok(());
+                return Ok(true);
             }
+        }
+        Ok(false)
+    }
+
+    /// Returns `true` when Range was present and invalid (457 already sent).
+    async fn reject_invalid_play_range(
+        &mut self,
+        rtsp_request: &RtspRequest,
+        session_id: &str,
+    ) -> Result<bool, SessionError> {
+        let Some(range_str) = rtsp_request.get_header("Range") else {
+            return Ok(false);
+        };
+        if RtspRange::unmarshal(range_str).is_ok() {
+            return Ok(false);
+        }
+        warn!(
+            session_id = %session_id,
+            remote_addr = %self.remote_addr,
+            stream_path = %rtsp_request.uri.path,
+            range = %range_str,
+            "play_rejected_invalid_range"
+        );
+        let response = Self::gen_rtsp_response(457, "Invalid Range", rtsp_request);
+        self.send_response(&response).await?;
+        Ok(true)
+    }
+
+    /// Returns `true` when tracks were not ready in time (503 already sent).
+    async fn wait_for_play_tracks_or_reject(
+        &mut self,
+        rtsp_request: &RtspRequest,
+        session_id: &str,
+    ) -> Result<bool, SessionError> {
+        let play_gate_timeout_ms = if self.config.play_ready_timeout_ms > 0 {
+            self.config.play_ready_timeout_ms
+        } else {
+            DEFAULT_PLAY_READY_TIMEOUT_MS
+        };
+        debug!(
+            session_id = %session_id,
+            remote_addr = %self.remote_addr,
+            stream_path = %rtsp_request.uri.path,
+            timeout_ms = play_gate_timeout_ms,
+            "play_waiting_for_tracks"
+        );
+        if self
+            .wait_for_tracks(
+                rtsp_request,
+                Duration::from_millis(play_gate_timeout_ms.max(50)),
+            )
+            .await?
+        {
+            return Ok(false);
+        }
+        warn!(
+            session_id = %session_id,
+            remote_addr = %self.remote_addr,
+            stream_path = %rtsp_request.uri.path,
+            timeout_ms = play_gate_timeout_ms,
+            "play_rejected_waiting_for_sps_pps"
+        );
+        let response = Self::gen_response(http::StatusCode::SERVICE_UNAVAILABLE, rtsp_request);
+        self.send_response(&response).await?;
+        Ok(true)
+    }
+
+    async fn handle_play(&mut self, rtsp_request: &RtspRequest) -> Result<(), SessionError> {
+        if self.authenticate_play_or_reject(rtsp_request).await? {
+            return Ok(());
         }
 
         let cseq = rtsp_request.get_header("CSeq").cloned().unwrap_or_default();
@@ -1693,49 +1767,17 @@ impl RtspServerSession {
             "rtsp_request"
         );
 
-        if let Some(range_str) = rtsp_request.get_header("Range")
-            && RtspRange::unmarshal(range_str).is_err()
+        if self
+            .reject_invalid_play_range(rtsp_request, &session_id)
+            .await?
         {
-            warn!(
-                session_id = %session_id,
-                remote_addr = %self.remote_addr,
-                stream_path = %rtsp_request.uri.path,
-                range = %range_str,
-                "play_rejected_invalid_range"
-            );
-            let response = Self::gen_rtsp_response(457, "Invalid Range", rtsp_request);
-            self.send_response(&response).await?;
             return Ok(());
         }
 
-        let play_gate_timeout_ms = if self.config.play_ready_timeout_ms > 0 {
-            self.config.play_ready_timeout_ms
-        } else {
-            DEFAULT_PLAY_READY_TIMEOUT_MS
-        };
-        debug!(
-            session_id = %session_id,
-            remote_addr = %self.remote_addr,
-            stream_path = %rtsp_request.uri.path,
-            timeout_ms = play_gate_timeout_ms,
-            "play_waiting_for_tracks"
-        );
-        if !self
-            .wait_for_tracks(
-                rtsp_request,
-                Duration::from_millis(play_gate_timeout_ms.max(50)),
-            )
+        if self
+            .wait_for_play_tracks_or_reject(rtsp_request, &session_id)
             .await?
         {
-            warn!(
-                session_id = %session_id,
-                remote_addr = %self.remote_addr,
-                stream_path = %rtsp_request.uri.path,
-                timeout_ms = play_gate_timeout_ms,
-                "play_rejected_waiting_for_sps_pps"
-            );
-            let response = Self::gen_response(http::StatusCode::SERVICE_UNAVAILABLE, rtsp_request);
-            self.send_response(&response).await?;
             return Ok(());
         }
 
