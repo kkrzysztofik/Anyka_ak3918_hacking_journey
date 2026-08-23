@@ -57,8 +57,15 @@ Gates are placed by property, not taste:
 ```
 
 `prettier` previously existed only as `--write`. `eslint-config-prettier` only
-disables conflicting ESLint rules; it verifies nothing. The tree is already
-`prettier --check` clean, so this costs no cleanup and locks in what is true.
+disables conflicting ESLint rules; it verifies nothing.
+
+This gate was approved on the premise that the tree was already
+`prettier --check` clean. It was not — 15 files had drifted. The premise came
+from `rtk prettier --check`, whose filter printed "All files formatted
+correctly" while the underlying exit code was 1. **Check prettier with
+`./node_modules/.bin/prettier --check .` and read the exit code; the RTK filter
+masks failures.** The 15 files are reformatted in a separate commit so the
+mechanical churn stays reviewable apart from the gate wiring.
 
 ### 2. `cross-compile/www/vite.config.ts`
 

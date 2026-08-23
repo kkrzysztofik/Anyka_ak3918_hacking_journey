@@ -9,13 +9,15 @@
     "preview": "vite preview",
     "lint": "eslint . --report-unused-disable-directives --max-warnings 0",
     "lint:fix": "eslint . --fix",
+    "verify": "npm run type-check && npm run lint && npm run format:check",
     "type-check": "npm run type-check:ts7 && npm run type-check:ts6",
     "type-check:ts7": "tsc -p tsconfig.json --noEmit",
     "type-check:ts6": "tsc6 -p tsconfig.json --noEmit",
     "test": "vitest run",
     "analyze": "out=$(mktemp -d) && trap 'rm -rf \"$out\"' EXIT && vite build --outDir \"$out\" --sourcemap --emptyOutDir >/dev/null && node scripts/analyze-bundle.mjs \"$out/js\"",
     "test:coverage": "vitest run --coverage",
-    "prettier": "prettier --write ."
+    "prettier": "prettier --write .",
+    "format:check": "prettier --check ."
   },
   "dependencies": {
     "@fontsource-variable/ibm-plex-sans": "^5.3.0",

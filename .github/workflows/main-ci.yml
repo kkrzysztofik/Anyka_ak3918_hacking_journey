@@ -363,8 +363,18 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Lint
-        run: npm run lint
+      # One step, not three. `verify` (type-check + lint + format:check) is
+      # defined in package.json and shared with scripts/build_sd_contents.sh;
+      # splitting it here would give a nicer UI at the cost of CI owning its
+      # own copy of the gate list, which is the drift that let three TS7
+      # errors merge green. The log shows which half failed.
+      - name: Verify (type-check + lint + format)
+        run: npm run verify
+
+      # Before the tests deliberately: "does not bundle" should not wait on the
+      # suite to report. Output is gitignored, so this leaves no dirty tree.
+      - name: Build
+        run: npm run build
 
       - name: Test with Coverage
         id: test-coverage
@@ -449,12 +459,38 @@ jobs:
           # removal date in a comment here. Empty is the steady state.
           ignore: ""
 
+      # The WebUI's npm tree. Lives here rather than in the webui job because
+      # `npm audit` needs the network, and the webui gate list (`npm run
+      # verify`) is shared with scripts/build_sd_contents.sh, which has to keep
+      # working offline.
+      - name: Use Node.js
+        if: always()
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v6.0.0
+        # SHA: 53b83947a5a98c8d113130e565377fae1a50d02f
+        with:
+          node-version: "24"
+
+      # All deps, not --omit=dev: dev packages never ship to the camera, but
+      # they execute in CI with repo credentials, so they are in scope.
+      # --package-lock-only audits the lockfile, so no `npm ci` is needed.
+      #
+      # Temporary waivers: npm audit has no `ignore:` list like cargo-audit.
+      # To waive, pin a patched transitive with an `overrides` entry in
+      # cross-compile/www/package.json and record the reason and removal date
+      # in a comment there. Empty is the steady state.
+      - name: Audit WebUI npm dependencies
+        id: audit-webui
+        if: always()
+        working-directory: cross-compile/www
+        run: npm audit --package-lock-only --audit-level=high
+
       - name: Record audit status
         id: audit-status
         if: always()
         run: |
           if [ "${{ steps.audit-workspace.outcome }}" = "success" ] && \
-             [ "${{ steps.audit-validation.outcome }}" = "success" ]; then
+             [ "${{ steps.audit-validation.outcome }}" = "success" ] && \
+             [ "${{ steps.audit-webui.outcome }}" = "success" ]; then
             echo "audit_status=success" >> "$GITHUB_OUTPUT"
           else
             echo "audit_status=failure" >> "$GITHUB_OUTPUT"

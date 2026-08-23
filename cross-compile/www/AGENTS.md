@@ -15,10 +15,14 @@ When working in this subtree, load and follow:
 
 ```bash
 cd cross-compile/www
-npm run lint
-npm run type-check   # TS 7 (`tsc`) then TS 6 (`tsc6`) side-by-side
+npm run verify   # type-check (TS 7 `tsc`, then TS 6 `tsc6`) + lint + format:check
 npm run test
 ```
+
+`verify` is the shared gate list: `main-ci.yml` and
+`scripts/build_sd_contents.sh` both call it, so add a new gate there rather
+than to any one caller. Run the parts individually (`npm run type-check`,
+`npm run lint`, `npm run format:check`) when iterating.
 
 ## Non-negotiable rules (summary)
 

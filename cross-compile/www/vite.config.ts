@@ -60,6 +60,19 @@ export default defineConfig(() => ({
         '**/*.config.{ts,js}',
         '**/types/**',
       ],
+      // A regression ratchet, not a target. Measured 2026-08-23 at
+      // 91.39 / 89.74 / 88.26 / 78.02 and floored 1-2 points below, because a
+      // threshold pinned to the exact measurement goes red on one added
+      // uncovered `catch` and is fragile against local-vs-CI drift. A gate
+      // that cries wolf gets disabled — which already happened to the
+      // sonarqube job (`continue-on-error: true`), leaving this the only
+      // enforcement the WebUI has. Raise the floors when coverage rises.
+      thresholds: {
+        lines: 90,
+        statements: 88,
+        functions: 87,
+        branches: 76,
+      },
     },
   },
   plugins: [react()],

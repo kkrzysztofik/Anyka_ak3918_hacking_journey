@@ -194,8 +194,12 @@ else
       npm ci
       printf '%s' "${current_hash}" > "${lock_hash_file}"
     fi
-    npm run type-check
-    npm run lint
+    # `verify` is the single definition of the WebUI gate list, shared with
+    # main-ci.yml so the two cannot drift — three TS7 errors merged green and
+    # stopped a fleet rollout here because CI ran neither type-check nor build.
+    # Tests and `npm audit` stay out of it on purpose: this script must work
+    # offline and stay fast, and CI owns both.
+    npm run verify
     npm run build
   )
   log_success "WebUI built to ${ANYKA_HACK}/onvif/www/"
