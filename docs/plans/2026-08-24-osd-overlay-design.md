@@ -203,24 +203,75 @@ existing fixture pattern; the React page under Vitest.
 
 Hardware is the only place the central assumption can be tested — see Phase 0.
 
-## Phase 0 — spike before implementation
+## Phase 0 — spike
 
-Everything above is paper reasoning about a foreign binary. Before implementation,
-push `libmpi_osd.so` and a small standalone test binary to `.198` and confirm:
+Everything above was paper reasoning about a foreign binary, so it was tested on
+hardware before committing to implementation.
 
-1. the library loads with two unresolved lazy symbols present;
-2. `ak_osd_init` succeeds against a live VI handle;
-3. a drawn string actually appears in the encoded stream;
-4. the `akuio_alloc_pmem` physical-memory cost, which matters on a 36 MB box.
+### Stage A — library load and font parse — **PASSED on `.198`, 2026-08-24**
 
-If the spike fails, this design is void and the fallback is the browser-side
-overlay. An hour here is worth a week later.
+A standalone probe (`/tmp/osd_probe.c`, linked against our lib set plus
+`-lmpi_osd`) was pushed to `/mnt/anyka_hack/osd-spike/` and run with
+`LD_LIBRARY_PATH` covering the scratch dir and
+`/mnt/anyka_hack/vendor-daemon/lib`. It needs no VI handle, so it ran alongside
+the live stack without disturbing it:
+
+```
+[probe] binary started -- so libmpi_osd.so LOADED ok
+[probe] ak_osd_get_version() = libmpi_osd V1.1.03
+[ak_osd_set_font_file:242] channel=1, font size=16
+[get_font_data_from_file:89] fd:4 byte:32
+[probe] ak_osd_set_font_file OK  (RSS 508 -> 552 kB, +44)
+[probe] PASS
+```
+
+Confirmed:
+
+- The dynamic linker loads `libmpi_osd.so` alongside our full SDK lib set with
+  `ak_cmd_{,un}register_module` unresolvable — the lazy-binding analysis holds in
+  practice, not just on paper.
+- Code inside the library executes: version reports `libmpi_osd V1.1.03`.
+- The on-camera font at `/usr/local/ak_font_16.bin` (265798 bytes) parses.
+
+Two facts learned that were not visible from the headers:
+
+- **Glyphs are 32 bytes each — 16×16 at 1bpp**, not the 4bpp format that
+  `ak_osd_draw_matrix` documents. The library expands them internally, so the
+  `draw_str` path needs no bitmap work from us.
+- **Font loading costs only ~44 KB RSS**, not the file's 259 KB: the library
+  holds the fd open and reads glyphs on demand. On a box reporting 2.7 MB free
+  (`free`: 36540 total / 33840 used, 25140 reclaimable) this is the difference
+  between viable and not.
+
+Note the linker precedent this rests on already exists in the tree: the
+`vendor-daemon` Makefile passes `-Wl,--allow-shlib-undefined` for the *same*
+lazy-binding reason with `libplat_thread.so`.
+
+### Stage B — live draw — pending, folded into implementation
+
+`ak_osd_init`, `ak_osd_set_rect` and `ak_osd_draw_str` need a live VI handle,
+which the running `vendor-daemon` owns; two processes cannot both hold VI. So
+Stage B is not a throwaway probe — it is the first slice of the C work
+(`CMD_OSD_INIT` + `CMD_OSD_SET_RECT` + `CMD_OSD_DRAW_STR`), verified by eye on
+the live stream. It should be the first task implemented and validated on
+hardware before any Rust, ONVIF or WebUI work begins.
+
+Still to be measured in Stage B: the `akuio_alloc_pmem` physical-memory cost of
+`ak_osd_init` (allocated per channel), and behaviour at both main and sub
+resolutions.
+
+### Scratch state left on the camera
+
+`/mnt/anyka_hack/osd-spike/` on `.198` holds `libmpi_osd.so` and `osd_probe`
+(both md5-verified after transfer). Harmless, outside the A/B slots, and reusable
+for Stage B; delete when the feature lands.
 
 ## Risks
 
 | Risk | Mitigation |
 |---|---|
-| `libmpi_osd.so` misbehaves on this silicon | Phase 0 spike, before any implementation |
-| OSD buffers exhaust physical memory | Measure `akuio_alloc_pmem` cost in the spike |
+| ~~`libmpi_osd.so` fails to load on this silicon~~ | **Retired** — Stage A passed on `.198`, 2026-08-24 |
+| `ak_osd_init` / `draw_str` misbehave against a live VI handle | Stage B is the first implementation task, verified on hardware before any Rust work |
+| OSD buffers exhaust physical memory | Font load measured at +44 KB; `akuio_alloc_pmem` cost still to be measured in Stage B |
 | Someone later calls `osd_sys_ipc_register` | Comment at the link site and in `handlers_osd.c` |
 | VPSS OSD interacts badly with our profile resolutions | Exercised in the spike at both main and sub dimensions |
