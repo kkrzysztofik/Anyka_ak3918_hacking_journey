@@ -120,17 +120,37 @@ pub fn protect_from_oom_killer(path: &std::path::Path) {
     }
 }
 
+/// Who holds `/var/run/wpa_supplicant/<iface>` when bring-up returns.
+///
+/// Only one process can own that control socket. Collapsing the vendor-fallback
+/// case into "no driver probed" is what caused the 2026-08-23 `.127` outage: the
+/// handover `killall` was skipped exactly when a foreign supplicant held the
+/// socket, so the supervised service exited 255 forever, tripped the crash-loop
+/// cap, and rebooted the camera into SAFE MODE.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SupplicantOwnership {
+    /// Bring-up associated. The supervised service takes over on this `-D` flag.
+    Ours(&'static str),
+    /// The vendor chain owns the interface and its supplicant holds the socket.
+    /// Supervising a second one can only crash-loop, so stand down for this boot.
+    Vendor,
+    /// Nothing holds the socket. Let the supervised service keep retrying — it
+    /// is the only remaining route back to a link.
+    Unowned,
+}
+
 /// P2: system setup. Every step is best-effort — a camera with no sensor
 /// module is still worth reaching over SSH to diagnose.
 ///
-/// Returns the probed `wpa_supplicant -D` flag on a successful wifi bring-up
-/// so P3 can start the supervised instance with the same driver (F2/F3).
+/// Returns who owns the supplicant control socket, so P3 can either take it
+/// over with the probed `-D` flag (F2/F3) or stand down when the vendor chain
+/// already holds it.
 pub fn system_setup(
     sys: &dyn Sys,
     cfg: &Config,
     baseline_wifi: &WifiCfg,
     overlay_path: &std::path::Path,
-) -> Option<&'static str> {
+) -> SupplicantOwnership {
     // Affects this process only. `gergehack.sh:358` exported TZ for children to
     // inherit; `Sys::spawn` calls `env_clear()`, so a service sees TZ only if
     // its own `[services.X].env` declares it. Kept because it costs nothing and
@@ -176,15 +196,15 @@ pub fn system_setup(
             driver,
         } => {
             tracing::info!(chip, ssid, addr, driver, "wifi up");
-            Some(driver)
+            SupplicantOwnership::Ours(driver)
         }
         crate::wifi::Outcome::FellBack => {
             tracing::error!("wifi came up via the vendor fallback; check the chip dispatch");
-            None
+            SupplicantOwnership::Vendor
         }
         crate::wifi::Outcome::Failed => {
             tracing::error!("wifi is down and the fallback is disabled");
-            None
+            SupplicantOwnership::Unowned
         }
     };
 
@@ -400,6 +420,39 @@ channel = 6
         assert_eq!(std::fs::read_to_string(&path).expect("read"), "-1000");
     }
 
+    /// Regression for the 2026-08-23 `.127` outage. When bring-up hands off to
+    /// the vendor chain, its supplicant owns the ctrl socket, so the result must
+    /// be `Vendor` and not be collapsed into the same "nothing probed" case as
+    /// an outright failure. `main` keys the stand-down off exactly this
+    /// distinction; without it the supervised service exits 255 on every restart
+    /// until the crash-loop cap reboots the camera into SAFE MODE.
+    #[test]
+    fn test_system_setup_reports_vendor_ownership_when_it_falls_back() {
+        let mut sys = MockSys::new();
+        sys.expect_insmod().returning(|_| Ok(()));
+        sys.expect_run_to_completion()
+            .returning(|_, _| Ok(ExitStatus::Code(0)));
+
+        let mut wifi = wifi_cfg("/nonexistent/anyka_cfg.ini", "net", "pass");
+        wifi.chip = "unknown_chip".into();
+        // The one bit that differs from the failure case below.
+        wifi.fallback_to_vendor = true;
+        let system = SystemCfg {
+            sensor_module: Some("sensor.ko".into()),
+            ..Default::default()
+        };
+        let cfg = test_config(wifi, system);
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let overlay_path = dir.path().join("network.toml");
+
+        assert_eq!(
+            system_setup(&sys, &cfg, &cfg.wifi, &overlay_path),
+            SupplicantOwnership::Vendor,
+            "vendor fallback must be distinguishable from an outright failure"
+        );
+    }
+
     #[test]
     fn test_system_setup_loads_sensor_kills_disabled_services_and_reports_wifi_failure() {
         let mut sys = MockSys::new();
@@ -427,8 +480,9 @@ channel = 6
         let overlay_path = dir.path().join("network.toml");
         let probed = system_setup(&sys, &cfg, &cfg.wifi, &overlay_path);
         assert_eq!(
-            probed, None,
-            "unknown chip with fallback disabled must fail"
+            probed,
+            SupplicantOwnership::Unowned,
+            "unknown chip with fallback disabled must fail, leaving the socket unowned"
         );
     }
 
@@ -457,8 +511,9 @@ channel = 6
         let overlay_path = dir.path().join("network.toml");
         let probed = system_setup(&sys, &cfg, &cfg.wifi, &overlay_path);
         assert_eq!(
-            probed, None,
-            "unknown chip with fallback disabled must fail"
+            probed,
+            SupplicantOwnership::Unowned,
+            "unknown chip with fallback disabled must fail, leaving the socket unowned"
         );
     }
 }

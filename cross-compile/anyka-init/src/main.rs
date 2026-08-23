@@ -102,16 +102,33 @@ fn main() {
     // socket. Hand the interface over to the supervised instance here, not
     // earlier: P2.5 time sync needs the link up, and the address stays
     // configured across the swap so the gap is one reassociation.
-    if let Some(driver) = probed {
-        if let Some(svc) = cfg.services.get_mut("wpa_supplicant")
-            && !anyka_init::wifi::patch_driver_arg(&mut svc.args, driver)
-        {
-            tracing::warn!(
-                driver,
-                "wpa_supplicant service has no -D flag to patch; using argv as-is"
-            );
+    match probed {
+        boot::SupplicantOwnership::Ours(driver) => {
+            if let Some(svc) = cfg.services.get_mut("wpa_supplicant")
+                && !anyka_init::wifi::patch_driver_arg(&mut svc.args, driver)
+            {
+                tracing::warn!(
+                    driver,
+                    "wpa_supplicant service has no -D flag to patch; using argv as-is"
+                );
+            }
+            let _ = sysimpl.run_to_completion("killall", &["wpa_supplicant".to_string()]);
         }
-        let _ = sysimpl.run_to_completion("killall", &["wpa_supplicant".to_string()]);
+        boot::SupplicantOwnership::Vendor => {
+            // The vendor chain's supplicant holds the ctrl socket and is the
+            // only thing keeping the link up. Killing it to take over would
+            // drop the network on a camera we may not be able to reach again;
+            // supervising a second one guarantees exit 255 on every restart.
+            // Stand down for this boot only — config is untouched, so the next
+            // boot that associates cleanly owns the supplicant again.
+            if let Some(svc) = cfg.services.get_mut("wpa_supplicant") {
+                svc.enabled = false;
+            }
+            tracing::warn!("vendor chain owns wlan0; not supervising wpa_supplicant this boot");
+        }
+        // Nothing holds the socket, so the supervised service is the only route
+        // back to a link. Leave it enabled and let it retry.
+        boot::SupplicantOwnership::Unowned => {}
     }
 
     // P3 + P4
