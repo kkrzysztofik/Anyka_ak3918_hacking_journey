@@ -96,10 +96,15 @@ jobs:
         run: |
           cargo fmt --check
 
+      # --all-targets, so tests and benches are linted too. Without it clippy
+      # sees only the lib/bin targets, and a lint in test code merges green:
+      # an `assert_eq!(x, true)` sat in diagnostics/network.rs undetected
+      # because CI never compiled that target. Same blind spot as the WebUI
+      # gate list — the local invocation checked more than CI did.
       - name: Run Clippy
         working-directory: cross-compile
         run: |
-          cargo clippy --target x86_64-unknown-linux-gnu -- -D warnings
+          cargo clippy --target x86_64-unknown-linux-gnu --all-targets -- -D warnings
 
       - name: Test Build Scripts (Python)
         working-directory: cross-compile/onvif-rust/scripts
@@ -476,8 +481,11 @@ jobs:
       #
       # Temporary waivers: npm audit has no `ignore:` list like cargo-audit.
       # To waive, pin a patched transitive with an `overrides` entry in
-      # cross-compile/www/package.json and record the reason and removal date
-      # in a comment there. Empty is the steady state.
+      # cross-compile/www/package.json, then record the advisory ID, the reason
+      # and the removal date *here* — package.json is strict JSON and cannot
+      # carry a comment, so this block is the waiver log. Empty is the steady
+      # state.
+      #   (no active waivers)
       - name: Audit WebUI npm dependencies
         id: audit-webui
         if: always()

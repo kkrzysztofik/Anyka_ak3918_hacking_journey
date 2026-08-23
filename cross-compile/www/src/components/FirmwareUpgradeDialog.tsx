@@ -21,6 +21,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { cn } from '@/lib/utils';
 import { ApiError } from '@/services/api';
 import { getDiagnostics, uploadFirmware } from '@/services/diagnosticsService';
 
@@ -226,7 +227,14 @@ export function FirmwareUpgradeDialog({
         }}
       >
         <DialogContent
-          className={`bg-card border-border text-foreground sm:max-w-[480px]${dismissLocked ? '[&_[data-testid=dialog-close]]:hidden' : ''}`}
+          className={cn(
+            // `cn`, not template concatenation: prettier-plugin-tailwindcss
+            // normalizes class strings inside template literals and strips the
+            // separating space, welding the two utilities into one dead token
+            // so the close button stayed visible while dismissal was locked.
+            'bg-card border-border text-foreground sm:max-w-[480px]',
+            dismissLocked && '[&_[data-testid=dialog-close]]:hidden',
+          )}
           data-testid="firmware-upgrade-dialog"
           onInteractOutside={(event) => {
             if (dismissLocked) event.preventDefault();

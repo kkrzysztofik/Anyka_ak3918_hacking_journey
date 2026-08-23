@@ -3,6 +3,7 @@
 ## Code Formatting & Linting
 
 ### Mandatory Before Commit
+
 ```bash
 cd cross-compile/www
 npm run verify                     # THE gate: type-check + lint + format:check
@@ -15,6 +16,7 @@ never into one caller — that drift is what let three TS 7 errors merge green
 and stop a fleet rollout at the deploy gate.
 
 Individual parts, for iterating:
+
 ```bash
 npm run type-check                 # TS 7 (`tsc`) then TS 6 (`tsc6`) side-by-side
 npm run type-check:ts7             # TypeScript 7 native checker only
@@ -25,6 +27,7 @@ npm run prettier                   # Prettier, rewrite in place
 ```
 
 ### Pre-Commit One-Liner
+
 ```bash
 npm run verify && npm run test
 ```

@@ -38,12 +38,17 @@ One `bundle.tar` for all four: same board (`Cloud39EV2_AK3918E80PIN_MNBD`), same
 `gc1084` sensor, byte-identical vendor libs.
 
 ```bash
-./scripts/build_upgrade_bundle.sh   # OUT set explicitly, not repo-root bundle.tar
+./scripts/build_upgrade_bundle.sh /tmp/bundle-fleet.tar
 ```
 
-The working tree is clean, so this stamps `a013f167` with no `-dirty` suffix —
-the first non-dirty version in the fleet, which makes `firmware_version ==
-a013f167` an unambiguous pass/fail.
+The path is explicit so the rollout never picks up a stale repo-root
+`bundle.tar`, and it is the same path the execution plan uploads.
+
+With a clean working tree the stamp carries no `-dirty` suffix — the first
+non-dirty version in the fleet, which makes `firmware_version` an unambiguous
+pass/fail. **Do not hard-code the expected value here.** Committing this plan
+and the `fix/www-typecheck-ts7` work both moved it; read the stamp the build
+actually prints and compare every camera against that.
 
 Build-time preconditions, both of which have bitten this repo before:
 

@@ -103,7 +103,7 @@ Semver-compatible; `npm audit fix` without `--force`.
 `webui-quality-and-coverage`: `Lint` becomes `Verify`; a `Build` step follows
 it. Final order:
 
-```
+```text
 npm ci -> npm run verify -> npm run build -> npm run test:coverage -> upload
 ```
 
@@ -117,7 +117,7 @@ the list. The log shows which half failed.
 
 `security-scans`: add `setup-node` plus
 
-```
+```bash
 npm audit --package-lock-only --audit-level=high
 ```
 
@@ -126,8 +126,11 @@ aggregation. `--package-lock-only` means no `npm ci`.
 
 **Waiver convention.** npm audit has no native ignore list, unlike
 `cargo-audit`'s `ignore:`. The escape hatch is an `overrides` entry in
-`package.json` pinning a patched transitive, with reason and removal date in a
-comment — mirroring the convention already written above the cargo-audit steps.
+`package.json` pinning a patched transitive. The rationale cannot live beside
+it: `package.json` is strict JSON and rejects comments, so npm would refuse the
+manifest. The advisory ID, reason and removal date go in the YAML comment above
+the audit step instead — the same place `cargo-audit`'s `ignore:` records its
+own waivers.
 Gating all deps at `high` buys real supply-chain coverage and a recurring tax:
 dev transitives will block unrelated PRs. That is survivable only because the
 waiver path is written down up front.
