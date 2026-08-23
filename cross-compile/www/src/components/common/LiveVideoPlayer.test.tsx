@@ -143,9 +143,7 @@ describe('LiveVideoPlayer', () => {
     const mediaHandler = mockPlayer.on.mock.calls.find((c) => c[0] === 'media_info')?.[1];
     mediaHandler({ width: 1280, height: 720, fps: 25, videoCodec: 'avc1.4d001f' });
 
-    expect(onStats).toHaveBeenCalledWith(
-      expect.objectContaining({ width: 1280, height: 720 }),
-    );
+    expect(onStats).toHaveBeenCalledWith(expect.objectContaining({ width: 1280, height: 720 }));
   });
 
   it('formats the raw AVC codec tag into a human label', async () => {
@@ -169,9 +167,7 @@ describe('LiveVideoPlayer', () => {
     const mediaHandler = mockPlayer.on.mock.calls.find((c) => c[0] === 'media_info')?.[1];
     mediaHandler({ width: 1280, height: 720, fps: 23.976, videoCodec: 'avc1.4de028' });
 
-    expect(onStats).toHaveBeenCalledWith(
-      expect.not.objectContaining({ fps: expect.anything() }),
-    );
+    expect(onStats).toHaveBeenCalledWith(expect.not.objectContaining({ fps: expect.anything() }));
   });
 
   it('measures real fps from decoded frame deltas', async () => {

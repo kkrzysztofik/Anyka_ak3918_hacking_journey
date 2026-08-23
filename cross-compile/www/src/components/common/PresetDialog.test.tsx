@@ -7,9 +7,9 @@ import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { renderWithProviders } from '@/test/componentTestHelpers';
 import { getPtzStatus, setPreset } from '@/services/ptzService';
 import type { PTZStatus } from '@/services/ptzService';
+import { renderWithProviders } from '@/test/componentTestHelpers';
 
 import { PresetDialog } from './PresetDialog';
 

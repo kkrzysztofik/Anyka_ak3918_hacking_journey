@@ -26,21 +26,24 @@ const healthyDiagnostics: Diagnostics = {
 
 describe('strictHealthStatus', () => {
   it('returns unknown while loading', () => {
-    expect(
-      strictHealthStatus(undefined, { isError: false, isLoading: true }),
-    ).toEqual({ label: '—', tone: 'unknown' });
+    expect(strictHealthStatus(undefined, { isError: false, isLoading: true })).toEqual({
+      label: '—',
+      tone: 'unknown',
+    });
   });
 
   it('returns unreachable on fetch error', () => {
-    expect(
-      strictHealthStatus(undefined, { isError: true, isLoading: false }),
-    ).toEqual({ label: 'Unreachable', tone: 'unreachable' });
+    expect(strictHealthStatus(undefined, { isError: true, isLoading: false })).toEqual({
+      label: 'Unreachable',
+      tone: 'unreachable',
+    });
   });
 
   it('returns healthy when diagnostics report healthy with no degraded services', () => {
-    expect(
-      strictHealthStatus(healthyDiagnostics, { isError: false, isLoading: false }),
-    ).toEqual({ label: 'Healthy', tone: 'healthy' });
+    expect(strictHealthStatus(healthyDiagnostics, { isError: false, isLoading: false })).toEqual({
+      label: 'Healthy',
+      tone: 'healthy',
+    });
   });
 
   it('returns degraded when degraded_services is non-empty', () => {

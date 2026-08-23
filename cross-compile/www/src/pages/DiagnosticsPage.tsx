@@ -8,15 +8,15 @@ import {
   Download,
   Eye,
   FileText,
-  Move,
   HardDrive,
   Info,
+  Move,
   Upload,
   Wifi,
 } from 'lucide-react';
 
-import { Sparkline } from '@/components/common/Sparkline';
 import { FirmwareUpgradeDialog } from '@/components/FirmwareUpgradeDialog';
+import { Sparkline } from '@/components/common/Sparkline';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
@@ -248,7 +248,9 @@ function PtzCard({ ptz }: Readonly<{ ptz: NonNullable<Diagnostics['ptz']> }>) {
       // The age is measured even when the position beside it is not: it is when the last
       // turn finished, so it belongs here whether or not step readback works.
       label: 'Last motion',
-      value: ptz.last_step_pos ? `${formatDuration(ptz.last_step_pos.age_ms / 1000)} ago` : '\u2014',
+      value: ptz.last_step_pos
+        ? `${formatDuration(ptz.last_step_pos.age_ms / 1000)} ago`
+        : '\u2014',
       testId: 'diagnostics-ptz-last-motion',
     },
   ];
@@ -293,8 +295,8 @@ function PtzCard({ ptz }: Readonly<{ ptz: NonNullable<Diagnostics['ptz']> }>) {
           </dl>
           {ptz.enabled && noReadback ? (
             <p className="mt-2 text-xs text-yellow-500" data-testid="diagnostics-ptz-no-readback">
-              This motor driver accepts the status ioctl and writes nothing back, so step
-              positions are unavailable on this hardware.
+              This motor driver accepts the status ioctl and writes nothing back, so step positions
+              are unavailable on this hardware.
             </p>
           ) : null}
         </div>

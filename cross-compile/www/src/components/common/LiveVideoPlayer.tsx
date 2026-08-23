@@ -177,14 +177,14 @@ export function LiveVideoPlayer({
 }
 
 /** Turn an mpegts.js error triple into something a human can act on. */
-function describeError(
-  type: string,
-  detail: string,
-  info?: { code?: number },
-): string {
+function describeError(type: string, detail: string, info?: { code?: number }): string {
   // mpegts.js puts the HTTP status on errorInfo.code; `detail` is a stable
   // ErrorDetails enum like "HttpStatusCodeInvalid" (no status digits).
-  if (info?.code === 401 || detail?.includes('401') || detail?.toLowerCase().includes('unauthorized')) {
+  if (
+    info?.code === 401 ||
+    detail?.includes('401') ||
+    detail?.toLowerCase().includes('unauthorized')
+  ) {
     return 'The camera rejected these credentials for the video stream.';
   }
   if (type === 'NetworkError') {

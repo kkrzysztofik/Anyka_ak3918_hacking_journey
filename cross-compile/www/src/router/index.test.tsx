@@ -86,24 +86,21 @@ describe('Router', () => {
       { path: '#/live', description: 'accessing a protected route without auth' },
     ];
 
-    it.each(loginRedirectCases)(
-      'should render login page when $description',
-      async ({ path }) => {
-        globalThis.history.replaceState(null, '', path);
-        render(
-          <AuthProvider>
-            <AppRouter />
-          </AuthProvider>,
-        );
+    it.each(loginRedirectCases)('should render login page when $description', async ({ path }) => {
+      globalThis.history.replaceState(null, '', path);
+      render(
+        <AuthProvider>
+          <AppRouter />
+        </AuthProvider>,
+      );
 
-        await waitFor(
-          () => {
-            expect(screen.getByTestId('page-login')).toBeInTheDocument();
-          },
-          { timeout: 3000 },
-        );
-      },
-    );
+      await waitFor(
+        () => {
+          expect(screen.getByTestId('page-login')).toBeInTheDocument();
+        },
+        { timeout: 3000 },
+      );
+    });
 
     // Authenticated routes tests
     const routes = [
@@ -138,6 +135,5 @@ describe('Router', () => {
         { timeout: 5000 },
       );
     });
-
   });
 });

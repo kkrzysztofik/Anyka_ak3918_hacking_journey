@@ -21,8 +21,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { getDiagnostics, uploadFirmware } from '@/services/diagnosticsService';
 import { ApiError } from '@/services/api';
+import { getDiagnostics, uploadFirmware } from '@/services/diagnosticsService';
 
 const MAX_BYTES = 64 * 1024 * 1024;
 const POLL_INTERVAL_MS = 2000;
@@ -141,9 +141,7 @@ export function FirmwareUpgradeDialog({
             if (next !== previousVersion) {
               setResultMessage(`Upgrade committed. Firmware version is now ${next}.`);
             } else {
-              setResultMessage(
-                `Upgrade probably reverted. Firmware version is still ${next}.`,
-              );
+              setResultMessage(`Upgrade probably reverted. Firmware version is still ${next}.`);
             }
             setStep('result');
             return;
@@ -228,7 +226,7 @@ export function FirmwareUpgradeDialog({
         }}
       >
         <DialogContent
-          className={`bg-card border-border text-foreground sm:max-w-[480px]${dismissLocked ? ' [&_[data-testid=dialog-close]]:hidden' : ''}`}
+          className={`bg-card border-border text-foreground sm:max-w-[480px]${dismissLocked ? '[&_[data-testid=dialog-close]]:hidden' : ''}`}
           data-testid="firmware-upgrade-dialog"
           onInteractOutside={(event) => {
             if (dismissLocked) event.preventDefault();
@@ -275,12 +273,7 @@ export function FirmwareUpgradeDialog({
                   data-testid="firmware-upgrade-input"
                   onChange={(e) => assignFile(e.target.files?.[0] ?? null)}
                 />
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={handleBrowse}
-                >
+                <Button type="button" variant="outline" size="sm" onClick={handleBrowse}>
                   {file?.name ?? 'Choose bundle…'}
                 </Button>
               </div>
