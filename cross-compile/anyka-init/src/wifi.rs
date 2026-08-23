@@ -509,11 +509,26 @@ fn fall_back(sys: &dyn Sys, layout: &FsLayout) -> Outcome {
         script = %layout.wifi_manage_script,
         "falling back to the vendor wifi chain"
     );
+    // `FellBack` is not "we tried the vendor chain", it is "the vendor chain
+    // now owns the ctrl socket" — P3 stands its own supplicant down on the
+    // strength of it. A missing or failing script owns nothing, so claiming
+    // `FellBack` for it would leave the camera with no supplicant at all and
+    // no supervised retry until the next boot. Report `Failed` instead and let
+    // the supervised service keep trying.
     match sys.run_to_completion(&layout.wifi_manage_script, &["start".to_string()]) {
-        Ok(st) => tracing::warn!(?st, "vendor wifi_manage.sh start invoked"),
-        Err(e) => tracing::error!(error = %e, "vendor fallback also failed"),
+        Ok(st) if st.success() => {
+            tracing::warn!(?st, "vendor wifi_manage.sh start invoked");
+            Outcome::FellBack
+        }
+        Ok(st) => {
+            tracing::error!(?st, "vendor wifi_manage.sh start exited non-zero");
+            Outcome::Failed
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "vendor fallback also failed");
+            Outcome::Failed
+        }
     }
-    Outcome::FellBack
 }
 
 fn try_bring_up_with(sys: &dyn Sys, cfg: &WifiCfg, layout: &FsLayout) -> Result<Outcome, String> {
@@ -1216,6 +1231,27 @@ mod tests {
         assert_eq!(
             bring_up(&sys, &cfg, "/nonexistent/storm.json"),
             Outcome::FellBack
+        );
+    }
+
+    /// `FellBack` makes P3 stand its own supplicant down, so a vendor script
+    /// that failed must not report it — that would leave the camera with no
+    /// supplicant at all and nothing supervised to retry with.
+    #[test]
+    fn test_bring_up_returns_failed_when_the_vendor_script_fails() {
+        let mut cfg = happy_cfg();
+        cfg.chip = "nonexistent".into();
+        cfg.fallback_to_vendor = true;
+
+        let mut sys = MockSys::new();
+        sys.expect_run_to_completion()
+            .withf(|prog, args| prog == "/usr/sbin/wifi_manage.sh" && args == ["start".to_string()])
+            .times(1)
+            .returning(|_, _| Ok(ExitStatus::Code(1)));
+
+        assert_eq!(
+            bring_up(&sys, &cfg, "/nonexistent/storm.json"),
+            Outcome::Failed
         );
     }
 

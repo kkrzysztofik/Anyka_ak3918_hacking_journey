@@ -134,9 +134,71 @@ pub enum SupplicantOwnership {
     /// The vendor chain owns the interface and its supplicant holds the socket.
     /// Supervising a second one can only crash-loop, so stand down for this boot.
     Vendor,
-    /// Nothing holds the socket. Let the supervised service keep retrying — it
-    /// is the only remaining route back to a link.
+    /// Bring-up produced no link and no vendor handoff. The supervised service
+    /// is the only remaining route back, so it gets the socket — note that
+    /// bring-up may still have left a detached supplicant of its own holding
+    /// it (it spawns one per driver probe and only kills the previous), so the
+    /// handover clears the socket before the service starts.
     Unowned,
+}
+
+/// P3 handover: settle who runs `wpa_supplicant` for the rest of this boot.
+///
+/// Exactly one process may hold `/var/run/wpa_supplicant/<iface>`, so every arm
+/// has to leave one supplicant alive with `cfg` agreeing about which one it is.
+/// Both directions of getting that wrong are outages: supervising a second one
+/// exits 255 on every restart until the crash-loop cap reboots into SAFE MODE,
+/// and killing the only working one without a valid replacement drops the link
+/// with no way back onto the camera.
+pub fn hand_over_supplicant(sys: &dyn Sys, cfg: &mut Config, probed: SupplicantOwnership) {
+    match probed {
+        SupplicantOwnership::Ours(driver) => {
+            // Bring-up's supplicant is unsupervised but working. Hand over only
+            // to a replacement that will start on the same `-D` flag that
+            // actually associated; with anything less, keeping the link that
+            // works beats a supervised service that may never associate.
+            match cfg.services.get_mut("wpa_supplicant") {
+                Some(svc) => {
+                    if crate::wifi::patch_driver_arg(&mut svc.args, driver) {
+                        let _ = sys.run_to_completion("killall", &["wpa_supplicant".to_string()]);
+                    } else {
+                        // Leaving it enabled would start a second supplicant
+                        // against the socket bring-up's is still holding — the
+                        // exit-255 crash loop again. Stand down as for Vendor.
+                        svc.enabled = false;
+                        tracing::error!(
+                            driver,
+                            "wpa_supplicant service has no -D flag to patch; keeping the \
+                             bring-up supplicant and not supervising one this boot"
+                        );
+                    }
+                }
+                None => tracing::error!(
+                    "no wpa_supplicant service is configured; keeping the bring-up supplicant"
+                ),
+            }
+        }
+        SupplicantOwnership::Vendor => {
+            // The vendor chain's supplicant holds the ctrl socket and is the
+            // only thing keeping the link up. Killing it to take over would
+            // drop the network on a camera we may not be able to reach again;
+            // supervising a second one guarantees exit 255 on every restart.
+            // Stand down for this boot only — config is untouched, so the next
+            // boot that associates cleanly owns the supplicant again.
+            if let Some(svc) = cfg.services.get_mut("wpa_supplicant") {
+                svc.enabled = false;
+            }
+            tracing::warn!("vendor chain owns wlan0; not supervising wpa_supplicant this boot");
+        }
+        SupplicantOwnership::Unowned => {
+            // No link and no vendor handoff, so the supervised service is the
+            // only route back and it must be able to open the ctrl socket. A
+            // bring-up that associated and then failed at DHCP — or exhausted
+            // the driver probe — leaves its own detached supplicant squatting
+            // on it, so clear the socket before the service starts.
+            let _ = sys.run_to_completion("killall", &["wpa_supplicant".to_string()]);
+        }
+    }
 }
 
 /// P2: system setup. Every step is best-effort — a camera with no sensor
@@ -226,7 +288,9 @@ pub fn system_setup(
 #[cfg(test)]
 mod wifi_tests {
     use super::*;
-    use crate::config::{LogCfg, MonitorCfg, RebootCfg, SupervisorCfg, SystemCfg, TimeCfg};
+    use crate::config::{
+        LogCfg, MonitorCfg, RebootCfg, ServiceCfg, SupervisorCfg, SystemCfg, TimeCfg,
+    };
     use crate::sys::{ExitStatus, MockSys, SysError};
     use std::collections::BTreeMap;
 
@@ -451,6 +515,109 @@ channel = 6
             SupplicantOwnership::Vendor,
             "vendor fallback must be distinguishable from an outright failure"
         );
+    }
+
+    /// A config carrying one `wpa_supplicant` service with the given argv.
+    fn config_with_supplicant(args: &[&str]) -> Config {
+        let mut cfg = test_config(
+            wifi_cfg("/nonexistent/anyka_cfg.ini", "net", "pass"),
+            SystemCfg::default(),
+        );
+        cfg.services.insert(
+            "wpa_supplicant".into(),
+            ServiceCfg {
+                enabled: true,
+                exec: "/usr/sbin/wpa_supplicant".into(),
+                args: args.iter().map(|a| (*a).to_string()).collect(),
+                env: BTreeMap::new(),
+                log: "/mnt/logs/wpa.log".into(),
+                core_dump: false,
+            },
+        );
+        cfg
+    }
+
+    fn expect_one_supplicant_killall(sys: &mut MockSys) {
+        sys.expect_run_to_completion()
+            .withf(|prog, args| prog == "killall" && args == ["wpa_supplicant".to_string()])
+            .times(1)
+            .returning(|_, _| Ok(ExitStatus::Code(0)));
+    }
+
+    #[test]
+    fn test_handover_kills_bring_up_only_once_the_service_takes_the_probed_driver() {
+        let mut sys = MockSys::new();
+        expect_one_supplicant_killall(&mut sys);
+        let mut cfg = config_with_supplicant(&["-i", "wlan0", "-D", "wext", "-c", "/tmp/wpa.conf"]);
+
+        hand_over_supplicant(&sys, &mut cfg, SupplicantOwnership::Ours("nl80211"));
+
+        let svc = &cfg.services["wpa_supplicant"];
+        assert!(svc.enabled, "the replacement must stay enabled");
+        assert!(
+            svc.args.contains(&"nl80211".to_string()),
+            "the service must start on the driver that actually associated, got {:?}",
+            svc.args
+        );
+    }
+
+    /// Without a service to take over, `killall` drops the one working link on
+    /// a camera that may not be reachable again. Keep the bring-up supplicant.
+    #[test]
+    fn test_handover_keeps_the_link_when_no_supplicant_service_is_configured() {
+        // No `run_to_completion` expectation: any killall here fails the test.
+        let sys = MockSys::new();
+        let mut cfg = test_config(
+            wifi_cfg("/nonexistent/anyka_cfg.ini", "net", "pass"),
+            SystemCfg::default(),
+        );
+
+        hand_over_supplicant(&sys, &mut cfg, SupplicantOwnership::Ours("nl80211"));
+    }
+
+    /// An argv with no `-D` pair cannot be pointed at the probed driver, so the
+    /// replacement may never associate. Stand down rather than trade a working
+    /// link for a supervised service that crash-loops against the held socket.
+    #[test]
+    fn test_handover_stands_down_when_the_service_has_no_driver_flag() {
+        let sys = MockSys::new();
+        let mut cfg = config_with_supplicant(&["-i", "wlan0", "-c", "/tmp/wpa.conf"]);
+
+        hand_over_supplicant(&sys, &mut cfg, SupplicantOwnership::Ours("nl80211"));
+
+        assert!(
+            !cfg.services["wpa_supplicant"].enabled,
+            "an unpatchable service must not be supervised against a held socket"
+        );
+    }
+
+    /// `Unowned` means no link, not an empty ctrl socket: bring-up spawns a
+    /// supplicant per driver probe and the last one outlives a later DHCP
+    /// failure. Leaving it holding the socket is exactly the exit-255 loop.
+    #[test]
+    fn test_handover_clears_a_leftover_supplicant_when_nothing_owns_the_link() {
+        let mut sys = MockSys::new();
+        expect_one_supplicant_killall(&mut sys);
+        let mut cfg = config_with_supplicant(&["-i", "wlan0", "-D", "wext"]);
+
+        hand_over_supplicant(&sys, &mut cfg, SupplicantOwnership::Unowned);
+
+        assert!(
+            cfg.services["wpa_supplicant"].enabled,
+            "the supervised service is the only route back to a link"
+        );
+    }
+
+    #[test]
+    fn test_handover_stands_the_service_down_when_the_vendor_chain_owns_wlan0() {
+        // No `run_to_completion` expectation: killing the vendor supplicant
+        // would drop the only working link.
+        let sys = MockSys::new();
+        let mut cfg = config_with_supplicant(&["-i", "wlan0", "-D", "wext"]);
+
+        hand_over_supplicant(&sys, &mut cfg, SupplicantOwnership::Vendor);
+
+        assert!(!cfg.services["wpa_supplicant"].enabled);
     }
 
     #[test]
