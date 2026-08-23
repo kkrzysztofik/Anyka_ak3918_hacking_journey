@@ -323,8 +323,26 @@ mod tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt;
 
+    /// Serializes every test in this binary that forks.
+    ///
+    /// `fork` clones the whole fd table, so a child inherits any fd another
+    /// test thread happens to have open at that instant — including the write
+    /// handle `fs::write` holds while creating the probe script below. Linux
+    /// then refuses to `execve` that script while any process holds it open
+    /// for writing, and the spawn fails with ETXTBSY ("Text file busy").
+    ///
+    /// These two tests are the only fork sites in the lib test binary
+    /// (`supervision.rs` is a separate process), so serializing them closes
+    /// the window entirely rather than retrying around it. Measured at 5
+    /// failures per 120 runs of the full binary before this lock, 0 after.
+    /// A new test that spawns must take this lock too.
+    static FORK_LOCK: Mutex<()> = Mutex::new(());
+
     #[test]
     fn a_spawned_child_runs_in_its_executable_directory() {
+        let _fork_guard = FORK_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let d = tempfile::tempdir().unwrap();
         let script = d.path().join("probe.sh");
         std::fs::write(&script, "#!/bin/sh\npwd\n").unwrap();
@@ -370,6 +388,9 @@ mod tests {
 
     #[test]
     fn a_bare_executable_name_spawns_through_path() {
+        let _fork_guard = FORK_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         // `exec = "busybox"` style: no directory component, so no current_dir
         // may be set (an empty one makes spawn fail with ENOENT). `true` is
         // resolved through PATH and must start cleanly.

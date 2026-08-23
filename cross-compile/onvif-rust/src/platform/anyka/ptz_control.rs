@@ -1080,16 +1080,30 @@ mod tests {
         mock.expect_ptz_stop().returning(|_| Ok(()));
 
         let ptz = create_opened(mock);
+        // `restore_position_from_disk` delegates to `move_to_position`, which
+        // returns as soon as the turns are *issued*: `do_move` replies on
+        // acceptance and only commits the target afterwards, in the drain tail.
+        // `get_position` reads the shared position directly instead of going
+        // through the actor mailbox, so without this wait it races that commit
+        // and still observes HOME.
+        let before = ptz.shared.commands_completed.load(Ordering::SeqCst);
         ptz.restore_position_from_disk(&path).await.unwrap();
+        await_actor_completed(&ptz, before).await;
 
+        // Not dead reckoning: `integrate_axis` runs only on interrupt, and the
+        // mocked `ptz_wait_turn` reports `interrupted == false`, so
+        // `drain_started_turns` commits the clamped target verbatim. Both are
+        // inside +/-350 pan and +/-130 tilt, so nothing clamps.
         let pos = ptz.get_position().await.unwrap();
-        // The move lands via the dead-reckoning integrator, so the initial pan
-        // delta comes from `(90 - 0) deg` traveling at the default rate. Verify
-        // the direction is correct (positive) rather than the exact value.
         assert!(
-            pos.pan > 0.0,
-            "expected pan to grow positive, got {}",
+            (pos.pan - 90.0).abs() < f32::EPSILON,
+            "expected pan to land on the restored 90, got {}",
             pos.pan
+        );
+        assert!(
+            (pos.tilt + 45.0).abs() < f32::EPSILON,
+            "expected tilt to land on the restored -45, got {}",
+            pos.tilt
         );
     }
 
