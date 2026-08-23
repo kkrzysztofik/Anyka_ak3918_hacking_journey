@@ -232,7 +232,9 @@ export default function NetworkPage() {
       const iface = config?.interfaces[0];
       if (!iface) throw new Error('No interface found');
 
-      const liveSsid = overlay?.pending?.ssid ?? diagnostics?.wifi?.ssid;
+      // diagnostics reports ssid: null when wlan0 is not associated; the patch
+      // builder takes string | undefined, so collapse null into undefined.
+      const liveSsid = overlay?.pending?.ssid ?? diagnostics?.wifi?.ssid ?? undefined;
       const liveSecurity =
         (overlay?.pending?.security as NetworkFormData['security'] | undefined) ?? 'wpa';
       const wifiPatch = buildWifiOverlayPatch(values, liveSsid, liveSecurity);
@@ -244,8 +246,9 @@ export default function NetworkPage() {
         setNetworkInterface(iface.token, values.dhcp, values.address, values.prefixLength),
       );
 
-      if (!values.dhcp && values.gateway) {
-        await runNetworkStep('Gateway failed', () => setNetworkDefaultGateway(values.gateway));
+      const gateway = values.gateway;
+      if (!values.dhcp && gateway) {
+        await runNetworkStep('Gateway failed', () => setNetworkDefaultGateway(gateway));
       }
 
       const dnsServers = [values.primaryDNS, values.secondaryDNS].filter(Boolean) as string[];

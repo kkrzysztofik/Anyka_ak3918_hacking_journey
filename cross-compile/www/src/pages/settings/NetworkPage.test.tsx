@@ -123,7 +123,7 @@ describe('NetworkPage', () => {
     ['network-hostname-input', 'hostname; Identification owns it'],
     ['network-onvif-discovery-switch', 'ONVIF discovery; Identification owns it'],
     ['network-https-port-input', 'HTTPS port; no TLS listener exists'],
-  ] as const)('should not render %s (%s)', async (testId) => {
+  ] as const)('should not render %s (%s)', async (testId, _reason) => {
     await renderNetworkPage();
     expect(screen.queryByTestId(testId)).toBeNull();
   });
