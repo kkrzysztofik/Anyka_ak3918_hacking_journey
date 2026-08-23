@@ -12,6 +12,7 @@ import { Resolver, useForm, useWatch } from 'react-hook-form';
 import { toast } from 'sonner';
 import { z } from 'zod';
 
+import { HealthStatusValue } from '@/components/settings/HealthStatusValue';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -55,7 +56,6 @@ import {
   StatusCardItem,
 } from '@/components/ui/status-card';
 import { Switch } from '@/components/ui/switch';
-import { HealthStatusValue } from '@/components/settings/HealthStatusValue';
 import { useDeviceStatus } from '@/hooks/useDeviceStatus';
 import {
   type NetworkConfig,
@@ -232,7 +232,9 @@ export default function NetworkPage() {
       const iface = config?.interfaces[0];
       if (!iface) throw new Error('No interface found');
 
-      const liveSsid = overlay?.pending?.ssid ?? diagnostics?.wifi?.ssid;
+      // diagnostics reports ssid: null when wlan0 is not associated; the patch
+      // builder takes string | undefined, so collapse null into undefined.
+      const liveSsid = overlay?.pending?.ssid ?? diagnostics?.wifi?.ssid ?? undefined;
       const liveSecurity =
         (overlay?.pending?.security as NetworkFormData['security'] | undefined) ?? 'wpa';
       const wifiPatch = buildWifiOverlayPatch(values, liveSsid, liveSecurity);
@@ -244,8 +246,9 @@ export default function NetworkPage() {
         setNetworkInterface(iface.token, values.dhcp, values.address, values.prefixLength),
       );
 
-      if (!values.dhcp && values.gateway) {
-        await runNetworkStep('Gateway failed', () => setNetworkDefaultGateway(values.gateway));
+      const gateway = values.gateway;
+      if (!values.dhcp && gateway) {
+        await runNetworkStep('Gateway failed', () => setNetworkDefaultGateway(gateway));
       }
 
       const dnsServers = [values.primaryDNS, values.secondaryDNS].filter(Boolean) as string[];
@@ -358,8 +361,8 @@ export default function NetworkPage() {
           >
             <p className="text-[13px] text-[#ff453a]">
               Previous network settings failed and were reverted
-              {overlay.last_failure.ssid ? ` (SSID: ${overlay.last_failure.ssid})` : ''}. Review
-              the values below before saving again.
+              {overlay.last_failure.ssid ? ` (SSID: ${overlay.last_failure.ssid})` : ''}. Review the
+              values below before saving again.
             </p>
             <Button
               type="button"
@@ -385,7 +388,11 @@ export default function NetworkPage() {
               value={primaryInterface?.hwAddress || '—'}
               data-testid="network-mac-address"
             />
-            <StatusCardItem label="Link Quality" value={wifiQuality} data-testid="network-quality" />
+            <StatusCardItem
+              label="Link Quality"
+              value={wifiQuality}
+              data-testid="network-quality"
+            />
             <StatusCardItem
               label="Status"
               value={
@@ -445,7 +452,9 @@ export default function NetworkPage() {
                         <Input
                           {...field}
                           type="password"
-                          placeholder={overlay?.pending.has_password ? 'Saved (leave blank to keep)' : ''}
+                          placeholder={
+                            overlay?.pending.has_password ? 'Saved (leave blank to keep)' : ''
+                          }
                           className="border-[#3a3a3c] bg-transparent text-white focus:border-[#0a84ff]"
                           data-testid="network-password-input"
                         />
@@ -491,7 +500,9 @@ export default function NetworkPage() {
                   <div className="flex flex-1 items-center justify-between gap-[12px]">
                     <div>
                       <SettingsCardTitle>IP Configuration</SettingsCardTitle>
-                      <SettingsCardDescription>Addressing applied at next reboot</SettingsCardDescription>
+                      <SettingsCardDescription>
+                        Addressing applied at next reboot
+                      </SettingsCardDescription>
                     </div>
                     {ipPending && (
                       <Badge
@@ -668,7 +679,9 @@ export default function NetworkPage() {
                   </div>
                   <div>
                     <SettingsCardTitle>Port Configuration</SettingsCardTitle>
-                    <SettingsCardDescription>HTTP and RTSP ports (reboot required)</SettingsCardDescription>
+                    <SettingsCardDescription>
+                      HTTP and RTSP ports (reboot required)
+                    </SettingsCardDescription>
                   </div>
                 </div>
               </SettingsCardHeader>
@@ -741,7 +754,9 @@ export default function NetworkPage() {
             <div className="mt-[24px] flex gap-[12px] rounded-[8px] border border-[rgba(0,122,255,0.2)] bg-[rgba(0,122,255,0.05)] p-[16px]">
               <Info className="mt-[2px] size-5 flex-shrink-0 text-[#007AFF]" />
               <div>
-                <p className="mb-[4px] text-[14px] font-medium text-[#007AFF]">Network Information</p>
+                <p className="mb-[4px] text-[14px] font-medium text-[#007AFF]">
+                  Network Information
+                </p>
                 <p className="text-[13px] text-[#a1a1a6]">
                   IP, DNS, gateway, and Wi-Fi changes are written to a pending overlay and apply
                   after reboot. Port changes also require a restart of the ONVIF service.

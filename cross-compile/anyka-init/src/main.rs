@@ -102,17 +102,7 @@ fn main() {
     // socket. Hand the interface over to the supervised instance here, not
     // earlier: P2.5 time sync needs the link up, and the address stays
     // configured across the swap so the gap is one reassociation.
-    if let Some(driver) = probed {
-        if let Some(svc) = cfg.services.get_mut("wpa_supplicant")
-            && !anyka_init::wifi::patch_driver_arg(&mut svc.args, driver)
-        {
-            tracing::warn!(
-                driver,
-                "wpa_supplicant service has no -D flag to patch; using argv as-is"
-            );
-        }
-        let _ = sysimpl.run_to_completion("killall", &["wpa_supplicant".to_string()]);
-    }
+    boot::hand_over_supplicant(sysimpl.as_ref(), &mut cfg, probed);
 
     // P3 + P4
     // An unconfirmed update resolves on its own thread, because

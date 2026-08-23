@@ -334,6 +334,6 @@ mod tests {
             .await
             .expect("get must succeed");
         assert_eq!(response.pending.ssid.as_deref(), Some("TestNet"));
-        assert_eq!(response.has_pending, true);
+        assert!(response.has_pending);
     }
 }

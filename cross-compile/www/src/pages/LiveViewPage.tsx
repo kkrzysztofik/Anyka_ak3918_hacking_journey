@@ -47,7 +47,6 @@ import {
   SettingsCardTitle,
 } from '@/components/ui/settings-card';
 import { cn } from '@/lib/utils';
-import { copyTextToClipboard } from '@/utils/clipboard';
 import { getProfiles } from '@/services/profileService';
 import {
   continuousMove,
@@ -58,6 +57,7 @@ import {
   stopMove,
 } from '@/services/ptzService';
 import type { PTZDirection, PTZPreset } from '@/services/ptzService';
+import { copyTextToClipboard } from '@/utils/clipboard';
 import { type StreamType, buildFlvUrl } from '@/utils/streamUrl';
 
 /** User-facing label for each player state. */
@@ -130,9 +130,7 @@ export default function LiveViewPage() {
 
   const hasPtz = !!profiles?.some((p) => p.ptzConfiguration);
   const ptzDisabled = isSuccess && !hasPtz;
-  const profileToken = hasPtz
-    ? (profiles?.find((p) => p.ptzConfiguration)?.token ?? '')
-    : '';
+  const profileToken = hasPtz ? (profiles?.find((p) => p.ptzConfiguration)?.token ?? '') : '';
 
   // Fetch presets for the active profile
   const { data: presets } = useQuery({

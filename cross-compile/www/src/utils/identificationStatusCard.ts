@@ -1,6 +1,5 @@
 import type { Diagnostics } from '@/services/diagnosticsService';
 import type { NetworkInterface } from '@/services/networkService';
-
 import { formatDuration } from '@/utils/formatDuration';
 
 export type HealthBadgeTone = 'healthy' | 'degraded' | 'unreachable' | 'unknown';
@@ -68,9 +67,7 @@ export function pickPrimaryNetworkInterface(
     }
   }
 
-  return (
-    interfaces.find((iface) => iface.enabled && iface.hwAddress.length > 0) ?? interfaces[0]
-  );
+  return interfaces.find((iface) => iface.enabled && iface.hwAddress.length > 0) ?? interfaces[0];
 }
 
 export function formatLinkSpeedMbps(speedMbps: number | null | undefined): string {

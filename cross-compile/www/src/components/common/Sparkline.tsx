@@ -132,7 +132,10 @@ export function Sparkline({ data, series, domain, className }: Readonly<Sparklin
               />
               <span>{s.label}</span>
               {valueText !== null && (
-                <span className="text-foreground font-mono" data-testid={`sparkline-legend-${s.key}-value`}>
+                <span
+                  className="text-foreground font-mono"
+                  data-testid={`sparkline-legend-${s.key}-value`}
+                >
                   {valueText}
                 </span>
               )}

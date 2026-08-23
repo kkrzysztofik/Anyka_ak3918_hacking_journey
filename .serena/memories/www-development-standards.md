@@ -3,19 +3,33 @@
 ## Code Formatting & Linting
 
 ### Mandatory Before Commit
+
 ```bash
 cd cross-compile/www
-npm run lint                       # ESLint check (zero warnings)
+npm run verify                     # THE gate: type-check + lint + format:check
+npm run test                       # All tests must pass
+```
+
+`verify` is the single definition of the WebUI gate list. `main-ci.yml` and
+`scripts/build_sd_contents.sh` both call it, so a new gate goes in `verify`,
+never into one caller — that drift is what let three TS 7 errors merge green
+and stop a fleet rollout at the deploy gate.
+
+Individual parts, for iterating:
+
+```bash
 npm run type-check                 # TS 7 (`tsc`) then TS 6 (`tsc6`) side-by-side
 npm run type-check:ts7             # TypeScript 7 native checker only
 npm run type-check:ts6             # TypeScript 6 checker only (eslint API peer)
-npm run test                       # All tests must pass
-npm run prettier                   # Format code
+npm run lint                       # ESLint check (zero warnings)
+npm run format:check               # Prettier, check only
+npm run prettier                   # Prettier, rewrite in place
 ```
 
 ### Pre-Commit One-Liner
+
 ```bash
-npm run lint && npm run type-check && npm run test
+npm run verify && npm run test
 ```
 
 ## Naming Conventions
@@ -386,8 +400,7 @@ import type { DeviceInfo } from '@/types';
 
 ## Pre-Commit Checklist
 
-- [ ] ESLint passes (`npm run lint`)
-- [ ] TypeScript passes (`npm run type-check`)
+- [ ] Gate list passes (`npm run verify` — type-check + lint + format:check)
 - [ ] All tests pass (`npm run test`)
 - [ ] Code formatted (`npm run prettier`)
 - [ ] No `any` types

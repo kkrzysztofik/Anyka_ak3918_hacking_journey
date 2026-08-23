@@ -4,11 +4,11 @@
  * Verifies snapshot forwarding, history accumulation, ring-buffer cap,
  * and the dataUpdatedAt guard that prevents duplicate history entries.
  */
-import { act, renderHook, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { act, renderHook, waitFor } from '@testing-library/react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { getDiagnostics } from '@/services/diagnosticsService';
 import type { Diagnostics } from '@/services/diagnosticsService';
@@ -74,25 +74,21 @@ describe('useDiagnostics', () => {
     expect(typeof point.t).toBe('number');
   });
 
-  it(
-    'test_useDiagnostics_many_updates_caps_history_at_sixty_samples',
-    async () => {
-      const { queryClient, wrapper } = makeWrapper();
-      const { result } = renderHook(() => useDiagnostics(), { wrapper });
+  it('test_useDiagnostics_many_updates_caps_history_at_sixty_samples', async () => {
+    const { queryClient, wrapper } = makeWrapper();
+    const { result } = renderHook(() => useDiagnostics(), { wrapper });
 
-      await waitFor(() => expect(result.current.history).toHaveLength(1));
+    await waitFor(() => expect(result.current.history).toHaveLength(1));
 
-      for (let i = 0; i < 69; i++) {
-        await act(async () => {
-          await new Promise((resolve) => setTimeout(resolve, 2));
-          await queryClient.invalidateQueries({ queryKey: ['diagnostics'] });
-        });
-      }
+    for (let i = 0; i < 69; i++) {
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 2));
+        await queryClient.invalidateQueries({ queryKey: ['diagnostics'] });
+      });
+    }
 
-      await waitFor(() => expect(result.current.history).toHaveLength(60), { timeout: 10_000 });
-    },
-    20_000,
-  );
+    await waitFor(() => expect(result.current.history).toHaveLength(60), { timeout: 10_000 });
+  }, 20_000);
 
   it('test_useDiagnostics_rerender_without_data_update_does_not_duplicate_history', async () => {
     const { wrapper } = makeWrapper();
