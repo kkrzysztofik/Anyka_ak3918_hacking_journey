@@ -11,6 +11,7 @@
 #include "ak_vpss.h"
 #include "handlers_vi.h"
 #include "handlers_vpss.h"
+#include "handlers_osd.h"
 #include "handlers_venc.h"
 #include "handlers_audio.h"
 #include "handlers_isp.h"
@@ -40,6 +41,7 @@ static int is_lifecycle_cmd(int32_t cmd)
     case CMD_VI_CAPTURE_OFF:
     case CMD_VPSS_INIT:
     case CMD_VPSS_DESTROY:
+    case CMD_OSD_INIT:
     case CMD_VENC_SET_CFG_PATH:
     case CMD_VENC_OPEN:
     case CMD_VENC_CLOSE:
@@ -231,6 +233,23 @@ int process_request(int fd)
         break;
     case CMD_VPSS_DESTROY:
         ret = handle_vpss_destroy(fd, req_buf, req_len);
+        break;
+
+    /* --- OSD --- */
+    case CMD_OSD_INIT:
+        ret = handle_osd_init(fd, req_buf, req_len);
+        break;
+    case CMD_OSD_SET_RECT:
+        ret = handle_osd_set_rect(fd, req_buf, req_len);
+        break;
+    case CMD_OSD_DRAW_STR:
+        ret = handle_osd_draw_str(fd, req_buf, req_len);
+        break;
+    case CMD_OSD_SET_ENABLE:
+        ret = handle_osd_set_enable(fd, req_buf, req_len);
+        break;
+    case CMD_OSD_SET_STYLE:
+        ret = handle_osd_set_style(fd, req_buf, req_len);
         break;
 
     /* --- Video Encoder --- */
