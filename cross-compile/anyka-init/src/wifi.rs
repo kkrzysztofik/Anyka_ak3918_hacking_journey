@@ -655,12 +655,26 @@ pub fn ifconfig_static_args(iface: &str, cidr: &Cidr) -> Vec<String> {
 /// lost its symlinks (R17). Spawned as `/bin/busybox` with `udhcpc` as the
 /// first argument so busybox resolves the applet from argv[1].
 pub fn udhcpc_oneshot_args(iface: &str) -> Vec<String> {
+    // -t/-T are set explicitly rather than left to busybox's defaults (-t 3
+    // -T 3), which give up at ~9 s. That is not enough headroom: .127's AP
+    // answered at 6.56 s on the boot that succeeded and missed the window on
+    // the five that followed. Each miss drops bring-up into the vendor wifi
+    // chain, whose wpa_supplicant then owns /var/run/wpa_supplicant/wlan0, so
+    // our supervised one can never initialise its control interface and exits
+    // 255 forever -> crash-loop cap -> reboot -> storm guard -> SAFE MODE.
+    //
+    // -q still returns the instant a lease arrives, so the wider budget costs
+    // nothing on a healthy boot; it only extends the genuinely-failing case.
     vec![
         "udhcpc".into(),
         "-i".into(),
         iface.into(),
         "-n".into(),
         "-q".into(),
+        "-t".into(),
+        "8".into(),
+        "-T".into(),
+        "3".into(),
     ]
 }
 
@@ -1097,6 +1111,29 @@ mod tests {
         assert_eq!(
             args[0], "udhcpc",
             "busybox multicall: first arg selects the applet when exec is /bin/busybox"
+        );
+    }
+
+    #[test]
+    fn test_udhcpc_oneshot_args_budget_outlasts_a_slow_ap() {
+        // Regression: .127 went into a reboot cascade on 2026-08-23 because the
+        // budget was busybox's default -t 3 -T 3, giving up at ~9 s. That
+        // camera's AP answered at 6.56 s on the boot that worked and missed the
+        // window on the five that followed, each time dropping anyka-init into
+        // the vendor wifi chain. Require a budget with real headroom over the
+        // ~6.5 s observed reply.
+        let args = udhcpc_oneshot_args("wlan0");
+        let value_after = |flag: &str| -> u32 {
+            let i = args.iter().position(|a| a == flag).unwrap_or_else(|| {
+                panic!("{flag} must be set explicitly, not left to the default")
+            });
+            args[i + 1].parse().expect("numeric value")
+        };
+        let retries = value_after("-t");
+        let interval = value_after("-T");
+        assert!(
+            retries * interval >= 20,
+            "discover budget {retries}x{interval}s is too tight for a slow AP"
         );
     }
 
