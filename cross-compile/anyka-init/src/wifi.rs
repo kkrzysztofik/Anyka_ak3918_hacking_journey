@@ -509,11 +509,26 @@ fn fall_back(sys: &dyn Sys, layout: &FsLayout) -> Outcome {
         script = %layout.wifi_manage_script,
         "falling back to the vendor wifi chain"
     );
+    // `FellBack` is not "we tried the vendor chain", it is "the vendor chain
+    // now owns the ctrl socket" — P3 stands its own supplicant down on the
+    // strength of it. A missing or failing script owns nothing, so claiming
+    // `FellBack` for it would leave the camera with no supplicant at all and
+    // no supervised retry until the next boot. Report `Failed` instead and let
+    // the supervised service keep trying.
     match sys.run_to_completion(&layout.wifi_manage_script, &["start".to_string()]) {
-        Ok(st) => tracing::warn!(?st, "vendor wifi_manage.sh start invoked"),
-        Err(e) => tracing::error!(error = %e, "vendor fallback also failed"),
+        Ok(st) if st.success() => {
+            tracing::warn!(?st, "vendor wifi_manage.sh start invoked");
+            Outcome::FellBack
+        }
+        Ok(st) => {
+            tracing::error!(?st, "vendor wifi_manage.sh start exited non-zero");
+            Outcome::Failed
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "vendor fallback also failed");
+            Outcome::Failed
+        }
     }
-    Outcome::FellBack
 }
 
 fn try_bring_up_with(sys: &dyn Sys, cfg: &WifiCfg, layout: &FsLayout) -> Result<Outcome, String> {
@@ -655,12 +670,26 @@ pub fn ifconfig_static_args(iface: &str, cidr: &Cidr) -> Vec<String> {
 /// lost its symlinks (R17). Spawned as `/bin/busybox` with `udhcpc` as the
 /// first argument so busybox resolves the applet from argv[1].
 pub fn udhcpc_oneshot_args(iface: &str) -> Vec<String> {
+    // -t/-T are set explicitly rather than left to busybox's defaults (-t 3
+    // -T 3), which give up at ~9 s. That is not enough headroom: .127's AP
+    // answered at 6.56 s on the boot that succeeded and missed the window on
+    // the five that followed. Each miss drops bring-up into the vendor wifi
+    // chain, whose wpa_supplicant then owns /var/run/wpa_supplicant/wlan0, so
+    // our supervised one can never initialise its control interface and exits
+    // 255 forever -> crash-loop cap -> reboot -> storm guard -> SAFE MODE.
+    //
+    // -q still returns the instant a lease arrives, so the wider budget costs
+    // nothing on a healthy boot; it only extends the genuinely-failing case.
     vec![
         "udhcpc".into(),
         "-i".into(),
         iface.into(),
         "-n".into(),
         "-q".into(),
+        "-t".into(),
+        "8".into(),
+        "-T".into(),
+        "3".into(),
     ]
 }
 
@@ -1101,6 +1130,29 @@ mod tests {
     }
 
     #[test]
+    fn test_udhcpc_oneshot_args_budget_outlasts_a_slow_ap() {
+        // Regression: .127 went into a reboot cascade on 2026-08-23 because the
+        // budget was busybox's default -t 3 -T 3, giving up at ~9 s. That
+        // camera's AP answered at 6.56 s on the boot that worked and missed the
+        // window on the five that followed, each time dropping anyka-init into
+        // the vendor wifi chain. Require a budget with real headroom over the
+        // ~6.5 s observed reply.
+        let args = udhcpc_oneshot_args("wlan0");
+        let value_after = |flag: &str| -> u32 {
+            let i = args.iter().position(|a| a == flag).unwrap_or_else(|| {
+                panic!("{flag} must be set explicitly, not left to the default")
+            });
+            args[i + 1].parse().expect("numeric value")
+        };
+        let retries = value_after("-t");
+        let interval = value_after("-T");
+        assert!(
+            retries * interval >= 20,
+            "discover budget {retries}x{interval}s is too tight for a slow AP"
+        );
+    }
+
+    #[test]
     fn test_patch_driver_arg_replaces_the_flag_value() {
         let mut args = vec![
             "-i".to_string(),
@@ -1179,6 +1231,27 @@ mod tests {
         assert_eq!(
             bring_up(&sys, &cfg, "/nonexistent/storm.json"),
             Outcome::FellBack
+        );
+    }
+
+    /// `FellBack` makes P3 stand its own supplicant down, so a vendor script
+    /// that failed must not report it — that would leave the camera with no
+    /// supplicant at all and nothing supervised to retry with.
+    #[test]
+    fn test_bring_up_returns_failed_when_the_vendor_script_fails() {
+        let mut cfg = happy_cfg();
+        cfg.chip = "nonexistent".into();
+        cfg.fallback_to_vendor = true;
+
+        let mut sys = MockSys::new();
+        sys.expect_run_to_completion()
+            .withf(|prog, args| prog == "/usr/sbin/wifi_manage.sh" && args == ["start".to_string()])
+            .times(1)
+            .returning(|_, _| Ok(ExitStatus::Code(1)));
+
+        assert_eq!(
+            bring_up(&sys, &cfg, "/nonexistent/storm.json"),
+            Outcome::Failed
         );
     }
 
