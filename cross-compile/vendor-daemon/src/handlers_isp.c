@@ -22,22 +22,7 @@ static int isp_first_vi(void **out)
     return -1;
 }
 
-/**
- * handle_isp_effect - Generic IPC handler for ISP image-effect commands.
- *
- * All ISP effect commands share the same wire format and dispatch to
- * ak_vpss_effect_set() with the appropriate effect_type constant.
- * CMD_ISP_SET_IR_FILTER and CMD_ISP_SET_WDR are handled by dedicated functions.
- *
- * Wire format: [i32 value] = 4 bytes.
- *
- * @param fd          Client socket file descriptor, used to send the response.
- * @param req         Request payload bytes (little-endian, layout described above).
- * @param req_len     Length of @p req in bytes.
- * @param effect_type VPSS_EFFECT_* enum constant selecting the ISP parameter.
- * @param name        Human-readable effect name used in log messages.
- * @return            0 on success, -1 on I/O error.
- */
+/* ISP effect cmds — wire: [i32 value]; effect_type selects VPSS_EFFECT_*. */
 int handle_isp_effect(int fd, const uint8_t *req, uint32_t req_len,
                       int effect_type, const char *name)
 {
@@ -59,19 +44,7 @@ int handle_isp_effect(int fd, const uint8_t *req, uint32_t req_len,
     return send_response(fd, ret, NULL, 0);
 }
 
-/**
- * handle_isp_set_wdr - IPC handler for CMD_ISP_SET_WDR (no-op).
- *
- * ak_vpss_open_wdr() and ak_vpss_close_wdr() are not exported by the
- * libre_anyka_app SDK variant; this function always responds STATUS_OK
- * without calling any SDK function.
- * WDR control is not available in this SDK variant.
- *
- * @param fd      Client socket file descriptor.
- * @param req     Ignored.
- * @param req_len Ignored.
- * @return        0 on success, -1 on write error.
- */
+/* CMD_ISP_SET_WDR (no-op). */
 int handle_isp_set_wdr(int fd, const uint8_t *req, uint32_t req_len)
 {
     (void)req;
@@ -80,20 +53,7 @@ int handle_isp_set_wdr(int fd, const uint8_t *req, uint32_t req_len)
     return send_response(fd, STATUS_OK, NULL, 0);
 }
 
-/**
- * handle_isp_set_ir_filter - IPC handler for CMD_ISP_SET_IR_FILTER.
- *
- * Uses the VI day/night switch (ak_vi_switch_mode) rather than a VPSS effect
- * to control the IR cut filter.
- *
- * Wire format: [i32 mode] = 4 bytes.
- * mode: 0 = day (IR filter in), 1 = night (IR filter out).
- *
- * @param fd      Client socket file descriptor, used to send the response.
- * @param req     Request payload bytes (little-endian, layout described above).
- * @param req_len Length of @p req in bytes.
- * @return        0 on success, -1 on I/O error.
- */
+/* CMD_ISP_SET_IR_FILTER. Wire format: [i32 mode] = 4 bytes. */
 int handle_isp_set_ir_filter(int fd, const uint8_t *req, uint32_t req_len)
 {
     void *vi_handle;
@@ -114,12 +74,7 @@ int handle_isp_set_ir_filter(int fd, const uint8_t *req, uint32_t req_len)
     return send_response(fd, ret, NULL, 0);
 }
 
-/**
- * handle_isp_get_ae_luma - Return current_calc_avg_lumi for the sole VI.
- *
- * Empty request. Uses the first live VD_OBJ_KIND_VI slot (single-camera boards).
- * Response payload: 1 byte luma on STATUS_OK.
- */
+/* Return current_calc_avg_lumi for the sole VI. */
 int handle_isp_get_ae_luma(int fd, const uint8_t *req, uint32_t req_len)
 {
     void *vi;
@@ -155,25 +110,7 @@ int handle_isp_get_ae_luma(int fd, const uint8_t *req, uint32_t req_len)
  */
 extern int isp_get_cur_lum_factor(void);
 
-/**
- * handle_isp_get_lum_factor - Return the vendor's day/night luminance ratio.
- *
- * Reproduces calc_cur_lumi() from the stock firmware
- * (anyka_reference/platform/libplat/src/vpss/ak_vpss_isp.c:205):
- *
- *     lum_factor = isp_get_cur_lum_factor() * 40 / avg_lumi
- *
- * avg_lumi is the AE loop's *regulated* output, pinned near its setpoint until
- * the AE runs out of gain, which is why it is useless alone as a light meter.
- * Dividing the ISP's luminance factor by it yields exposure effort per unit of
- * achieved brightness, so HIGHER MEANS DARKER. The stock thresholds are already
- * on every camera in /etc/jffs2/anyka_cfg.ini [autoir]: day_to_night_lum = 6400,
- * night_to_day_lum = 2048, and the gap between them is the hysteresis band.
- *
- * See docs/reference/vendor-day-night-implementation.md.
- *
- * Empty request. Response payload: [i32 lum_factor] = 4 bytes.
- */
+/* Return the vendor's day/night luminance ratio. Empty request. Response payload: [i32 lum_facto... */
 int handle_isp_get_lum_factor(int fd, const uint8_t *req, uint32_t req_len)
 {
     void *vi;
@@ -289,17 +226,7 @@ extern int isp_get_statinfo(int module_id, void *buf, unsigned int *size);
 
 _Static_assert(sizeof(struct vpss_isp_awb_stat_info) == 196, "AWB stat wire size changed");
 
-/**
- * handle_isp_get_awb_stat - Return the ISP's live AWB colour-bin statistics.
- *
- * The vendor's own day/night switch never trusts luminance alone: it gates on
- * these AWB colour-temperature bin counts (total_cnt[10]) because chroma
- * collapses under IR illumination even when the AE loop reads "bright". This
- * handler copies that subset out uninterpreted; the caller decodes. See
- * docs/reference/vendor-day-night-implementation.md.
- *
- * Empty request. Response payload: [i32 total_cnt[10]] = 40 bytes.
- */
+/* Return the ISP's live AWB colour-bin statistics. Empty request. Response payload: [i32 total_c... */
 int handle_isp_get_awb_stat(int fd, const uint8_t *req, uint32_t req_len)
 {
     void *vi;
