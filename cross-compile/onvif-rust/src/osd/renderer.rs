@@ -43,6 +43,8 @@ pub struct DrawPlan {
     pub erase: Option<ErasePlan>,
     /// Glyph payload or position differs — needs `draw_str`.
     pub content_changed: bool,
+    /// Slot contents before this plan; restored if the matching IPC fails.
+    previous: Option<SlotMemory>,
 }
 
 /// Erase the previous string when it moves to a new corner.
@@ -51,6 +53,8 @@ pub struct ErasePlan {
     pub draw_x: i32,
     pub draw_y: i32,
     pub glyphs: Vec<u16>,
+    /// Slot taken by `clear()`; put back if the space-fill IPC fails.
+    restore: Option<(OsdRect, SlotMemory)>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -119,6 +123,7 @@ impl RenderState {
                     draw_x: p.draw_x,
                     draw_y: p.draw_y,
                     glyphs: vec![0x20; p.glyph_len],
+                    restore: None,
                 })
             }
             _ => None,
@@ -141,6 +146,7 @@ impl RenderState {
             glyphs,
             erase,
             content_changed,
+            previous: prev,
         })
     }
 
@@ -162,6 +168,7 @@ impl RenderState {
             draw_x: prev.draw_x,
             draw_y: prev.draw_y,
             glyphs: vec![0x20; prev.glyph_len],
+            restore: Some((rect, prev)),
         })
     }
 
@@ -180,7 +187,8 @@ impl RenderState {
                 .osd_set_enable(i32::from(channel), CANVAS_RECT, false)
                 .await
             {
-                warn!(error = %e, channel, "osd_set_enable(false) failed; overlay may persist");
+                warn!(error = %e, channel, "osd_set_enable(false) failed; will retry");
+                continue;
             }
             self.canvas_ready[idx] = false;
             self.last[idx] = Default::default();
@@ -367,7 +375,7 @@ fn plan_channel_slots(
     (plans, erases)
 }
 
-async fn apply_erases(ipc: &AnykaIpc, channel: u8, erases: &[ErasePlan]) {
+async fn apply_erases(ipc: &AnykaIpc, state: &mut RenderState, channel: u8, erases: &[ErasePlan]) {
     // Wipe switched-off overlays first, so a same-tick redraw of the other
     // overlay cannot be clobbered by the erase.
     for erase in erases {
@@ -382,16 +390,20 @@ async fn apply_erases(ipc: &AnykaIpc, channel: u8, erases: &[ErasePlan]) {
             .await
         {
             warn!(error = %e, channel, "osd_draw_str disable-erase failed");
+            if let Some((rect, slot)) = erase.restore.clone() {
+                state.last[channel as usize][rect as usize] = Some(slot);
+            }
         }
     }
 }
 
-async fn apply_plans(ipc: &AnykaIpc, plans: &mut [DrawPlan]) {
+async fn apply_plans(ipc: &AnykaIpc, state: &mut RenderState, plans: &mut [DrawPlan]) {
     // Paint into the shared canvas. Order does not matter for persistence —
     // each draw_str only updates its glyph region — but draw datetime last
     // so the final ISP flush of the tick includes the fresh timestamp.
     plans.sort_by_key(|p| p.rect as i32);
     for plan in plans.iter() {
+        let mut failed = false;
         if let Some(erase) = &plan.erase
             && let Err(e) = ipc
                 .osd_draw_str(
@@ -404,19 +416,19 @@ async fn apply_plans(ipc: &AnykaIpc, plans: &mut [DrawPlan]) {
                 .await
         {
             warn!(error = %e, channel = plan.channel, "osd_draw_str erase failed");
+            failed = true;
         }
-        if !plan.content_changed {
-            continue;
-        }
-        if let Err(e) = ipc
-            .osd_draw_str(
-                i32::from(plan.channel),
-                CANVAS_RECT,
-                plan.draw_x,
-                plan.draw_y,
-                &plan.glyphs,
-            )
-            .await
+        if !failed
+            && plan.content_changed
+            && let Err(e) = ipc
+                .osd_draw_str(
+                    i32::from(plan.channel),
+                    CANVAS_RECT,
+                    plan.draw_x,
+                    plan.draw_y,
+                    &plan.glyphs,
+                )
+                .await
         {
             warn!(
                 error = %e,
@@ -424,6 +436,10 @@ async fn apply_plans(ipc: &AnykaIpc, plans: &mut [DrawPlan]) {
                 rect = ?plan.rect,
                 "osd_draw_str failed"
             );
+            failed = true;
+        }
+        if failed {
+            state.last[plan.channel as usize][plan.rect as usize] = plan.previous.clone();
         }
     }
 }
@@ -450,8 +466,8 @@ async fn tick_channel(
         return;
     }
 
-    apply_erases(&args.ipc, channel, &erases).await;
-    apply_plans(&args.ipc, &mut plans).await;
+    apply_erases(&args.ipc, state, channel, &erases).await;
+    apply_plans(&args.ipc, state, &mut plans).await;
 }
 
 #[cfg(test)]
@@ -840,5 +856,121 @@ mod tests {
             "name must redraw after recovery"
         );
         assert!(state.canvas_ready[0]);
+    }
+
+    #[tokio::test]
+    async fn test_tick_retries_draw_str_after_ipc_failure() {
+        use crate::hal::anyka::ipc::test_helpers::*;
+        use crate::hal::common::AK_FAILED_I32;
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let fail_draw = std::sync::Arc::new(AtomicBool::new(true));
+        let fail_flag = fail_draw.clone();
+        let seen: Seen = Default::default();
+        let sink = seen.clone();
+        let daemon = FakeDaemon::start(move |cmd, req| {
+            sink.lock().unwrap().push((cmd, req.to_vec()));
+            if cmd == CMD_DRAW_STR && fail_flag.load(Ordering::SeqCst) {
+                return (AK_FAILED_I32, vec![]);
+            }
+            (0, vec![])
+        });
+        let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+        ipc.set_epochs_for_test(1, 1);
+
+        let mut cfg = OsdConfig::default();
+        cfg.datetime.enabled = false;
+        cfg.name.text = "CAM1".into();
+
+        let (_tx, rx) = broadcast::channel(1);
+        let args = OsdRendererArgs {
+            ipc: Arc::new(ipc),
+            vi: Arc::new(crate::hal::common::video::VideoInputHandle::test_handle()),
+            dims: [
+                MAIN,
+                ChannelDims {
+                    width: 0,
+                    height: 0,
+                },
+            ],
+            config: Arc::new(parking_lot::RwLock::new(cfg)),
+            device_name: "ipcam".into(),
+            shutdown: rx,
+        };
+        let mut state = RenderState::default();
+        let mut style = None;
+
+        tick_once(&mut state, &args, &mut style).await;
+        assert_eq!(count_of(&seen, CMD_DRAW_STR), 1, "one failed name draw");
+        fail_draw.store(false, Ordering::SeqCst);
+        seen.lock().unwrap().clear();
+
+        tick_once(&mut state, &args, &mut style).await;
+        assert_eq!(
+            count_of(&seen, CMD_DRAW_STR),
+            1,
+            "failed draw must not latch as already painted"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_tick_retries_disable_after_failed_set_enable() {
+        use crate::hal::anyka::ipc::test_helpers::*;
+        use crate::hal::common::AK_FAILED_I32;
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let fail_off = std::sync::Arc::new(AtomicBool::new(false));
+        let fail_flag = fail_off.clone();
+        let seen: Seen = Default::default();
+        let sink = seen.clone();
+        let daemon = FakeDaemon::start(move |cmd, req| {
+            sink.lock().unwrap().push((cmd, req.to_vec()));
+            if cmd == CMD_SET_ENABLE
+                && fail_flag.load(Ordering::SeqCst)
+                && req.get(8..12) == Some(&0i32.to_le_bytes())
+            {
+                return (AK_FAILED_I32, vec![]);
+            }
+            (0, vec![])
+        });
+        let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+        ipc.set_epochs_for_test(1, 1);
+
+        let (_tx, rx) = broadcast::channel(1);
+        let args = OsdRendererArgs {
+            ipc: Arc::new(ipc),
+            vi: Arc::new(crate::hal::common::video::VideoInputHandle::test_handle()),
+            dims: [
+                MAIN,
+                ChannelDims {
+                    width: 0,
+                    height: 0,
+                },
+            ],
+            config: Arc::new(parking_lot::RwLock::new(OsdConfig::default())),
+            device_name: "ipcam".into(),
+            shutdown: rx,
+        };
+        let mut state = RenderState::default();
+        let mut style = None;
+
+        tick_once(&mut state, &args, &mut style).await;
+        assert!(state.canvas_ready[0]);
+
+        fail_off.store(true, Ordering::SeqCst);
+        args.config.write().enabled = false;
+        tick_once(&mut state, &args, &mut style).await;
+        assert!(
+            state.canvas_ready[0],
+            "failed disable must keep the canvas marked ready"
+        );
+        seen.lock().unwrap().clear();
+
+        tick_once(&mut state, &args, &mut style).await;
+        assert_eq!(
+            count_of(&seen, CMD_SET_ENABLE),
+            1,
+            "disable must retry while the canvas is still composited"
+        );
     }
 }

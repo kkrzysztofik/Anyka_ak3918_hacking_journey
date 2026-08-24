@@ -597,12 +597,16 @@ impl MediaService {
 
     /// Handle CreateOSD request — enables one of the two fixed rects.
     pub fn handle_create_osd(&self, request: CreateOSD) -> OnvifResult<CreateOSDResponse> {
-        osd_ops::create_osd(self.config.as_ref(), self.platform.as_ref(), request)
+        let response = osd_ops::create_osd(self.config.as_ref(), self.platform.as_ref(), request)?;
+        self.request_config_save();
+        Ok(response)
     }
 
     /// Handle DeleteOSD request — disables one of the two fixed rects.
     pub fn handle_delete_osd(&self, request: DeleteOSD) -> OnvifResult<DeleteOSDResponse> {
-        osd_ops::delete_osd(self.config.as_ref(), self.platform.as_ref(), request)
+        let response = osd_ops::delete_osd(self.config.as_ref(), self.platform.as_ref(), request)?;
+        self.request_config_save();
+        Ok(response)
     }
 
     /// Handle GetServiceCapabilities request.

@@ -37,6 +37,7 @@ static void resolve_real_set_param(void)
 {
     const char *err;
 
+    (void)dlerror();
     real_set_param = (ak_vpss_osd_set_param_fn)dlsym(RTLD_NEXT,
                                                      "ak_vpss_osd_set_param");
     if (!real_set_param) {
@@ -90,32 +91,32 @@ int ak_vpss_osd_set_param(const void *vi_handle, struct vpss_osd_param *param)
          * [i32 chn][ptr addr][u32 w][u32 h][u16 x][u16 y][u16 alpha][u16 en]
          * Same byte-0 shift as mem_attr — drop leading chn. */
         int32_t chn;
-        uintptr_t addr;
+        uint32_t addr;
         uint32_t w, h;
         uint16_t x, y, alpha, en;
-        memcpy(&chn, param->data, 4);
-        memcpy(&addr, param->data + 4, 4);
-        memcpy(&w, param->data + 8, 4);
-        memcpy(&h, param->data + 12, 4);
-        memcpy(&x, param->data + 16, 2);
-        memcpy(&y, param->data + 18, 2);
-        memcpy(&alpha, param->data + 20, 2);
-        memcpy(&en, param->data + 22, 2);
+        memcpy(&chn, param->data, sizeof(chn));
+        memcpy(&addr, param->data + 4, sizeof(addr));
+        memcpy(&w, param->data + 8, sizeof(w));
+        memcpy(&h, param->data + 12, sizeof(h));
+        memcpy(&x, param->data + 16, sizeof(x));
+        memcpy(&y, param->data + 18, sizeof(y));
+        memcpy(&alpha, param->data + 20, sizeof(alpha));
+        memcpy(&en, param->data + 22, sizeof(en));
 
         memset(param->data, 0, sizeof(param->data));
-        memcpy(param->data + 0, &addr, 4);
-        memcpy(param->data + 4, &w, 4);
-        memcpy(param->data + 8, &h, 4);
-        memcpy(param->data + 12, &x, 2);
-        memcpy(param->data + 14, &y, 2);
-        memcpy(param->data + 16, &alpha, 2);
-        memcpy(param->data + 18, &en, 2);
+        memcpy(param->data + 0, &addr, sizeof(addr));
+        memcpy(param->data + 4, &w, sizeof(w));
+        memcpy(param->data + 8, &h, sizeof(h));
+        memcpy(param->data + 12, &x, sizeof(x));
+        memcpy(param->data + 14, &y, sizeof(y));
+        memcpy(param->data + 16, &alpha, sizeof(alpha));
+        memcpy(param->data + 18, &en, sizeof(en));
         {
             static int logged;
             if (!logged) {
                 logged = 1;
                 log_info("[osd] ctx_attr rewrite chn=%d addr=%p %ux%u @%u,%u a=%u en=%u",
-                         (int)chn, (void *)addr, w, h, x, y, alpha, en);
+                         (int)chn, (void *)(uintptr_t)addr, w, h, x, y, alpha, en);
             }
         }
     }
