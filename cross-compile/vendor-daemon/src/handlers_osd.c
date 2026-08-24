@@ -6,8 +6,9 @@
  * because policy there is host-testable.  These handlers only draw what they
  * are told, where they are told.
  *
- * NEVER call osd_sys_ipc_register/osd_sys_ipc_unregister from this file — see
- * the warning in the Makefile LDFLAGS block.  They crash at the PLT.
+ * ak_osd_init calls osd_sys_ipc_register internally; ak_cmd_register_module /
+ * ak_cmd_unregister_module are satisfied by no-op stubs in osd_ipcsrv_stubs.c.
+ * Do not remove those stubs. ISP mem/context attrs go through osd_vpss_wrap.c.
  */
 #include <string.h>
 #include <stdlib.h>
@@ -18,6 +19,7 @@
 #include "protocol.h"
 #include "log.h"
 #include "ak_osd.h"
+#include "ak_error.h"
 
 #define OSD_FONT_PATH   "/usr/local/ak_font_16.bin"
 #define OSD_FONT_SIZE   16
@@ -255,3 +257,4 @@ void osd_shutdown(void)
         log_info("[osd] destroyed");
     }
 }
+

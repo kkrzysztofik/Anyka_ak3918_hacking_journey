@@ -1,7 +1,7 @@
 # OSD Overlay (Camera Name + Timestamp) — Design
 
 **Date:** 2026-08-24
-**Status:** Design approved, Phase 0 spike pending
+**Status:** Design approved; Phase 0 Stages A+B passed on hardware 2026-08-24
 **Scope:** Burn camera name and timestamp into the encoded video, configurable over ONVIF and from the WebUI.
 
 ## Goal
@@ -56,8 +56,10 @@ This differs materially from the libakstreamenc failure, which was a version gat
 between libraries that had to agree on encoder state. Here the foreign library is
 a leaf that writes a 132-byte param blob through a stable entry point.
 
-**Constraint carried into the build:** never call `osd_sys_ipc_register` or
-`osd_sys_ipc_unregister`. This must be commented at the link site, because it is
+**Constraint carried into the build (revised after Stage B):** `ak_osd_init`
+always calls `osd_sys_ipc_register`, so provide no-op stubs for
+`ak_cmd_register_module` / `ak_cmd_unregister_module` (`osd_ipcsrv_stubs.c`).
+Do not remove those stubs. Comment at the link site, because it is
 non-obvious.
 
 ### The font already ships, and it is Chinese
@@ -247,18 +249,43 @@ Note the linker precedent this rests on already exists in the tree: the
 `vendor-daemon` Makefile passes `-Wl,--allow-shlib-undefined` for the *same*
 lazy-binding reason with `libplat_thread.so`.
 
-### Stage B — live draw — pending, folded into implementation
+### Stage B — live draw — **PASSED on `.198` (192.168.2.198), 2026-08-24**
 
-`ak_osd_init`, `ak_osd_set_rect` and `ak_osd_draw_str` need a live VI handle,
-which the running `vendor-daemon` owns; two processes cannot both hold VI. So
-Stage B is not a throwaway probe — it is the first slice of the C work
-(`CMD_OSD_INIT` + `CMD_OSD_SET_RECT` + `CMD_OSD_DRAW_STR`), verified by eye on
-the live stream. It should be the first task implemented and validated on
-hardware before any Rust, ONVIF or WebUI work begins.
+`HELLO OSD` was burned into the live main stream (1280×720 RTSP `/main`) after
+`CMD_OSD_*` handlers, `ak_cmd_*_module` stubs, and an ISP mem/context-attr
+layout wrap were in place.
 
-Still to be measured in Stage B: the `akuio_alloc_pmem` physical-memory cost of
-`ak_osd_init` (allocated per channel), and behaviour at both main and sub
-resolutions.
+Findings that Stage A could not see:
+
+1. **`ak_osd_init` always calls `osd_sys_ipc_register`**, which needs
+   `ak_cmd_register_module`. Lazy binding only deferred the crash until live
+   init — it does not avoid it. Fixed with no-op stubs in
+   `osd_ipcsrv_stubs.c` matching the reference signatures
+   `(unsigned port, const char *name)`.
+2. **Main-channel font height is `font_file_size * 2` (32px)**; ASCII advance
+   is half of that (16px). A 16×16 rect fails `ak_osd_set_rect` validation.
+3. **ISP `MEM_ATTR` / `CONTEXT_ATTR` wire layout on this camera does not match
+   `libmpi_osd`'s `(chn, …)` prefix.** dmesg showed
+   `paddr:(null) size:-2134570752` where the size was our paddr `0x80c50900`
+   as int32 — the ISP was reading `AK_ISP_USER_PARAM` from byte 0 so `id`
+   occupied `chn` and `data[0]` (our chn=0) became paddr. Fixed by
+   `osd_vpss_wrap.c` rewriting both payloads before `ak_vpss_osd_set_param`.
+4. **Deploy path is the A/B slot**, not `/mnt/anyka_hack/vendor-daemon/`:
+   active slot `b` → `/mnt/anyka_hack/slots/b/vendor-daemon/`.
+5. **Never kill `anyka-init`** to restart the stack — it owns Wi-Fi; killing it
+   drops the camera off the network until reboot.
+
+Memory after a successful single-rect draw on main (one 144×32 overlay):
+
+```
+free:     Mem free ≈ 3.3 MB (unchanged vs pre-OSD ~2.9 MB noise)
+vendor-daemon VmRSS: 2336 kB  (pre-OSD baseline was ~2340 kB)
+DMA request for the rect: 4608 bytes (ping-pong); canvas: 2304 bytes
+```
+
+Both channels fitting is still to be confirmed once Rust enables sub as well;
+the per-rect pmem cost is small enough that two rects × two channels stays
+under a few tens of KB.
 
 ### Scratch state left on the camera
 
@@ -271,7 +298,8 @@ for Stage B; delete when the feature lands.
 | Risk | Mitigation |
 |---|---|
 | ~~`libmpi_osd.so` fails to load on this silicon~~ | **Retired** — Stage A passed on `.198`, 2026-08-24 |
-| `ak_osd_init` / `draw_str` misbehave against a live VI handle | Stage B is the first implementation task, verified on hardware before any Rust work |
-| OSD buffers exhaust physical memory | Font load measured at +44 KB; `akuio_alloc_pmem` cost still to be measured in Stage B |
-| Someone later calls `osd_sys_ipc_register` | Comment at the link site and in `handlers_osd.c` |
+| ~~`ak_osd_init` / `draw_str` misbehave against a live VI handle~~ | **Retired** — Stage B drew `HELLO OSD` on live main, 2026-08-24 |
+| OSD buffers exhaust physical memory | Font +44 KB; one 144×32 rect ≈ 7 KB pmem; VmRSS unchanged within noise |
+| Someone later calls `osd_sys_ipc_register` | Stubs absorb it; comment at the link site and in `handlers_osd.c` |
+| ISP mem/context attr layout mismatch | `osd_vpss_wrap.c` rewrites payloads for this camera's ISP |
 | VPSS OSD interacts badly with our profile resolutions | Exercised in the spike at both main and sub dimensions |

@@ -76,15 +76,14 @@ CFLAGS = $(COMMON_CFLAGS) $(MODE_CFLAGS)
 # at link time. See: SD_card_contents/anyka_hack/libre_anyka_app runs with this
 # exact combination proving the code paths are never hit.
 # -lmpi_osd comes from the IOT-ANYKA-PTZdaemon bundle, not this SDK generation.
-# It has two undefined symbols we cannot satisfy — ak_cmd_register_module and
-# ak_cmd_unregister_module — because our libplat_ipcsrv.so exports
-# ak_cmd_server_register instead. Disassembly shows both are reachable ONLY from
-# osd_sys_ipc_register/osd_sys_ipc_unregister, and there is no BIND_NOW, so lazy
-# binding never resolves them. NEVER call those two functions: doing so crashes
-# at the PLT. Verified loading on .198 2026-08-24 (libmpi_osd V1.1.03).
+# It needs ak_cmd_register_module / ak_cmd_unregister_module, which our
+# libplat_ipcsrv.so does not export (it has ak_cmd_server_register instead).
+# ak_osd_init ALWAYS calls osd_sys_ipc_register (disassembly of V1.1.03), which
+# reaches those symbols — Stage A only proved the .so loads; live init crashes
+# without stubs.  osd_ipcsrv_stubs.c provides no-ops.  Verified on .198 2026-08-24.
 LDFLAGS = \
 	-L$(ANYKA_LIB_DIR) \
-	-Wl,--allow-shlib-undefined \
+	-Wl,--allow-shlib-undefined -Wl,--export-dynamic \
 	-Wl,--start-group \
 	  -lplat_vi \
 	  -lplat_vpss \
@@ -105,6 +104,7 @@ LDFLAGS = \
 	  -lakstreamenc \
 	-Wl,--end-group \
 	-lpthread -lrt -lm -ldl
+# osd_vpss_wrap.c uses dlsym(RTLD_NEXT, "ak_vpss_osd_set_param").
 
 SRC_DIR   = src
 BUILD_DIR = build

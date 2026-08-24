@@ -16,7 +16,7 @@
 
 Violating any of these breaks the camera, not just the feature.
 
-1. **Never call `osd_sys_ipc_register` or `osd_sys_ipc_unregister`.** They are the only reachers of `ak_cmd_register_module` / `ak_cmd_unregister_module`, which do not exist in our `libplat_ipcsrv.so`. There is no `BIND_NOW`, so lazy binding keeps the library healthy right up until someone calls one of those two, at which point it crashes at the PLT.
+1. **`ak_osd_init` always calls `osd_sys_ipc_register`.** Those reach `ak_cmd_register_module` / `ak_cmd_unregister_module`, which our `libplat_ipcsrv.so` does not export. Stage B fixed this with no-op stubs in `osd_ipcsrv_stubs.c` — do not remove them. Do not add real IPC-server registration; the stubs are intentional. Also keep `osd_vpss_wrap.c` (ISP MEM/CONTEXT attr layout rewrite for this camera).
 2. **Never renumber existing command IDs** in `protocol.h`. It is a wire protocol; a client/daemon pair can be mid-upgrade. Append only. This is documented at `protocol.h:55`.
 3. **ASCII only for OSD text.** `/usr/local/ak_font_16.bin` is a GB2312 font — it has no `ó`, `ł` or `ü`. Reject non-ASCII at validation rather than rendering garbage.
 4. **Colour and alpha are device-global.** `ak_osd_set_color` and `ak_osd_set_alpha` take no channel or rect argument.
