@@ -898,6 +898,13 @@ int handle_audio_start_push(int fd, const uint8_t *req, uint32_t req_len)
         log_warn("[audio] already active, ignoring start_push");
         return send_response(fd, STATUS_OK, NULL, 0);
     }
+    if (state->join_pending) {
+        /* A previous stop gave up on this slot's worker; it may still be
+         * running.  Starting another would hand a second thread the same state
+         * and race the detached one -- mirror handle_venc_start_push. */
+        log_error("[audio] audio slot has an unjoined worker, refusing start_push");
+        return send_response(fd, STATUS_ERROR, NULL, 0);
+    }
 
     struct pcm_param ai_param;
     memset(&ai_param, 0, sizeof(ai_param));

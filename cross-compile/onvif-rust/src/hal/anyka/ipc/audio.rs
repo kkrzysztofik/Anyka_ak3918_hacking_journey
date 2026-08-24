@@ -107,12 +107,12 @@ impl AudioHalTrait for AnykaIpc {
     }
 
     fn start_audio_push(&self, sample_rate: u32, channels: u32) -> PlatformResult<()> {
-        // The inherent method on AnykaIpc (mod.rs) has the same name; Rust
-        // method resolution prefers it over this trait method, so no recursion.
-        self.start_audio_push(sample_rate, channels)
+        // Fully-qualified so a future refactor cannot turn this into infinite
+        // recursion (the inherent method has the same name).
+        AnykaIpc::start_audio_push(self, sample_rate, channels)
     }
 
     fn stop_audio_push(&self) -> PlatformResult<()> {
-        self.stop_audio_push()
+        AnykaIpc::stop_audio_push(self)
     }
 }

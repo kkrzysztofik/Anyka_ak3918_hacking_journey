@@ -1904,14 +1904,13 @@ impl RtspServerSession {
         for track_type in [TrackType::Video, TrackType::Audio] {
             if let Some(track) = self.tracks.get(&track_type) {
                 let rtcp_channel = Arc::clone(&track.rtcp_channel);
-                if let Ok(mut rtp_guard) = track.rtp_channel.try_lock() {
-                    rtp_guard.on_packet_for_rtcp_handler(Box::new(move |packet| {
-                        let rtcp_channel_in = Arc::clone(&rtcp_channel);
-                        Box::pin(async move {
-                            rtcp_channel_in.lock().await.on_packet(packet);
-                        })
-                    }));
-                }
+                let mut rtp_guard = track.rtp_channel.lock().await;
+                rtp_guard.on_packet_for_rtcp_handler(Box::new(move |packet| {
+                    let rtcp_channel_in = Arc::clone(&rtcp_channel);
+                    Box::pin(async move {
+                        rtcp_channel_in.lock().await.on_packet(packet);
+                    })
+                }));
             }
         }
 
