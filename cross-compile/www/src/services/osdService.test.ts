@@ -78,6 +78,34 @@ describe('osdService', () => {
       expect(result.appearance.alpha).toBe(80);
     });
 
+    it('should parse a single OSD when GetOSDs returns one node', async () => {
+      // fast-xml-parser yields an object, not an array, for a single child.
+      const mockResponse = createMockSOAPResponse(`
+        <GetOSDsResponse>
+          <OSDs token="osd_name">
+            <VideoSourceConfigurationToken>VS0</VideoSourceConfigurationToken>
+            <Type>Text</Type>
+            <Position><Type>UpperRight</Type></Position>
+            <TextString>
+              <Type>Plain</Type>
+              <FontSize>16</FontSize>
+              <PlainText>CAM1</PlainText>
+              <FontColor Transparent="80"><Color X="0.0667" Y="0.0667" Z="0.0667" /></FontColor>
+            </TextString>
+          </OSDs>
+        </GetOSDsResponse>
+      `);
+
+      vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
+
+      const result = await getOsdSettings();
+
+      expect(result.name.enabled).toBe(true);
+      expect(result.name.text).toBe('CAM1');
+      expect(result.name.position).toBe('UpperRight');
+      expect(result.datetime.enabled).toBe(false);
+    });
+
     it('should surface a SOAP fault as an Error', async () => {
       vi.mocked(apiClient.post).mockResolvedValueOnce(
         createMockSOAPFaultResponse('ter:NotAuthorized', 'Not authorized'),

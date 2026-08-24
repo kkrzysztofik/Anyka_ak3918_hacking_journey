@@ -284,136 +284,174 @@ async fn tick_once(
         return;
     }
 
-    let style = (cfg.color, cfg.alpha);
-    if last_style.as_ref() != Some(&style) {
-        if let Err(e) = args
-            .ipc
-            .osd_set_style(i32::from(cfg.color), 0, 0, i32::from(cfg.alpha))
-            .await
-        {
-            warn!(error = %e, "osd_set_style failed; continuing without style");
-        } else {
-            *last_style = Some(style);
-        }
-    }
+    apply_style_if_changed(&args.ipc, &cfg, last_style).await;
 
-    let name_owned;
     let name_text = if cfg.name.text.is_empty() {
         args.device_name.as_str()
     } else {
-        name_owned = cfg.name.text.clone();
-        name_owned.as_str()
+        cfg.name.text.as_str()
     };
 
     for channel in 0u8..=1 {
-        let dims = args.dims[channel as usize];
-        if dims.width <= 0 || dims.height <= 0 {
-            continue;
+        tick_channel(state, args, &cfg, name_text, channel).await;
+    }
+}
+
+async fn apply_style_if_changed(
+    ipc: &AnykaIpc,
+    cfg: &OsdConfig,
+    last_style: &mut Option<(u8, u8)>,
+) {
+    let style = (cfg.color, cfg.alpha);
+    if last_style.as_ref() == Some(&style) {
+        return;
+    }
+    if let Err(e) = ipc
+        .osd_set_style(i32::from(cfg.color), 0, 0, i32::from(cfg.alpha))
+        .await
+    {
+        warn!(error = %e, "osd_set_style failed; continuing without style");
+        return;
+    }
+    *last_style = Some(style);
+}
+
+fn channel_should_tick(
+    state: &RenderState,
+    cfg: &OsdConfig,
+    channel: u8,
+    dims: ChannelDims,
+) -> bool {
+    if dims.width <= 0 || dims.height <= 0 {
+        return false;
+    }
+    let has_slots =
+        state.last[channel as usize][0].is_some() || state.last[channel as usize][1].is_some();
+    cfg.name.enabled || cfg.datetime.enabled || has_slots
+}
+
+fn plan_channel_slots(
+    state: &mut RenderState,
+    cfg: &OsdConfig,
+    channel: u8,
+    name_text: &str,
+    dims: ChannelDims,
+) -> (Vec<DrawPlan>, Vec<ErasePlan>) {
+    let mut plans = Vec::new();
+    let mut erases = Vec::new();
+    if cfg.name.enabled {
+        if let Some(plan) = state.plan(channel, OsdRect::Name, name_text, cfg.name.position, dims) {
+            plans.push(plan);
         }
-
-        let has_slots =
-            state.last[channel as usize][0].is_some() || state.last[channel as usize][1].is_some();
-        if !cfg.name.enabled && !cfg.datetime.enabled && !has_slots {
-            continue;
+    } else if let Some(erase) = state.clear(channel, OsdRect::Name) {
+        erases.push(erase);
+    }
+    if cfg.datetime.enabled {
+        let text = format_datetime(
+            Local::now(),
+            cfg.datetime.date_format,
+            cfg.datetime.time_format,
+        );
+        if let Some(plan) = state.plan(
+            channel,
+            OsdRect::DateTime,
+            &text,
+            cfg.datetime.position,
+            dims,
+        ) {
+            plans.push(plan);
         }
+    } else if let Some(erase) = state.clear(channel, OsdRect::DateTime) {
+        erases.push(erase);
+    }
+    (plans, erases)
+}
 
-        // Gate canvas before plan/clear so a failed setup does not poison SlotMemory.
-        let vi = args.vi.as_ptr() as u64;
-        if !state.ensure_canvas(channel, dims, &args.ipc, vi).await {
-            continue;
+async fn apply_erases(ipc: &AnykaIpc, channel: u8, erases: &[ErasePlan]) {
+    // Wipe switched-off overlays first, so a same-tick redraw of the other
+    // overlay cannot be clobbered by the erase.
+    for erase in erases {
+        if let Err(e) = ipc
+            .osd_draw_str(
+                i32::from(channel),
+                CANVAS_RECT,
+                erase.draw_x,
+                erase.draw_y,
+                &erase.glyphs,
+            )
+            .await
+        {
+            warn!(error = %e, channel, "osd_draw_str disable-erase failed");
         }
+    }
+}
 
-        let mut plans = Vec::new();
-        // Overlays switched off individually must be wiped from the shared
-        // canvas; the other overlay keeps it composited, so `disable_all` is
-        // not an option here.
-        let mut erases = Vec::new();
-
-        if cfg.name.enabled {
-            if let Some(plan) =
-                state.plan(channel, OsdRect::Name, name_text, cfg.name.position, dims)
-            {
-                plans.push(plan);
-            }
-        } else if let Some(erase) = state.clear(channel, OsdRect::Name) {
-            erases.push(erase);
-        }
-
-        if cfg.datetime.enabled {
-            let when = Local::now();
-            let text = format_datetime(when, cfg.datetime.date_format, cfg.datetime.time_format);
-            if let Some(plan) = state.plan(
-                channel,
-                OsdRect::DateTime,
-                &text,
-                cfg.datetime.position,
-                dims,
-            ) {
-                plans.push(plan);
-            }
-        } else if let Some(erase) = state.clear(channel, OsdRect::DateTime) {
-            erases.push(erase);
-        }
-
-        if plans.is_empty() && erases.is_empty() {
-            continue;
-        }
-
-        // Wipe switched-off overlays first, so a same-tick redraw of the other
-        // overlay cannot be clobbered by the erase.
-        for erase in &erases {
-            if let Err(e) = args
-                .ipc
+async fn apply_plans(ipc: &AnykaIpc, plans: &mut [DrawPlan]) {
+    // Paint into the shared canvas. Order does not matter for persistence —
+    // each draw_str only updates its glyph region — but draw datetime last
+    // so the final ISP flush of the tick includes the fresh timestamp.
+    plans.sort_by_key(|p| p.rect as i32);
+    for plan in plans.iter() {
+        if let Some(erase) = &plan.erase
+            && let Err(e) = ipc
                 .osd_draw_str(
-                    i32::from(channel),
+                    i32::from(plan.channel),
                     CANVAS_RECT,
                     erase.draw_x,
                     erase.draw_y,
                     &erase.glyphs,
                 )
                 .await
-            {
-                warn!(error = %e, channel, "osd_draw_str disable-erase failed");
-            }
+        {
+            warn!(error = %e, channel = plan.channel, "osd_draw_str erase failed");
         }
-
-        // Paint into the shared canvas. Order does not matter for persistence —
-        // each draw_str only updates its glyph region — but draw datetime last
-        // so the final ISP flush of the tick includes the fresh timestamp.
-        plans.sort_by_key(|p| p.rect as i32);
-        for plan in &plans {
-            if let Some(erase) = &plan.erase
-                && let Err(e) = args
-                    .ipc
-                    .osd_draw_str(
-                        i32::from(plan.channel),
-                        CANVAS_RECT,
-                        erase.draw_x,
-                        erase.draw_y,
-                        &erase.glyphs,
-                    )
-                    .await
-            {
-                warn!(error = %e, channel, "osd_draw_str erase failed");
-            }
-            if !plan.content_changed {
-                continue;
-            }
-            if let Err(e) = args
-                .ipc
-                .osd_draw_str(
-                    i32::from(plan.channel),
-                    CANVAS_RECT,
-                    plan.draw_x,
-                    plan.draw_y,
-                    &plan.glyphs,
-                )
-                .await
-            {
-                warn!(error = %e, channel, rect = ?plan.rect, "osd_draw_str failed");
-            }
+        if !plan.content_changed {
+            continue;
+        }
+        if let Err(e) = ipc
+            .osd_draw_str(
+                i32::from(plan.channel),
+                CANVAS_RECT,
+                plan.draw_x,
+                plan.draw_y,
+                &plan.glyphs,
+            )
+            .await
+        {
+            warn!(
+                error = %e,
+                channel = plan.channel,
+                rect = ?plan.rect,
+                "osd_draw_str failed"
+            );
         }
     }
+}
+
+async fn tick_channel(
+    state: &mut RenderState,
+    args: &OsdRendererArgs,
+    cfg: &OsdConfig,
+    name_text: &str,
+    channel: u8,
+) {
+    let dims = args.dims[channel as usize];
+    if !channel_should_tick(state, cfg, channel, dims) {
+        return;
+    }
+
+    let vi = args.vi.as_ptr() as u64;
+    if !state.ensure_canvas(channel, dims, &args.ipc, vi).await {
+        return;
+    }
+
+    let (mut plans, erases) = plan_channel_slots(state, cfg, channel, name_text, dims);
+    if plans.is_empty() && erases.is_empty() {
+        return;
+    }
+
+    apply_erases(&args.ipc, channel, &erases).await;
+    apply_plans(&args.ipc, &mut plans).await;
 }
 
 #[cfg(test)]

@@ -5,7 +5,13 @@ use std::sync::Arc;
 use crate::config::ConfigRuntime;
 use crate::config::types::{OsdConfig, OsdDateTimeConfig, OsdNameConfig};
 use crate::onvif::error::{OnvifError, OnvifResult};
-use crate::onvif::types::media_osd::*;
+use crate::onvif::types::media_osd::{
+    COLORSPACE_YCBCR, ColorChannels, CreateOSD, CreateOSDResponse, DeleteOSD, DeleteOSDResponse,
+    GetOSD, GetOSDOptionsResponse, GetOSDResponse, GetOSDsResponse, IntRangeXml,
+    MaximumNumberOfOSDs, OSD_TOKEN_DATETIME, OSD_TOKEN_NAME, OSDColor, OSDColorOptions,
+    OSDConfiguration, OSDConfigurationOptions, OSDPosConfiguration, OSDTextConfiguration,
+    OSDTextOptions, SetOSD, SetOSDResponse,
+};
 use crate::osd::encode::encode_glyphs;
 use crate::osd::format::{DateFormat, TimeFormat};
 use crate::osd::layout::Corner;

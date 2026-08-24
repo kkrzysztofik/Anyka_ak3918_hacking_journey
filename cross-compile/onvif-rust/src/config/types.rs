@@ -116,6 +116,15 @@ impl AppConfig {
             }
         }
 
+        fn osd_name_text(errors: &mut Vec<String>, text: &str) {
+            if text.is_empty() {
+                return;
+            }
+            if let Err(e) = crate::osd::encode::encode_glyphs(text) {
+                errors.push(format!("osd.name.text: {e}"));
+            }
+        }
+
         // Server
         range(&mut errors, "server.port", self.server.port, 1, u16::MAX);
         range(
@@ -254,11 +263,7 @@ impl AppConfig {
         // Empty name text falls back to the device name at render time; non-empty
         // values must already be encodable so a bad anyka.toml cannot reach the
         // renderer.
-        if !self.osd.name.text.is_empty()
-            && let Err(e) = crate::osd::encode::encode_glyphs(&self.osd.name.text)
-        {
-            errors.push(format!("osd.name.text: {e}"));
-        }
+        osd_name_text(&mut errors, &self.osd.name.text);
 
         // Discovery
         range(

@@ -151,6 +151,16 @@ function parseAppearance(text: Record<string, unknown> | undefined): OsdAppearan
   return { color: colorIndex, alpha };
 }
 
+function asOsdList(raw: unknown): Record<string, unknown>[] {
+  if (Array.isArray(raw)) {
+    return raw as Record<string, unknown>[];
+  }
+  if (raw) {
+    return [raw as Record<string, unknown>];
+  }
+  return [];
+}
+
 function parseOsdNode(node: Record<string, unknown>): {
   token: string;
   videoSourceToken: string;
@@ -172,7 +182,7 @@ function parseOsdNode(node: Record<string, unknown>): {
 /** Reject non-ASCII before SetOSD — the camera font has no Latin diacritics. */
 export function assertAsciiOsdText(text: string): void {
   // Not a regex: an ASCII-range character class trips eslint's no-control-regex.
-  if (![...text].every((ch) => ch.charCodeAt(0) < 128)) {
+  if (![...text].every((ch) => (ch.codePointAt(0) ?? 0) < 128)) {
     throw new Error(
       'OSD text must be ASCII: the camera font is GB2312 and has no glyph for non-ASCII characters',
     );
@@ -219,8 +229,7 @@ export async function getOsdSettings(): Promise<OsdSettings> {
     'GetOSDsResponse',
   );
 
-  const raw = data?.OSDs;
-  const list = (Array.isArray(raw) ? raw : raw ? [raw] : []) as Record<string, unknown>[];
+  const list = asOsdList(data?.OSDs);
 
   // A disabled OSD is simply absent from GetOSDs, so start from disabled
   // defaults and let whatever came back switch it on.
@@ -295,8 +304,6 @@ export async function setOsd(settings: {
   } else {
     textParts.push(
       `<tt:DateFormat>${escapeXml(settings.dateFormat ?? 'yyyy-MM-dd')}</tt:DateFormat>`,
-    );
-    textParts.push(
       `<tt:TimeFormat>${escapeXml(settings.timeFormat ?? 'HH:mm:ss')}</tt:TimeFormat>`,
     );
   }
