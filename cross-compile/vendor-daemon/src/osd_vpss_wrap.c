@@ -10,8 +10,9 @@
  *   size  = data[4] = our dma_paddr (dmesg: size:-2134570752 == 0x80c50900)
  *
  * Rewrite data to (dma_paddr, size) before the real call.  MAIN vs SUB is
- * already selected by param->id; the rect index is not recoverable from the
- * CID, but Stage B / our handlers only use rect 0 on first bring-up.
+ * already selected by param->id.  The rect index is lost in this rewrite —
+ * this camera's ISP path only composites one OSD plane per video channel.
+ * Rust therefore paints name + datetime into silicon rect 0 (full-frame canvas).
  */
 #include <string.h>
 #include <stdint.h>

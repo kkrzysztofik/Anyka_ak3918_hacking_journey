@@ -288,6 +288,38 @@ Both channels fitting is still to be confirmed once Rust enables sub as well;
 the per-rect pmem cost is small enough that two rects × two channels stays
 under a few tens of KB.
 
+### Phase 6 — E2E on `192.168.2.198` (2026-08-24)
+
+Deployed slot **b** (`onvif-rust.bin` + `www/` with `OsdPage-*.js`). Live config:
+`/mnt/anyka_hack/onvif/config.toml` with `[osd]` enabled.
+
+**Main stream (`/main`, 1280×720): PASS**
+
+- `HELLO OSD` upper-left + ISO timestamp lower-right, both visible simultaneously
+- Timestamp advances once per second without blanking the name
+- `GetOSDs` / `SetOSD` SOAP verified (corner move applies within ~2 s)
+
+**Renderer (single-canvas, 2026-08-24):** this ISP path only composites one
+OSD DMA plane per video channel — `osd_vpss_wrap` drops the rect index, so
+rect 1 `draw_str` replaced rect 0 (and vice versa), which looked like flicker.
+Fix: one full-frame canvas on silicon rect 0; name and datetime are painted
+into that shared buffer; only dirty strings are redrawn each tick.
+
+**Sub stream (`/sub`, 640×360): NOT COMPOSITED**
+
+- Kernel logs show `sub osd addr: (null)` — ISP only allocates main-channel OSD
+  DMA on this firmware; Rust still plans/draws channel 1 but nothing appears
+  on `/sub` RTSP. Treat as hardware limitation until vendor path proves otherwise.
+
+**Memory (dual overlay on main, both rects):**
+
+```
+onvif-rust VmRSS:  ~6168 kB  (+~3.8 MB vs pre-OSD daemon stack — includes full ONVIF stack, not OSD alone)
+vendor-daemon VmRSS: ~2408 kB  (≈ Stage B baseline)
+```
+
+**WebUI:** `index-iHUnpIzG.js` served from slot `www/`; `OsdPage-DjOJGvsB.js` HTTP 200.
+
 ### Scratch state left on the camera
 
 `/mnt/anyka_hack/osd-spike/` on `.198` holds `libmpi_osd.so` and `osd_probe`

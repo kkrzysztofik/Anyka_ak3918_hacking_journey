@@ -3,12 +3,20 @@
 //! Ports the vendor layout idea from `osd_disp_name`, corrected by Stage B on
 //! this camera: `ak_osd_init` doubles the font-file size on the main channel
 //! (16 → 32), and ASCII advance is half of the per-channel font height.
+//!
+//! This camera's ISP path (via `osd_vpss_wrap.c`) only drives **one** OSD DMA
+//! plane per video channel — the wrap drops the rect index. Name and datetime
+//! therefore share a single full-frame canvas; `place` returns draw offsets
+//! inside that canvas.
 //! Pure functions only — fully testable without hardware.
 
 use serde::{Deserialize, Serialize};
 
 /// Font-file size on disk (`/usr/local/ak_font_16.bin`).
 pub const FONT_FILE_SIZE: i32 = 16;
+
+/// Silicon rect index used for the shared per-channel canvas.
+pub const CANVAS_RECT: i32 = 0;
 
 /// Which corner an OSD sits in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -54,18 +62,22 @@ pub struct ChannelDims {
     pub height: i32,
 }
 
-/// Where to start drawing.
+/// Draw offsets inside the shared full-frame canvas.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Placement {
-    pub x: i32,
-    pub y: i32,
+    pub draw_x: i32,
+    pub draw_y: i32,
 }
 
-/// Compute the draw origin for `glyph_count` ASCII glyphs in `corner`.
+/// Full-frame canvas geometry for `ak_osd_set_rect` (once per channel).
+pub fn canvas_rect(dims: ChannelDims) -> (i32, i32, i32, i32) {
+    (0, 0, dims.width, dims.height)
+}
+
+/// Compute `draw_str` offsets for `glyph_count` ASCII glyphs in `corner`.
 ///
-/// Clamps to zero rather than returning a negative origin: the vendor library
-/// does not bounds-check `ak_osd_draw_str`, so an overlong string would
-/// otherwise index outside the OSD buffer.
+/// Clamps draw_x to zero rather than negative: the vendor library does not
+/// bounds-check `ak_osd_draw_str`.
 pub fn place(
     corner: Corner,
     glyph_count: usize,
@@ -73,20 +85,19 @@ pub fn place(
     font: FontMetrics,
 ) -> Placement {
     let text_width = font.advance * glyph_count as i32;
-
-    let x = match corner {
+    let draw_x = match corner {
         Corner::UpperLeft | Corner::LowerLeft => font.height,
         Corner::UpperRight | Corner::LowerRight => (dims.width - text_width).max(0),
     };
-    let y = match corner {
+    let draw_y = match corner {
         Corner::UpperLeft | Corner::UpperRight => 0,
         Corner::LowerLeft | Corner::LowerRight => (dims.height - font.height).max(0),
     };
 
-    Placement { x, y }
+    Placement { draw_x, draw_y }
 }
 
-/// Pixel size of the OSD rect that must hold `glyph_count` glyphs.
+/// Pixel size of the string itself (for pad/erase bookkeeping).
 pub fn rect_size(glyph_count: usize, font: FontMetrics) -> (i32, i32) {
     (font.advance * glyph_count as i32, font.height)
 }
@@ -119,34 +130,38 @@ mod tests {
     }
 
     #[test]
+    fn test_canvas_rect_is_full_frame() {
+        assert_eq!(canvas_rect(MAIN), (0, 0, 1280, 720));
+    }
+
+    #[test]
     fn test_place_upper_left_insets_by_font_height() {
         let p = place(Corner::UpperLeft, 9, MAIN, MAIN_FONT);
-        assert_eq!((p.x, p.y), (32, 0));
+        assert_eq!((p.draw_x, p.draw_y), (32, 0));
     }
 
     #[test]
-    fn test_place_upper_right_is_right_aligned_by_glyph_width() {
-        // 9 ASCII glyphs at 16px each = 144px wide on main.
+    fn test_place_upper_right_is_right_aligned() {
         let p = place(Corner::UpperRight, 9, MAIN, MAIN_FONT);
-        assert_eq!((p.x, p.y), (1280 - 144, 0));
+        assert_eq!((p.draw_x, p.draw_y), (1280 - 144, 0));
     }
 
     #[test]
-    fn test_place_lower_left_sits_one_line_above_the_bottom() {
+    fn test_place_lower_left_sits_one_line_above_bottom() {
         let p = place(Corner::LowerLeft, 9, MAIN, MAIN_FONT);
-        assert_eq!((p.x, p.y), (32, 720 - 32));
+        assert_eq!((p.draw_x, p.draw_y), (32, 720 - 32));
     }
 
     #[test]
     fn test_place_lower_right_combines_both_edges() {
         let p = place(Corner::LowerRight, 9, MAIN, MAIN_FONT);
-        assert_eq!((p.x, p.y), (1280 - 144, 720 - 32));
+        assert_eq!((p.draw_x, p.draw_y), (1280 - 144, 720 - 32));
     }
 
     #[test]
     fn test_place_clamps_overlong_text_to_zero_rather_than_negative() {
         let p = place(Corner::UpperRight, 400, MAIN, MAIN_FONT);
-        assert_eq!(p.x, 0);
+        assert_eq!(p.draw_x, 0);
     }
 
     #[test]
@@ -156,7 +171,7 @@ mod tests {
             height: 360,
         };
         let p = place(Corner::LowerRight, 9, sub, SUB_FONT);
-        assert_eq!((p.x, p.y), (640 - 72, 360 - 16));
+        assert_eq!((p.draw_x, p.draw_y), (640 - 72, 360 - 16));
     }
 
     #[test]
