@@ -232,10 +232,15 @@ static void *push_frame_thread(void *arg)
         /* Timestamp normalization: subtract first timestamp to produce 0-based values,
          * then forward-clamp oversized jumps (see TS_MAX_FORWARD_MS). */
         if (!state->timestamp_initialized) {
+            /* Publish the anchor under the ring lock: audio_push_thread() reads
+             * this pair from the MAIN slot, and must never see the flag set
+             * while first_timestamp_ms is still stale. Once per stream. */
+            pthread_mutex_lock(&g_ring_write_lock);
             state->first_timestamp_ms = raw_timestamp_ms;
             state->last_raw_timestamp_ms = raw_timestamp_ms;
             state->raw_timestamp_epoch_ms = 0;
             state->timestamp_initialized = 1;
+            pthread_mutex_unlock(&g_ring_write_lock);
             timestamp_ms = 0;
             log_info("event=timestamp_anchor stream=%u first_ts_ms=%u diag_monotonic_ms=%llu",
                      state->stream_id,
@@ -526,11 +531,15 @@ static void *audio_push_thread(void *arg)
              * drop the frame rather than invent an origin we would have to
              * correct later.
              */
-            if (!g_push_streams[0].timestamp_initialized) {
+            pthread_mutex_lock(&g_ring_write_lock);
+            int video_anchored = g_push_streams[0].timestamp_initialized;
+            uint32_t first_ms  = g_push_streams[0].first_timestamp_ms;
+            pthread_mutex_unlock(&g_ring_write_lock);
+
+            if (!video_anchored) {
                 ak_aenc_release_stream(entry);
                 continue;
             }
-            uint32_t first_ms = g_push_streams[0].first_timestamp_ms;
             uint32_t raw_ms   = (uint32_t)entry->stream.ts;
             uint32_t timestamp_ms = (raw_ms >= first_ms) ? (raw_ms - first_ms) : 0;
 
@@ -590,6 +599,37 @@ static void *audio_push_thread(void *arg)
              (unsigned long long)ring_drops,
              (unsigned long long)diag_monotonic_ms());
     return NULL;
+}
+
+/**
+ * stop_audio_chain - Tear down the audio SDK chain in reverse open order.
+ *
+ * Idempotent: every handle is NULL-checked and cleared, so calling this when
+ * audio was never started, or twice, is a no-op.  Callers must have stopped the
+ * audio push thread first -- these handles are what the thread polls.
+ */
+static void stop_audio_chain(void)
+{
+    if (!g_astream_handle && !g_aenc_handle && !g_ai_handle) {
+        return;
+    }
+
+    /* Reverse of the open order in handle_audio_start_push(). */
+    if (g_astream_handle) {
+        ak_aenc_cancel_stream(g_astream_handle);
+        g_astream_handle = NULL;
+    }
+    if (g_aenc_handle) {
+        ak_aenc_close(g_aenc_handle);
+        g_aenc_handle = NULL;
+    }
+    if (g_ai_handle) {
+        ak_ai_stop_capture(g_ai_handle);
+        ak_ai_close(g_ai_handle);
+        g_ai_handle = NULL;
+    }
+
+    log_info("[audio] push stopped");
 }
 
 /* ---- Public interface ---------------------------------------------------- */
@@ -759,9 +799,14 @@ int handle_venc_start_push(int fd, const uint8_t *req, uint32_t req_len)
         return send_response(fd, VD_STATUS_STALE_EPOCH, NULL, 0);
     state->stream_id = stream_id;
     state->active = 1;
-    /* Reset timestamp normalization state on push start */
+    /* Reset timestamp normalization state on push start.  Under the ring lock
+     * for the same reason as the anchor publication in push_frame_thread(): a
+     * running audio thread must never pair a stale "initialized" flag with a
+     * freshly zeroed first_timestamp_ms. */
+    pthread_mutex_lock(&g_ring_write_lock);
     state->timestamp_initialized = 0;
     state->first_timestamp_ms = 0;
+    pthread_mutex_unlock(&g_ring_write_lock);
     state->last_raw_timestamp_ms = 0;
     state->raw_timestamp_epoch_ms = 0;
     state->last_out_ts_ms = 0;
@@ -853,8 +898,24 @@ int handle_venc_stop_push(int fd, const uint8_t *req, uint32_t req_len)
     }
 
     int failed = 0;
+    int audio_idx = push_slot_index(VD_STREAM_AUDIO);
+    int audio_stopped = 0;
     for (int i = 0; i < PUSH_STREAM_SLOT_COUNT; i++) {
-        failed |= (stop_push_slot(i) != 0);
+        if (stop_push_slot(i) != 0) {
+            failed = 1;
+        } else if (i == audio_idx) {
+            audio_stopped = 1;
+        }
+    }
+    /*
+     * Stopping every slot stops the audio thread too, so the SDK chain that
+     * thread owns has to come down with it: leaving it open lets a later
+     * start_audio_push() reopen over the live handles and leak the ADC and
+     * encoder.  Only safe once the worker is confirmed joined -- a wedged
+     * thread is still polling g_astream_handle.
+     */
+    if (audio_stopped) {
+        stop_audio_chain();
     }
     if (failed) {
         log_error("[push] failed to stop push-based frame delivery (all streams)");
@@ -1009,21 +1070,6 @@ int handle_audio_stop_push(int fd, const uint8_t *req, uint32_t req_len)
         return send_response(fd, STATUS_ERROR, NULL, 0);
     }
 
-    /* Reverse of the open order in handle_audio_start_push(). */
-    if (g_astream_handle) {
-        ak_aenc_cancel_stream(g_astream_handle);
-        g_astream_handle = NULL;
-    }
-    if (g_aenc_handle) {
-        ak_aenc_close(g_aenc_handle);
-        g_aenc_handle = NULL;
-    }
-    if (g_ai_handle) {
-        ak_ai_stop_capture(g_ai_handle);
-        ak_ai_close(g_ai_handle);
-        g_ai_handle = NULL;
-    }
-
-    log_info("[audio] push stopped");
+    stop_audio_chain();
     return send_response(fd, STATUS_OK, NULL, 0);
 }
