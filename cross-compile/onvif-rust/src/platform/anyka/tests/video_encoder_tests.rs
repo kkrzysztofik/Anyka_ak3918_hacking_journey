@@ -667,7 +667,7 @@ fn test_handle_pushed_frame_routes_sub_stream_and_skips_iframe_count() {
 }
 
 #[test]
-fn test_handle_pushed_frame_ignores_audio_frame() {
+fn test_handle_pushed_frame_forwards_audio_frame_to_callbacks() {
     let mut fx = PushFixture::new(false);
 
     fx.push(test_frame(
@@ -676,7 +676,9 @@ fn test_handle_pushed_frame_ignores_audio_frame() {
         StreamId::Audio,
     ));
 
-    assert_eq!(fx.cb.call_count(), 0);
+    // Audio carries no per-stream video state; the callback (bridge) fans it
+    // into both the main and sub queues.
+    assert_eq!(fx.cb.call_count(), 1);
     assert_eq!(fx.main_state.frame_count, 0);
     assert_eq!(fx.sub_state.frame_count, 0);
 }

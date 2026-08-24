@@ -659,13 +659,17 @@ pub(super) fn handle_pushed_frame(
     sub_state: &mut StreamState,
     owned_frame: OwnedFrame,
 ) {
+    if owned_frame.stream_id == StreamId::Audio {
+        // No per-stream video state to update: the bridge fans audio into both
+        // the main and sub queues itself. Forward straight to the callbacks.
+        invoke_owned_callbacks_from_map(owned_callbacks, owned_frame);
+        return;
+    }
+
     let state = match owned_frame.stream_id {
         StreamId::VideoMain => main_state,
         StreamId::VideoSub => sub_state,
-        StreamId::Audio => {
-            tracing::trace!("Ignoring unexpected audio frame in video loop");
-            return;
-        }
+        StreamId::Audio => return, // handled above; unreachable
     };
 
     state.consecutive_no_data = 0;
