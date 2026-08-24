@@ -482,6 +482,9 @@ static void *audio_push_thread(void *arg)
 {
     struct push_stream_state *state = (struct push_stream_state *)arg;
     uint64_t frames_pushed = 0;
+    uint64_t polls = 0;
+    uint64_t get_stream_errs = 0;
+    uint64_t ring_drops = 0;
     uint32_t seq_no = 0;
 
     log_info("event=audio_push_lifecycle state=start thread_id=%lu diag_monotonic_ms=%llu",
@@ -492,9 +495,17 @@ static void *audio_push_thread(void *arg)
         struct list_head stream_head;
         INIT_LIST_HEAD(&stream_head);
 
+        /*
+         * Pace every iteration like aenc_demo does. ak_aenc_get_stream() may
+         * return 0 ("success") with an EMPTY list when no frame is ready yet;
+         * sleeping only on a non-zero return would then busy-spin and starve
+         * the SDK's read_pcm_thread on this single core.
+         */
         if (ak_aenc_get_stream(g_astream_handle, &stream_head) != 0) {
+            get_stream_errs++;
             struct timespec ts = { .tv_sec = 0, .tv_nsec = PUSH_POLL_SLEEP_MS * 1000000L };
             nanosleep(&ts, NULL);
+            polls++;
             continue;
         }
 
@@ -537,6 +548,8 @@ static void *audio_push_thread(void *arg)
                                       VD_FRAME_TYPE_P, VD_STREAM_AUDIO);
             if (ring_slot >= 0) {
                 fill_slot_timing(g_ring_buffer, ring_slot);
+            } else {
+                ring_drops++;
             }
             pthread_mutex_unlock(&g_ring_write_lock);
 
@@ -555,10 +568,26 @@ static void *audio_push_thread(void *arg)
             seq_no++;
             ak_aenc_release_stream(entry);
         }
+        polls++;
+
+        if (frames_pushed > 0 && (frames_pushed % 300) == 0) {
+            log_info("[audio] frames=%llu polls=%llu errs=%llu drops=%llu diag_monotonic_ms=%llu",
+                     (unsigned long long)frames_pushed,
+                     (unsigned long long)polls,
+                     (unsigned long long)get_stream_errs,
+                     (unsigned long long)ring_drops,
+                     (unsigned long long)diag_monotonic_ms());
+        }
+
+        struct timespec ts = { .tv_sec = 0, .tv_nsec = PUSH_POLL_SLEEP_MS * 1000000L };
+        nanosleep(&ts, NULL);
     }
 
-    log_info("event=audio_push_lifecycle state=exit frames_pushed=%llu diag_monotonic_ms=%llu",
+    log_info("event=audio_push_lifecycle state=exit frames_pushed=%llu polls=%llu errs=%llu drops=%llu diag_monotonic_ms=%llu",
              (unsigned long long)frames_pushed,
+             (unsigned long long)polls,
+             (unsigned long long)get_stream_errs,
+             (unsigned long long)ring_drops,
              (unsigned long long)diag_monotonic_ms());
     return NULL;
 }
