@@ -1625,6 +1625,22 @@ impl AnykaIpc {
     }
 
     /// Stop push-based audio delivery.
+    ///
+    /// Deliberately has no caller. The obvious site is the unified reader's exit
+    /// path, next to the `stop_push` calls for main and sub — and putting it
+    /// there is wrong: the supervisor reattaches the platform by re-running
+    /// `start_frame_production`, which spawns a fresh reader and restarts video
+    /// push, but nothing restarts audio (`start_audio_push` is called once, from
+    /// `Application::start_streaming`). Stopping audio on reader exit would kill
+    /// it on the first unwind, permanently.
+    ///
+    /// Leaving audio running across a reattach is correct today: the daemon
+    /// re-reads the video anchor per frame, so audio re-syncs to the new
+    /// timeline on its own, and the daemon exits with onvif-rust anyway.
+    ///
+    /// Wiring this up properly means moving the audio lifecycle under the
+    /// supervisor alongside video, which needs the platform layer to reach the
+    /// streaming bridge — the coupling the audio design punted on.
     pub fn stop_audio_push(&self) -> PlatformResult<()> {
         let (status, _) = self.send_request(CMD_AUDIO_STOP_PUSH, &[])?;
         if status == VD_STATUS_STALE_EPOCH {
