@@ -492,6 +492,7 @@ enabled = false
 # Profile name
 name = "Profile4"
 
+
 # Video width (160-3840)
 width = 640
 
@@ -537,3 +538,23 @@ audio_bitrate = 64
 
 # Audio sample rate in Hz (8000-48000)
 audio_sample_rate = 8000
+
+# -----------------------------------------------------------------------------
+# On-screen display (burned into encoded video via VPSS / libmpi_osd)
+# colour and alpha are device-global — the vendor API has no per-rect colour.
+# -----------------------------------------------------------------------------
+[osd]
+enabled = true
+color = 1
+alpha = 80
+
+[osd.name]
+enabled = true
+position = "upper-left"
+text = ""
+
+[osd.datetime]
+enabled = true
+position = "lower-right"
+date_format = "iso"
+time_format = "h24"
