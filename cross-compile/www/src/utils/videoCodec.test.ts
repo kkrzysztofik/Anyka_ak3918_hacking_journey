@@ -3,7 +3,27 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { formatVideoCodec } from './videoCodec';
+import { formatAudioCodec, formatVideoCodec } from './videoCodec';
+
+describe('formatAudioCodec', () => {
+  it('names the AAC object types the camera can emit', () => {
+    expect(formatAudioCodec('mp4a.40.2')).toBe('AAC-LC');
+    expect(formatAudioCodec('mp4a.40.5')).toBe('HE-AAC');
+  });
+
+  it('keeps an unknown object type visible rather than hiding it', () => {
+    expect(formatAudioCodec('mp4a.40.99')).toBe('AAC type 99');
+  });
+
+  it('passes through non-AAC or malformed codec strings', () => {
+    expect(formatAudioCodec('opus')).toBe('opus');
+    expect(formatAudioCodec('mp4a.40')).toBe('mp4a.40');
+  });
+
+  it('returns undefined for an empty codec', () => {
+    expect(formatAudioCodec(undefined)).toBeUndefined();
+  });
+});
 
 describe('formatVideoCodec', () => {
   it('labels a Main profile tag with profile and level', () => {

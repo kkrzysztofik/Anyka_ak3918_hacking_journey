@@ -79,6 +79,14 @@ function stat(value: number | string | undefined, suffix = ''): string {
   return value === undefined ? '—' : `${value}${suffix}`;
 }
 
+/** Name the common channel layouts; fall back to a raw count for the rest. */
+function formatChannels(channels: number | undefined): string {
+  if (channels === undefined) return '—';
+  if (channels === 1) return 'Mono';
+  if (channels === 2) return 'Stereo';
+  return `${channels} ch`;
+}
+
 export default function LiveViewPage() {
   const [streamType, setStreamType] = useState<StreamType>('main');
   const [ptzSpeed, setPtzSpeed] = useState(50);
@@ -386,7 +394,9 @@ export default function LiveViewPage() {
                     <SettingsCardTitle data-testid="liveview-stream-info-title">
                       Stream Info
                     </SettingsCardTitle>
-                    <SettingsCardDescription>Video stream parameters</SettingsCardDescription>
+                    <SettingsCardDescription>
+                      Video and audio stream parameters
+                    </SettingsCardDescription>
                   </div>
                 </div>
               </SettingsCardHeader>
@@ -421,6 +431,27 @@ export default function LiveViewPage() {
                     data-testid="liveview-codec-value"
                   >
                     {stats.videoCodec ?? '—'}
+                  </span>
+                  <span className="text-muted-foreground">Audio Codec</span>
+                  <span
+                    className="text-foreground text-right font-mono"
+                    data-testid="liveview-audio-codec-value"
+                  >
+                    {stats.audioCodec ?? '—'}
+                  </span>
+                  <span className="text-muted-foreground">Sample Rate</span>
+                  <span
+                    className="text-foreground text-right font-mono"
+                    data-testid="liveview-audio-samplerate-value"
+                  >
+                    {stats.audioSampleRate ? `${stats.audioSampleRate / 1000} kHz` : '—'}
+                  </span>
+                  <span className="text-muted-foreground">Channels</span>
+                  <span
+                    className="text-foreground text-right font-mono"
+                    data-testid="liveview-audio-channels-value"
+                  >
+                    {formatChannels(stats.audioChannels)}
                   </span>
                 </div>
               </SettingsCardContent>

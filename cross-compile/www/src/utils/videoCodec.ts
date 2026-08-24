@@ -1,3 +1,22 @@
+/** MPEG-4 Audio Object Types, keyed by the value in an `mp4a.40.N` tag. */
+const AAC_OBJECT_TYPE_NAMES: Record<number, string> = {
+  2: 'AAC-LC',
+  5: 'HE-AAC',
+  29: 'HE-AACv2',
+};
+
+/**
+ * Turn an MP4 codec tag like `mp4a.40.2` into a human label like `AAC-LC`.
+ * The trailing number is the MPEG-4 Audio Object Type (ISO/IEC 14496-3).
+ */
+export function formatAudioCodec(codec?: string): string | undefined {
+  if (!codec) return undefined;
+  const match = codec.match(/^mp4a\.40\.(\d+)$/i);
+  if (!match) return codec;
+  const objectType = Number.parseInt(match[1], 10);
+  return AAC_OBJECT_TYPE_NAMES[objectType] ?? `AAC type ${objectType}`;
+}
+
 /** H.264 profile names keyed by `profile_idc`. */
 const H264_PROFILE_NAMES: Record<number, string> = {
   66: 'Baseline',

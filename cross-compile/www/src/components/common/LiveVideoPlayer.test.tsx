@@ -159,6 +159,60 @@ describe('LiveVideoPlayer', () => {
     );
   });
 
+  it('forwards audio track details to onStats', async () => {
+    const onStats = vi.fn();
+    renderWithProviders(<LiveVideoPlayer streamType="main" onStats={onStats} />);
+    await waitFor(() => expect(mockPlayer.on).toHaveBeenCalled());
+
+    const mediaHandler = mockPlayer.on.mock.calls.find((c) => c[0] === 'media_info')?.[1];
+    mediaHandler({
+      width: 1280,
+      height: 720,
+      videoCodec: 'avc1.4de028',
+      audioCodec: 'mp4a.40.2',
+      audioSampleRate: 8000,
+      audioChannelCount: 1,
+    });
+
+    expect(onStats).toHaveBeenCalledWith(
+      expect.objectContaining({
+        audioCodec: 'AAC-LC',
+        audioSampleRate: 8000,
+        audioChannels: 1,
+      }),
+    );
+  });
+
+  it('starts muted so autoplay is allowed, and offers no toggle without audio', async () => {
+    // Autoplay policies block a non-muted element from starting on its own, so
+    // an unmuted default would leave the preview stuck rather than noisy.
+    const { getByTestId, queryByTestId } = renderWithProviders(
+      <LiveVideoPlayer streamType="main" />,
+    );
+    await waitFor(() => expect(mockPlayer.on).toHaveBeenCalled());
+
+    expect((getByTestId('liveview-video') as HTMLVideoElement).muted).toBe(true);
+    expect(queryByTestId('liveview-mute-toggle')).toBeNull();
+  });
+
+  it('unmutes the element when the toggle is clicked on a stream with audio', async () => {
+    const { getByTestId } = renderWithProviders(<LiveVideoPlayer streamType="main" />);
+    await waitFor(() => expect(mockPlayer.on).toHaveBeenCalled());
+
+    const mediaHandler = mockPlayer.on.mock.calls.find((c) => c[0] === 'media_info')?.[1];
+    mediaHandler({ width: 1280, height: 720, videoCodec: 'avc1.4de028', audioCodec: 'mp4a.40.2' });
+
+    const toggle = await waitFor(() => getByTestId('liveview-mute-toggle'));
+    const video = getByTestId('liveview-video') as HTMLVideoElement;
+    expect(video.muted).toBe(true);
+
+    toggle.click();
+    await waitFor(() => expect(video.muted).toBe(false));
+
+    toggle.click();
+    await waitFor(() => expect(video.muted).toBe(true));
+  });
+
   it('does not trust the SPS-derived fps from MEDIA_INFO', async () => {
     const onStats = vi.fn();
     renderWithProviders(<LiveVideoPlayer streamType="main" onStats={onStats} />);

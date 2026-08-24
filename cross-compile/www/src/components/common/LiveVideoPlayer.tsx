@@ -6,12 +6,14 @@
  * The library is loaded with a dynamic import so it stays inside the lazy
  * LiveViewPage chunk rather than the eager bundle.
  */
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+
+import { Volume2, VolumeX } from 'lucide-react';
 
 import { useAuth } from '@/hooks/useAuth';
 import { cn } from '@/lib/utils';
 import { type StreamType, buildFlvUrl } from '@/utils/streamUrl';
-import { formatVideoCodec } from '@/utils/videoCodec';
+import { formatAudioCodec, formatVideoCodec } from '@/utils/videoCodec';
 
 export type PlayerState = 'connecting' | 'playing' | 'stalled' | 'error';
 
@@ -22,6 +24,9 @@ export interface StreamStats {
   readonly videoCodec?: string;
   readonly bitrateKbps?: number;
   readonly droppedFrames?: number;
+  readonly audioCodec?: string;
+  readonly audioSampleRate?: number;
+  readonly audioChannels?: number;
 }
 
 interface LiveVideoPlayerProps {
@@ -39,6 +44,20 @@ export function LiveVideoPlayer({
 }: LiveVideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const { getBasicAuthHeader } = useAuth();
+
+  // Starts muted and must: autoplay policies only let a muted element start on
+  // its own. Unmuting later is allowed because the click is a user gesture.
+  const [muted, setMuted] = useState(true);
+  // Only offer the control when the stream actually carries a track — the sub
+  // stream, or a camera with audio_enabled=false, has none.
+  const [hasAudio, setHasAudio] = useState(false);
+
+  // React stops reflecting `muted` to the DOM property after the initial
+  // render, so drive later changes from the element itself.
+  useEffect(() => {
+    const video = videoRef.current;
+    if (video) video.muted = muted;
+  }, [muted]);
 
   // Everything the effect needs but must not re-run for. Parents pass inline
   // arrows, and getBasicAuthHeader's identity changes with credentials; if the
@@ -59,6 +78,7 @@ export function LiveVideoPlayer({
     let cancelled = false;
     let player: { destroy: () => void } | null = null;
     fpsSample.current = undefined;
+    setHasAudio(false);
 
     latest.current.onStateChange?.('connecting');
 
@@ -96,11 +116,24 @@ export function LiveVideoPlayer({
         // arrive typed — no casts needed. MEDIA_INFO.fps is a guess from the
         // SPS VUI/default (23.976 when absent), so we ignore it and derive the
         // real frame rate from decodedFrames deltas in STATISTICS_INFO.
-        instance.on(mpegts.Events.MEDIA_INFO, ({ width, height, videoCodec }) => {
+        instance.on(mpegts.Events.MEDIA_INFO, (info) => {
+          const { width, height, videoCodec, audioCodec } = info;
+          // audioSampleRate/audioChannelCount are real fields on mpegts.js's
+          // MediaInfo but reachable only through its index signature; narrow
+          // them rather than casting, so a shape change degrades to "—".
+          const sampleRate =
+            typeof info.audioSampleRate === 'number' ? info.audioSampleRate : undefined;
+          const channels =
+            typeof info.audioChannelCount === 'number' ? info.audioChannelCount : undefined;
+
+          setHasAudio(Boolean(audioCodec));
           latest.current.onStats?.({
             width,
             height,
             videoCodec: formatVideoCodec(videoCodec),
+            audioCodec: formatAudioCodec(audioCodec),
+            ...(sampleRate !== undefined ? { audioSampleRate: sampleRate } : {}),
+            ...(channels !== undefined ? { audioChannels: channels } : {}),
           });
         });
 
@@ -162,17 +195,32 @@ export function LiveVideoPlayer({
   }, [streamType]);
 
   return (
-    <video
-      ref={videoRef}
-      className={cn('h-full w-full bg-black object-contain', className)}
-      data-testid="liveview-video"
-      aria-label={`${streamType === 'main' ? 'Main Stream' : 'Sub Stream'} live video`}
-      autoPlay
-      muted
-      playsInline
-      onPlaying={() => latest.current.onStateChange?.('playing')}
-      onWaiting={() => latest.current.onStateChange?.('stalled')}
-    />
+    <div className={cn('relative h-full w-full', className)}>
+      <video
+        ref={videoRef}
+        className="h-full w-full bg-black object-contain"
+        data-testid="liveview-video"
+        aria-label={`${streamType === 'main' ? 'Main Stream' : 'Sub Stream'} live video`}
+        autoPlay
+        muted={muted}
+        playsInline
+        onPlaying={() => latest.current.onStateChange?.('playing')}
+        onWaiting={() => latest.current.onStateChange?.('stalled')}
+      />
+
+      {hasAudio && (
+        <button
+          type="button"
+          onClick={() => setMuted((previous) => !previous)}
+          className="absolute right-3 bottom-3 rounded-md bg-black/60 p-2 text-white transition-colors hover:bg-black/80 focus-visible:ring-2 focus-visible:ring-white focus-visible:outline-none"
+          aria-pressed={!muted}
+          aria-label={muted ? 'Unmute audio' : 'Mute audio'}
+          data-testid="liveview-mute-toggle"
+        >
+          {muted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
+        </button>
+      )}
+    </div>
   );
 }
 
