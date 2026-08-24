@@ -2987,6 +2987,20 @@ mod tests {
     }
 
     #[test]
+    fn test_audio_hal_trait_push_methods_delegate_to_ipc() {
+        // The AudioHalTrait impl in ipc/audio.rs delegates to the inherent
+        // AnykaIpc methods; exercise the trait entry points so the delegation
+        // (and its fully-qualified call form) stays covered.
+        let daemon = FakeDaemon::start(|_c, _r| (AK_SUCCESS_I32, vec![]));
+        let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+        ipc.set_epochs_for_test(1, 1);
+
+        let hal: &dyn crate::hal::common::audio::AudioHalTrait = &ipc;
+        assert!(hal.start_audio_push(8000, 1).is_ok());
+        assert!(hal.stop_audio_push().is_ok());
+    }
+
+    #[test]
     fn test_stop_push_with_stream_id_encodes_payload() {
         use std::sync::{Arc, Mutex};
 

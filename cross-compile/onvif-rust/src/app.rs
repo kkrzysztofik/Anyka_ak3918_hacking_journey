@@ -2149,6 +2149,53 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_start_streaming_starts_audio_when_enabled() {
+        // stream_profile_1 defaults to audio_enabled=true; with a platform
+        // whose encoder accepts push, the audio track must be requested.
+        let rtsp_port = reserve_test_port();
+        let httpflv_port = reserve_test_port();
+        let config = make_streaming_runtime_config(rtsp_port, httpflv_port, false);
+
+        let mut audio_encoder = crate::platform::common::MockAudioEncoder::new();
+        audio_encoder
+            .expect_start()
+            .withf(|_, sample_rate, channels| *sample_rate == 8000 && *channels == 1)
+            .times(1)
+            .returning(|_, _, _| Ok(()));
+        let mut platform = crate::platform::common::MockPlatform::new();
+        platform.expect_idr_requester().returning(|| None);
+        // start_streaming registers the bridge as a frame callback before it
+        // reaches the audio start; without this the mock panics there first.
+        platform
+            .expect_register_owned_frame_callback()
+            .returning(|_| Ok(()));
+        platform
+            .expect_audio_encoder()
+            .times(1)
+            .return_once(move || Arc::new(audio_encoder));
+
+        let app_state = AppState::builder()
+            .user_storage(Arc::new(UserStorage::new()))
+            .password_manager(Arc::new(PasswordManager::new()))
+            .ptz_state(Arc::new(PTZStateManager::new()))
+            .config(config.clone())
+            .memory_monitor(Arc::new(MemoryMonitor::new()))
+            .rate_limiter(Arc::new(crate::security::RateLimiter::new(60)))
+            .profile_storage(Arc::new(ProfileStorage::new("/tmp/test_profiles.toml")))
+            .platform(Arc::new(platform))
+            .build()
+            .expect("app state should build");
+        let mut progress = StartupProgress::new();
+
+        let mut streaming = Application::start_streaming(&config, &app_state, &mut progress)
+            .await
+            .expect("streaming service should start");
+        assert!(!progress.has_degraded_services());
+
+        streaming.shutdown().await;
+    }
+
+    #[tokio::test]
     async fn test_application_start() {
         let app = Application::start("/nonexistent/config.toml").await;
         assert!(app.is_ok());
