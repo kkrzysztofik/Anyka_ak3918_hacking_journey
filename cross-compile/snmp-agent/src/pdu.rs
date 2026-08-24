@@ -56,6 +56,10 @@ pub enum SnmpValue {
     ObjectId(Oid),
     /// TimeTicks (application tag 3) — hundredths of a second.
     TimeTicks(u32),
+    /// Counter32 (application tag 1).
+    Counter32(u32),
+    /// Gauge32 (application tag 2).
+    Gauge32(u32),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -168,7 +172,17 @@ fn parse_varbind_list(mut input: &[u8]) -> Result<Vec<VarBind>, PduError> {
     Ok(out)
 }
 
+const TAG_COUNTER32: u8 = 0x41; // Application 1
+const TAG_GAUGE32: u8 = 0x42; // Application 2
 const TAG_TIMETICKS: u8 = 0x43; // Application 3
+
+fn decode_u32_app(content: &[u8]) -> Result<u32, PduError> {
+    let v = ber::decode_integer(content)?;
+    if v < 0 {
+        return Err(PduError::Malformed);
+    }
+    Ok(v as u32)
+}
 
 fn decode_value(tag: u8, content: &[u8]) -> Result<SnmpValue, PduError> {
     match tag {
@@ -176,13 +190,9 @@ fn decode_value(tag: u8, content: &[u8]) -> Result<SnmpValue, PduError> {
         TAG_INTEGER => Ok(SnmpValue::Integer(ber::decode_integer(content)?)),
         TAG_OCTET_STRING => Ok(SnmpValue::OctetString(content.to_vec())),
         TAG_OID => Ok(SnmpValue::ObjectId(Oid::decode(content)?)),
-        TAG_TIMETICKS => {
-            let v = ber::decode_integer(content)?;
-            if v < 0 {
-                return Err(PduError::Malformed);
-            }
-            Ok(SnmpValue::TimeTicks(v as u32))
-        }
+        TAG_COUNTER32 => Ok(SnmpValue::Counter32(decode_u32_app(content)?)),
+        TAG_GAUGE32 => Ok(SnmpValue::Gauge32(decode_u32_app(content)?)),
+        TAG_TIMETICKS => Ok(SnmpValue::TimeTicks(decode_u32_app(content)?)),
         _ => Err(PduError::Malformed),
     }
 }
@@ -193,6 +203,12 @@ fn encode_value(value: &SnmpValue, out: &mut Vec<u8>) -> Result<(), PduError> {
         SnmpValue::Integer(v) => ber::write_tlv(TAG_INTEGER, &ber::encode_integer(*v), out),
         SnmpValue::OctetString(b) => ber::write_tlv(TAG_OCTET_STRING, b, out),
         SnmpValue::ObjectId(oid) => ber::write_tlv(TAG_OID, &oid.encode()?, out),
+        SnmpValue::Counter32(v) => {
+            ber::write_tlv(TAG_COUNTER32, &ber::encode_integer(*v as i32), out);
+        }
+        SnmpValue::Gauge32(v) => {
+            ber::write_tlv(TAG_GAUGE32, &ber::encode_integer(*v as i32), out);
+        }
         SnmpValue::TimeTicks(t) => {
             ber::write_tlv(TAG_TIMETICKS, &ber::encode_integer(*t as i32), out);
         }

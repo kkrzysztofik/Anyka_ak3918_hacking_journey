@@ -1,5 +1,6 @@
 //! MIB-II object resolution (system + interfaces).
 
+pub mod interfaces;
 pub mod system;
 
 use crate::config::SnmpConfig;
@@ -18,6 +19,20 @@ pub trait MibSources {
     fn config(&self) -> &SnmpConfig;
 }
 
+fn resolve_get(
+    oid: &crate::ber::Oid,
+    sources: &dyn MibSources,
+) -> Option<(crate::ber::Oid, crate::pdu::SnmpValue)> {
+    system::get(oid, sources).or_else(|| interfaces::get(oid, sources))
+}
+
+fn resolve_get_next(
+    oid: &crate::ber::Oid,
+    sources: &dyn MibSources,
+) -> Option<(crate::ber::Oid, crate::pdu::SnmpValue)> {
+    system::get_next(oid, sources).or_else(|| interfaces::get_next(oid, sources))
+}
+
 /// Resolve GET / GETNEXT / reject SET for the fixed OID map.
 pub fn handle_varbinds(
     pdu_type: PduType,
@@ -34,8 +49,8 @@ pub fn handle_varbinds(
     let mut out = Vec::with_capacity(binds.len());
     for (i, vb) in binds.iter().enumerate() {
         let resolved = match pdu_type {
-            PduType::GetRequest => system::get(&vb.name, sources),
-            PduType::GetNextRequest => system::get_next(&vb.name, sources),
+            PduType::GetRequest => resolve_get(&vb.name, sources),
+            PduType::GetNextRequest => resolve_get_next(&vb.name, sources),
             PduType::GetResponse | PduType::SetRequest => unreachable!(),
         };
         match resolved {
