@@ -123,7 +123,14 @@ impl RtpChannel {
         timestamp: u32,
     ) -> Result<(), PackerError> {
         if let Some(packer) = &mut self.rtp_packer {
-            return packer.pack(nalus, timestamp).await;
+            // RTP-Info advertises `init_timestamp` as this track's base on PLAY,
+            // so the first RTP packet must carry it. The playback path hands in a
+            // 0-based timestamp; without adding the base, strict clients (ffmpeg)
+            // see the first packet at 0 vs. a random rtptime and stall waiting for
+            // a timeline that never catches up.
+            return packer
+                .pack(nalus, timestamp.wrapping_add(self.init_timestamp))
+                .await;
         }
         Ok(())
     }

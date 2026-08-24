@@ -1896,6 +1896,25 @@ impl RtspServerSession {
 
         self.has_subscribed = true;
         self.session_type = define::ServerSessionType::Pull;
+
+        // Feed every sent RTP packet into its track's RTCP sender-report context
+        // (mirrors the publish path below). Without this the SR always carries
+        // RTP timestamp 0, so clients cannot map the two tracks to a common
+        // timeline and A/V sync breaks.
+        for track_type in [TrackType::Video, TrackType::Audio] {
+            if let Some(track) = self.tracks.get(&track_type) {
+                let rtcp_channel = Arc::clone(&track.rtcp_channel);
+                if let Ok(mut rtp_guard) = track.rtp_channel.try_lock() {
+                    rtp_guard.on_packet_for_rtcp_handler(Box::new(move |packet| {
+                        let rtcp_channel_in = Arc::clone(&rtcp_channel);
+                        Box::pin(async move {
+                            rtcp_channel_in.lock().await.on_packet(packet);
+                        })
+                    }));
+                }
+            }
+        }
+
         let audio_rtp_channel = self
             .tracks
             .get(&TrackType::Audio)
