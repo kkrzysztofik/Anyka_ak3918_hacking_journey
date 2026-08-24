@@ -332,6 +332,31 @@ vendor-daemon VmRSS: ~2408 kB  (≈ Stage B baseline)
 (both md5-verified after transfer). Harmless, outside the A/B slots, and reusable
 for Stage B; delete when the feature lands.
 
+## Acceptance verification on `.198` — 2026-08-24
+
+Run against the final build (`onvif-rust` md5 `7c3c364d…`, `vendor-daemon.bin`
+unchanged at `9e3f55b0…`), captured over RTSP with `ffmpeg`. Evidence:
+`validation/osd_e2e/verify-0*.jpg`.
+
+| Check | Result |
+|---|---|
+| Both overlays on main (1280×720) | ✅ `HELLO OSD` upper-left, timestamp lower-right |
+| Both overlays on sub (640×360) | ✅ same, at half font size |
+| Timestamp advances once per second | ✅ `10:58:02` → `10:59:34` → `11:01:38` |
+| `GetOSDs` lists both fixed tokens | ✅ `osd_name`, `osd_datetime` |
+| Palette on the wire | ✅ `X="255" Y="127" Z="127" Colorspace=…/YCbCr` — vendor index 1, white |
+| `DeleteOSD osd_datetime` | ✅ drops from `GetOSDs` **and** vanishes from video, no residue |
+| `CreateOSD osd_datetime` | ✅ returns the token, overlay comes back ticking |
+| `[osd] enabled = false` + restart | ✅ completely clean frame — no frozen clock |
+
+The last three are the disable path, which had never run on hardware: before
+the fix, `osd_set_enable` was only ever called with `true`, so turning an
+overlay off froze its last text on the video permanently.
+
+Memory with both channels drawing: `vendor-daemon` VmRSS **2560 kB** against a
+~2340 kB pre-OSD baseline — about **220 kB** for two channels, on a box
+reporting 2.8 MB free. Both channels fit.
+
 ## Risks
 
 | Risk | Mitigation |
