@@ -305,11 +305,17 @@ rect 1 `draw_str` replaced rect 0 (and vice versa), which looked like flicker.
 Fix: one full-frame canvas on silicon rect 0; name and datetime are painted
 into that shared buffer; only dirty strings are redrawn each tick.
 
-**Sub stream (`/sub`, 640×360): NOT COMPOSITED**
+**Sub stream (`/sub`, 640×360): PASS (2026-08-24, after `vi_attr_wrap`)**
 
-- Kernel logs show `sub osd addr: (null)` — ISP only allocates main-channel OSD
-  DMA on this firmware; Rust still plans/draws channel 1 but nothing appears
-  on `/sub` RTSP. Treat as hardware limitation until vendor path proves otherwise.
+- Root cause was not "ISP has no sub OSD". `ak_vi_set_channel_attr` on this
+  `libplat_vi` stores the sub frame size in **main.max_*** (libre quirk) and
+  leaves `chn_sub` at 0; `ak_vi_get_channel_attr` does not fill `res[SUB]`, so
+  libmpi_osd's `get_resolution(1)` read stack garbage → `get_max_rect` returned
+  absurd dims → `set_rect` never reached DMA (`sub osd addr: (null)` was a
+  consequence).
+- Fix: `vi_attr_wrap.c` synthesizes `res[SUB]` from `main.max_*` on every
+  `ak_vi_get_channel_attr`. Init now reports `chn=1 max_rect=640x360`; DMA
+  size 230400; timestamp (+ name) visible on `/sub` RTSP.
 
 **Memory (dual overlay on main, both rects):**
 

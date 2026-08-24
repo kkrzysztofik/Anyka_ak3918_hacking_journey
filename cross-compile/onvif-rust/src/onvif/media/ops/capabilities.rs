@@ -64,7 +64,9 @@ mod tests {
         assert_eq!(caps.snapshot_uri, Some(true));
         assert_eq!(caps.rotation, Some(false));
         assert_eq!(caps.video_source_mode, Some(false));
-        assert_eq!(caps.osd, Some(false));
+        // OSD is implemented (GetOSDs/GetOSD/GetOSDOptions/SetOSD); the
+        // temporary-text variant is not.
+        assert_eq!(caps.osd, Some(true));
         assert_eq!(caps.temporary_osd_text, Some(false));
         assert_eq!(caps.exi_compression, Some(false));
 

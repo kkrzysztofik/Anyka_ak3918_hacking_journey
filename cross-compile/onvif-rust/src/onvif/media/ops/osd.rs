@@ -48,7 +48,7 @@ pub fn get_osd(
 
 /// Handle GetOSDOptions.
 pub fn get_osd_options(_pm: &ProfileManagerRef) -> OnvifResult<GetOSDOptionsResponse> {
-    let palette: Vec<ColorChannels> = (0..16).map(|i| palette_color(i)).collect();
+    let palette: Vec<ColorChannels> = (0..16).map(palette_color).collect();
     Ok(GetOSDOptionsResponse {
         osd_options: OSDConfigurationOptions {
             maximum_number_of_osds: MaximumNumberOfOSDs {

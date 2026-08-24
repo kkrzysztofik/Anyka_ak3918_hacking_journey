@@ -19,6 +19,7 @@
 #include "protocol.h"
 #include "log.h"
 #include "ak_osd.h"
+#include "ak_vi.h"
 #include "ak_error.h"
 
 #define OSD_FONT_PATH   "/usr/local/ak_font_16.bin"
@@ -82,6 +83,16 @@ int handle_osd_init(int fd, const uint8_t *req, uint32_t req_len)
             log_error("[osd] init: get_max_rect(chn=%d) failed", channel);
             ak_osd_destroy();
             return send_response(fd, STATUS_ERROR, NULL, 0);
+        }
+        if (w <= 0 || h <= 0 || w > 4096 || h > 4096) {
+            log_error("[osd] init: chn=%d max_rect=%dx%d looks bogus",
+                      channel, w, h);
+            if (channel == 0) {
+                ak_osd_destroy();
+                return send_response(fd, STATUS_ERROR, NULL, 0);
+            }
+            /* Sub only: leave zeros so Rust skips that channel. */
+            continue;
         }
         dims[channel * 2]     = (int32_t)w;
         dims[channel * 2 + 1] = (int32_t)h;

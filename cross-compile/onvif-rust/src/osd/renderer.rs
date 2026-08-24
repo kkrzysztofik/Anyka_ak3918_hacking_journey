@@ -77,6 +77,8 @@ pub struct RenderState {
     last: [[Option<SlotMemory>; 2]; 2],
     /// Whether the shared full-frame canvas is allocated for each channel.
     canvas_ready: [bool; 2],
+    /// Permanent give-up after a failed `set_rect` (avoids 1 Hz log spam).
+    canvas_failed: [bool; 2],
 }
 
 impl RenderState {
@@ -138,10 +140,52 @@ impl RenderState {
         })
     }
 
+    /// Space-fill one overlay's last draw and forget it.
+    ///
+    /// Needed because both overlays share a single composited canvas: an
+    /// overlay that is merely no longer redrawn keeps its last glyphs on screen
+    /// forever. Returns `None` when nothing was drawn, so this is idempotent and
+    /// safe to call every tick.
+    pub fn clear(&mut self, channel: u8, rect: OsdRect) -> Option<ErasePlan> {
+        if channel > 1 {
+            return None;
+        }
+        let prev = self.last[channel as usize][rect as usize].take()?;
+        if prev.glyph_len == 0 {
+            return None;
+        }
+        Some(ErasePlan {
+            draw_x: prev.draw_x,
+            draw_y: prev.draw_y,
+            glyphs: vec![0x20; prev.glyph_len],
+        })
+    }
+
+    /// Turn the whole overlay off at the silicon rect.
+    ///
+    /// Cheaper and more complete than space-filling: an unenabled rect is not
+    /// composited at all. Clearing `canvas_ready` makes the next enabled tick
+    /// re-run `set_rect` + `set_enable(true)`, and dropping the slot memory
+    /// forces a full redraw then. Idempotent — a disabled canvas is skipped.
+    fn disable_all(&mut self, ipc: &AnykaIpc) {
+        for channel in 0u8..=1 {
+            let idx = channel as usize;
+            if !self.canvas_ready[idx] {
+                continue;
+            }
+            if let Err(e) = ipc.osd_set_enable(i32::from(channel), CANVAS_RECT, false) {
+                warn!(error = %e, channel, "osd_set_enable(false) failed; overlay may persist");
+            }
+            self.canvas_ready[idx] = false;
+            self.last[idx] = Default::default();
+        }
+    }
+
     /// Forget remembered draws — call after daemon reattach / `osd_init`.
     pub fn reset(&mut self) {
         self.last = Default::default();
         self.canvas_ready = [false; 2];
+        self.canvas_failed = [false; 2];
     }
 
     fn ensure_canvas(
@@ -155,12 +199,29 @@ impl RenderState {
         if self.canvas_ready[idx] {
             return true;
         }
-        let (x, y, w, h) = canvas_rect(dims);
-        if let Err(e) = ipc.osd_set_rect(vi, i32::from(channel), CANVAS_RECT, x, y, w, h) {
-            warn!(error = %e, channel, "osd_set_rect (canvas) failed");
+        if self.canvas_failed[idx] {
             return false;
         }
-        let _ = ipc.osd_set_enable(i32::from(channel), CANVAS_RECT, true);
+        if dims.width <= 0 || dims.height <= 0 || dims.width > 4096 || dims.height > 4096 {
+            warn!(
+                channel,
+                width = dims.width,
+                height = dims.height,
+                "osd canvas dims invalid; skipping channel"
+            );
+            self.canvas_failed[idx] = true;
+            return false;
+        }
+        if let Err(e) = ipc.osd_set_rect(vi, i32::from(channel), CANVAS_RECT, canvas_rect(dims)) {
+            warn!(error = %e, channel, "osd_set_rect (canvas) failed; giving up on channel");
+            self.canvas_failed[idx] = true;
+            return false;
+        }
+        if let Err(e) = ipc.osd_set_enable(i32::from(channel), CANVAS_RECT, true) {
+            warn!(error = %e, channel, "osd_set_enable(true) failed; giving up on channel");
+            self.canvas_failed[idx] = true;
+            return false;
+        }
         self.canvas_ready[idx] = true;
         true
     }
@@ -208,6 +269,9 @@ async fn run_osd_renderer(mut args: OsdRendererArgs) {
 fn tick_once(state: &mut RenderState, args: &OsdRendererArgs, last_style: &mut Option<(u8, u8)>) {
     let cfg = args.config.read().clone();
     if !cfg.enabled {
+        // Not just "stop drawing": the canvas is persistent, so returning early
+        // would freeze the last timestamp on the video forever.
+        state.disable_all(&args.ipc);
         return;
     }
 
@@ -233,32 +297,62 @@ fn tick_once(state: &mut RenderState, args: &OsdRendererArgs, last_style: &mut O
 
     for channel in 0u8..=1 {
         let dims = args.dims[channel as usize];
+        if dims.width <= 0 || dims.height <= 0 {
+            continue;
+        }
         let mut plans = Vec::new();
+        // Overlays switched off individually must be wiped from the shared
+        // canvas; the other overlay keeps it composited, so `disable_all` is
+        // not an option here.
+        let mut erases = Vec::new();
 
-        if cfg.name.enabled
-            && let Some(plan) =
+        if cfg.name.enabled {
+            if let Some(plan) =
                 state.plan(channel, OsdRect::Name, name_text, cfg.name.position, dims)
-        {
-            plans.push(plan);
+            {
+                plans.push(plan);
+            }
+        } else if let Some(erase) = state.clear(channel, OsdRect::Name) {
+            erases.push(erase);
         }
 
         if cfg.datetime.enabled {
             let when = Local::now();
             let text = format_datetime(when, cfg.datetime.date_format, cfg.datetime.time_format);
-            if let Some(plan) =
-                state.plan(channel, OsdRect::DateTime, &text, cfg.datetime.position, dims)
-            {
+            if let Some(plan) = state.plan(
+                channel,
+                OsdRect::DateTime,
+                &text,
+                cfg.datetime.position,
+                dims,
+            ) {
                 plans.push(plan);
             }
+        } else if let Some(erase) = state.clear(channel, OsdRect::DateTime) {
+            erases.push(erase);
         }
 
-        if plans.is_empty() {
+        if plans.is_empty() && erases.is_empty() {
             continue;
         }
 
         let vi = args.vi.as_ptr();
         if !state.ensure_canvas(channel, dims, &args.ipc, vi) {
             continue;
+        }
+
+        // Wipe switched-off overlays first, so a same-tick redraw of the other
+        // overlay cannot be clobbered by the erase.
+        for erase in &erases {
+            if let Err(e) = args.ipc.osd_draw_str(
+                i32::from(channel),
+                CANVAS_RECT,
+                erase.draw_x,
+                erase.draw_y,
+                &erase.glyphs,
+            ) {
+                warn!(error = %e, channel, "osd_draw_str disable-erase failed");
+            }
         }
 
         // Paint into the shared canvas. Order does not matter for persistence —
@@ -360,19 +454,92 @@ mod tests {
     }
 
     #[test]
+    fn test_clear_erases_a_disabled_overlay_at_its_last_position() {
+        // Both overlays share one composited canvas, so an overlay that simply
+        // stops being redrawn stays on screen. Disabling must space-fill it.
+        let mut state = RenderState::default();
+        let drawn = state
+            .plan(0, OsdRect::Name, "CAM1", Corner::UpperLeft, MAIN)
+            .unwrap();
+
+        let erase = state.clear(0, OsdRect::Name).expect("must erase");
+        assert_eq!(erase.glyphs, vec![0x20; 4]);
+        assert_eq!((erase.draw_x, erase.draw_y), (drawn.draw_x, drawn.draw_y));
+    }
+
+    #[test]
+    fn test_clear_is_idempotent_so_it_can_run_every_tick() {
+        let mut state = RenderState::default();
+        state.plan(0, OsdRect::Name, "CAM1", Corner::UpperLeft, MAIN);
+
+        assert!(state.clear(0, OsdRect::Name).is_some());
+        assert!(
+            state.clear(0, OsdRect::Name).is_none(),
+            "a cleared slot must not keep re-erasing at 1 Hz"
+        );
+    }
+
+    #[test]
+    fn test_clear_of_a_never_drawn_overlay_is_a_noop() {
+        let mut state = RenderState::default();
+        assert!(state.clear(0, OsdRect::DateTime).is_none());
+    }
+
+    #[test]
+    fn test_disable_all_turns_the_rect_off_and_forces_a_full_redraw() {
+        use crate::hal::anyka::ipc::test_helpers::*;
+
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::<Vec<u8>>::new()));
+        let sink = seen.clone();
+        let daemon = FakeDaemon::start(move |_cmd, req| {
+            sink.lock().unwrap().push(req.to_vec());
+            (0, vec![])
+        });
+        let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+        ipc.set_epochs_for_test(1, 1);
+
+        let mut state = RenderState::default();
+        state.plan(0, OsdRect::Name, "CAM1", Corner::UpperLeft, MAIN);
+        state.canvas_ready[0] = true;
+
+        state.disable_all(&ipc);
+
+        // [i32 channel][i32 rect][i32 enable] — enable must be 0.
+        let last = seen.lock().unwrap().last().cloned().expect("an IPC call");
+        assert_eq!(&last[8..12], &0i32.to_le_bytes(), "must disable the rect");
+        assert!(!state.canvas_ready[0], "re-enabling must redo set_rect");
+        assert!(
+            state.clear(0, OsdRect::Name).is_none(),
+            "slot memory must be dropped so the overlay fully redraws"
+        );
+    }
+
+    #[test]
     fn test_name_and_datetime_share_independent_slots() {
         let mut state = RenderState::default();
         let name = state
             .plan(0, OsdRect::Name, "CAM1", Corner::UpperLeft, MAIN)
             .unwrap();
         let dt = state
-            .plan(0, OsdRect::DateTime, "2026-08-24 12:00:00", Corner::LowerRight, MAIN)
+            .plan(
+                0,
+                OsdRect::DateTime,
+                "2026-08-24 12:00:00",
+                Corner::LowerRight,
+                MAIN,
+            )
             .unwrap();
         assert_eq!(name.draw_y, 0);
         assert_eq!(dt.draw_y, 720 - 32);
         // Second datetime tick changes text only — name slot untouched.
         let dt2 = state
-            .plan(0, OsdRect::DateTime, "2026-08-24 12:00:01", Corner::LowerRight, MAIN)
+            .plan(
+                0,
+                OsdRect::DateTime,
+                "2026-08-24 12:00:01",
+                Corner::LowerRight,
+                MAIN,
+            )
             .unwrap();
         assert!(dt2.content_changed);
         let name2 = state

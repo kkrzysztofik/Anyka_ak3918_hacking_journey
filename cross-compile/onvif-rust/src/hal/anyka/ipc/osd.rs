@@ -46,16 +46,17 @@ impl AnykaIpc {
     }
 
     /// Place an OSD rectangle on a channel.
+    ///
+    /// `geom` is `(x, y, w, h)` — the shape [`crate::osd::layout::canvas_rect`]
+    /// returns, so callers pass it straight through.
     pub fn osd_set_rect(
         &self,
         vi_handle: *mut c_void,
         channel: i32,
         rect: i32,
-        x: i32,
-        y: i32,
-        w: i32,
-        h: i32,
+        geom: (i32, i32, i32, i32),
     ) -> PlatformResult<()> {
+        let (x, y, w, h) = geom;
         let mut req_data = (vi_handle as u64).to_le_bytes().to_vec();
         for v in [channel, rect, x, y, w, h] {
             req_data.extend_from_slice(&v.to_le_bytes());
