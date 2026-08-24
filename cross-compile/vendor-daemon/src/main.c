@@ -17,10 +17,11 @@
  *   - Frame sub socket: /tmp/vd-frame-sub.sock
  *     Dedicated notification channel for sub stream push frames
  *
- * Shared Memory Ring Buffer (Approach A):
+ * Shared Memory Ring Buffer:
  *   - Zero-copy frame delivery via shared memory
  *   - 20-byte notification protocol on frame socket
- *   - Falls back to socket-based delivery on ring buffer overflow
+ *   - On overflow: I-frame eviction of P/Pi slots, else drop (+ optional
+ *     VD_NOTIFY_FRAME_DROPPED); no socket payload fallback
  *
  * Connection model:
  *   poll()-based multiplexing of up to MAX_CLIENTS concurrent connections.
@@ -136,11 +137,11 @@ static void signal_handler(int sig)
  *   ipc.c           - read_exact, write_exact, send_response, socket helpers
  *   push.c          - push-mode frame delivery and push thread
  *   handlers_vi.c   - VI command handlers
- *   handlers_vpss.c - VPSS command handlers
  *   handlers_venc.c - VENC command handlers (non-push)
  *   handlers_audio.c - AI/AENC command handlers
  *   handlers_isp.c  - ISP/imaging command handlers
- *   dispatcher.c    - process_request
+ *   handlers_osd.c  - OSD command handlers
+ *   dispatcher.c    - process_request (includes VPSS no-ops)
  */
 
 /**

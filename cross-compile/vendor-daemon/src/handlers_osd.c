@@ -43,16 +43,7 @@ static int osd_args_valid(int32_t channel, int32_t rect)
            rect >= 0 && rect <= OSD_MAX_RECT;
 }
 
-/**
- * handle_osd_init - IPC handler for CMD_OSD_INIT.
- *
- * Request: [u64 vi_token]
- * Response: [i32 main_w][i32 main_h][i32 sub_w][i32 sub_h] — the per-channel
- * max rect, which Rust needs for its layout math.
- *
- * Font file must be set BEFORE ak_osd_init; that ordering is what
- * platform/libmpi/demo/osd_demo does and it is load-bearing.
- */
+/* CMD_OSD_INIT. Request: [u64 vi_token] */
 int handle_osd_init(int fd, const uint8_t *req, uint32_t req_len)
 {
     void *handle = NULL;
@@ -108,11 +99,7 @@ int handle_osd_init(int fd, const uint8_t *req, uint32_t req_len)
     return send_response(fd, STATUS_OK, dims, sizeof(dims));
 }
 
-/**
- * handle_osd_set_rect - IPC handler for CMD_OSD_SET_RECT.
- *
- * Request: [u64 vi_token][i32 channel][i32 rect][i32 x][i32 y][i32 w][i32 h]
- */
+/* CMD_OSD_SET_RECT. Request: [u64 vi_token][i32 channel][i32 rect][i32 x][i32 y][i32 w][i32 h] */
 int handle_osd_set_rect(int fd, const uint8_t *req, uint32_t req_len)
 {
     void *handle = NULL;
@@ -145,15 +132,7 @@ int handle_osd_set_rect(int fd, const uint8_t *req, uint32_t req_len)
     return send_response(fd, STATUS_OK, NULL, 0);
 }
 
-/**
- * handle_osd_draw_str - IPC handler for CMD_OSD_DRAW_STR.
- *
- * Request: [i32 channel][i32 rect][i32 x][i32 y][u16 glyph_count][u16 glyphs...]
- *
- * Glyphs are already vendor-encoded by Rust (ASCII: u16 == byte).  Rust also
- * space-pads a shrinking string to its previous length, which is why there is
- * no CMD_OSD_CLEAN_STR — the vendor's own osd_disp_stat does exactly this.
- */
+/* CMD_OSD_DRAW_STR. Request: [i32 channel][i32 rect][i32 x][i32 y][u16 glyph_count][u16 glyphs..... */
 int handle_osd_draw_str(int fd, const uint8_t *req, uint32_t req_len)
 {
     int32_t channel, rect, x, y;
@@ -202,11 +181,7 @@ int handle_osd_draw_str(int fd, const uint8_t *req, uint32_t req_len)
     return send_response(fd, STATUS_OK, NULL, 0);
 }
 
-/**
- * handle_osd_set_enable - IPC handler for CMD_OSD_SET_ENABLE.
- *
- * Request: [i32 channel][i32 rect][i32 enable]
- */
+/* CMD_OSD_SET_ENABLE. Request: [i32 channel][i32 rect][i32 enable] */
 int handle_osd_set_enable(int fd, const uint8_t *req, uint32_t req_len)
 {
     int32_t channel, rect, enable;
@@ -229,14 +204,7 @@ int handle_osd_set_enable(int fd, const uint8_t *req, uint32_t req_len)
     return send_response(fd, STATUS_OK, NULL, 0);
 }
 
-/**
- * handle_osd_set_style - IPC handler for CMD_OSD_SET_STYLE.
- *
- * Request: [i32 front_color][i32 bg_color][i32 edge_color][i32 alpha]
- *
- * All four are DEVICE-GLOBAL in the vendor API — no channel, no rect.  The
- * ONVIF layer advertises this honestly rather than faking per-OSD colour.
- */
+/* CMD_OSD_SET_STYLE. Request: [i32 front_color][i32 bg_color][i32 edge_color][i32 alpha] */
 int handle_osd_set_style(int fd, const uint8_t *req, uint32_t req_len)
 {
     int32_t front, bg, edge, alpha;

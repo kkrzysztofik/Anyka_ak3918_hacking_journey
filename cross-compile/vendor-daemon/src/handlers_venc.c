@@ -8,19 +8,7 @@
 #include "globals.h"
 #include "ak_venc.h"
 
-/**
- * handle_venc_set_cfg_path - IPC handler for CMD_VENC_SET_CFG_PATH (no-op).
- *
- * ak_venc_set_cfg_path() is not exported by the libre_anyka_app SDK variant; this
- * function always responds STATUS_OK without calling any SDK function.
- * The V2 encoder in this SDK variant uses the default path (/etc/jffs2/venc.cfg)
- * and does not support overriding it at runtime.
- *
- * @param fd      Client socket file descriptor.
- * @param req     Ignored.
- * @param req_len Ignored.
- * @return        0 on success, -1 on write error.
- */
+/* CMD_VENC_SET_CFG_PATH (no-op). */
 int handle_venc_set_cfg_path(int fd, const uint8_t *req, uint32_t req_len)
 {
     (void)req;
@@ -29,21 +17,7 @@ int handle_venc_set_cfg_path(int fd, const uint8_t *req, uint32_t req_len)
     return send_response(fd, STATUS_OK, NULL, 0);
 }
 
-/**
- * handle_venc_open - IPC handler for CMD_VENC_OPEN.
- *
- * Opens a video encoder instance and returns a 64-bit opaque handle.
- *
- * Wire format for encode_param (48 bytes, all i32/u32 LE):
- *   width(u32) height(u32) minqp(i32) maxqp(i32) fps(i32) goplen(i32)
- *   bps(i32) profile(i32) use_chn(i32) enc_grp(i32) br_mode(i32) enc_out_type(i32)
- * Response payload: [i64 handle] = 8 bytes.
- *
- * @param fd      Client socket file descriptor, used to send the response.
- * @param req     Request payload bytes (little-endian, layout described above).
- * @param req_len Length of @p req in bytes.
- * @return        0 on success, -1 on I/O error.
- */
+/* CMD_VENC_OPEN — resp [u64 token]. Wire: encode_param 48 bytes LE. */
 int handle_venc_open(int fd, const uint8_t *req, uint32_t req_len)
 {
     if (req_len < 48) {
@@ -87,18 +61,7 @@ int handle_venc_open(int fd, const uint8_t *req, uint32_t req_len)
     return send_token_response(fd, vd_obj_token(slot));
 }
 
-/**
- * handle_venc_close - IPC handler for CMD_VENC_CLOSE.
- *
- * Closes the video encoder identified by the 64-bit handle in the request.
- *
- * Wire format: [u64 handle] = 8 bytes.
- *
- * @param fd      Client socket file descriptor, used to send the response.
- * @param req     Request payload bytes (little-endian, layout described above).
- * @param req_len Length of @p req in bytes.
- * @return        0 on success, -1 on I/O error.
- */
+/* CMD_VENC_CLOSE. Wire format: [u64 handle] = 8 bytes. */
 int handle_venc_close(int fd, const uint8_t *req, uint32_t req_len)
 {
     if (req_len < sizeof(uint64_t))
@@ -115,18 +78,7 @@ int handle_venc_close(int fd, const uint8_t *req, uint32_t req_len)
     return send_response(fd, ret, NULL, 0);
 }
 
-/**
- * handle_venc_set_rc - IPC handler for CMD_VENC_SET_RC.
- *
- * Sets the bitrate (rate control) parameter on a running encoder.
- *
- * Wire format: [u64 handle][i32 bps] = 12 bytes.
- *
- * @param fd      Client socket file descriptor, used to send the response.
- * @param req     Request payload bytes (little-endian, layout described above).
- * @param req_len Length of @p req in bytes.
- * @return        0 on success, -1 on I/O error.
- */
+/* CMD_VENC_SET_RC. Wire format: [u64 handle][i32 bps] = 12 bytes. */
 int handle_venc_set_rc(int fd, const uint8_t *req, uint32_t req_len)
 {
     /* u64 handle + i32 bps = 12 bytes */
@@ -140,18 +92,7 @@ int handle_venc_set_rc(int fd, const uint8_t *req, uint32_t req_len)
     return send_response(fd, ret, NULL, 0);
 }
 
-/**
- * handle_venc_set_iframe - IPC handler for CMD_VENC_SET_IFRAME.
- *
- * Forces the next encoded frame on the given encoder to be an intra (I) frame.
- *
- * Wire format: [u64 handle] = 8 bytes.
- *
- * @param fd      Client socket file descriptor, used to send the response.
- * @param req     Request payload bytes (little-endian, layout described above).
- * @param req_len Length of @p req in bytes.
- * @return        0 on success, -1 on I/O error.
- */
+/* CMD_VENC_SET_IFRAME. Wire format: [u64 handle] = 8 bytes. */
 int handle_venc_set_iframe(int fd, const uint8_t *req, uint32_t req_len)
 {
     if (req_len < sizeof(uint64_t))
@@ -163,20 +104,7 @@ int handle_venc_set_iframe(int fd, const uint8_t *req, uint32_t req_len)
     return send_response(fd, ret, NULL, 0);
 }
 
-/**
- * handle_venc_request_stream - IPC handler for CMD_VENC_REQUEST_STREAM.
- *
- * Binds a VI input to a VENC encoder and opens a stream handle used for
- * subsequent push/cancel calls.
- *
- * Wire format: [u64 vi_handle][u64 venc_handle] = 16 bytes.
- * Response payload: [i64 stream_handle] = 8 bytes.
- *
- * @param fd      Client socket file descriptor, used to send the response.
- * @param req     Request payload bytes (little-endian, layout described above).
- * @param req_len Length of @p req in bytes.
- * @return        0 on success, -1 on I/O error.
- */
+/* CMD_VENC_REQUEST_STREAM. Wire format: [u64 vi_handle][u64 venc_handle] = 16 bytes. */
 int handle_venc_request_stream(int fd, const uint8_t *req, uint32_t req_len)
 {
     /* u64 vi_handle + u64 venc_handle = 16 bytes */
@@ -208,20 +136,7 @@ int handle_venc_request_stream(int fd, const uint8_t *req, uint32_t req_len)
     return send_token_response(fd, vd_obj_token(slot));
 }
 
-/**
- * handle_venc_cancel_stream - IPC handler for CMD_VENC_CANCEL_STREAM.
- *
- * Cancels an active stream binding created by CMD_VENC_REQUEST_STREAM.
- * Uses the shared bounded cancel helper so a wedged SDK cancel cannot block
- * the accept loop forever.
- *
- * Wire format: [u64 stream_handle] = 8 bytes.
- *
- * @param fd      Client socket file descriptor, used to send the response.
- * @param req     Request payload bytes (little-endian, layout described above).
- * @param req_len Length of @p req in bytes.
- * @return        0 on success, -1 on I/O error.
- */
+/* CMD_VENC_CANCEL_STREAM. Wire format: [u64 stream_handle] = 8 bytes. */
 int handle_venc_cancel_stream(int fd, const uint8_t *req, uint32_t req_len)
 {
     if (req_len < sizeof(uint64_t))
