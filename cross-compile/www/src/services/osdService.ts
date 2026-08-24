@@ -50,7 +50,13 @@ export interface OsdSettings {
 
 const CORNERS: OsdCorner[] = ['UpperLeft', 'UpperRight', 'LowerLeft', 'LowerRight'];
 
-/** ONVIF colourspace the camera reports its palette in. */
+/**
+ * ONVIF colourspace the camera reports its palette in.
+ *
+ * An opaque identifier from the ONVIF spec, never dereferenced. It must match
+ * byte-for-byte, so it cannot be "upgraded" to https.
+ */
+// NOSONAR typescript:S5332 -- XML namespace identifier, not a network endpoint
 const COLORSPACE_YCBCR = 'http://www.onvif.org/ver10/colorspace/YCbCr';
 
 /**

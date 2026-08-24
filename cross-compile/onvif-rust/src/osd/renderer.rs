@@ -534,4 +534,152 @@ mod tests {
             .unwrap();
         assert!(!name2.content_changed);
     }
+
+    // ---- tick_once: the integration point of config, state and IPC --------
+    //
+    // Command IDs are duplicated as literals because the `CMD_OSD_*` consts are
+    // private to hal::anyka::ipc. See protocol.h.
+    const CMD_SET_RECT: i32 = 23;
+    const CMD_DRAW_STR: i32 = 24;
+    const CMD_SET_ENABLE: i32 = 25;
+    const CMD_SET_STYLE: i32 = 26;
+
+    type Seen = std::sync::Arc<std::sync::Mutex<Vec<(i32, Vec<u8>)>>>;
+
+    /// A daemon that records every command, plus wired-up renderer args.
+    ///
+    /// The `FakeDaemon` is returned so the caller keeps it alive for the test.
+    fn tick_harness(
+        cfg: OsdConfig,
+    ) -> (
+        RenderState,
+        OsdRendererArgs,
+        Seen,
+        crate::hal::anyka::ipc::test_helpers::FakeDaemon,
+    ) {
+        use crate::hal::anyka::ipc::test_helpers::*;
+
+        let seen: Seen = Default::default();
+        let sink = seen.clone();
+        let daemon = FakeDaemon::start(move |cmd, req| {
+            sink.lock().unwrap().push((cmd, req.to_vec()));
+            (0, vec![])
+        });
+        let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+        ipc.set_epochs_for_test(1, 1);
+
+        let (_tx, rx) = broadcast::channel(1);
+        let args = OsdRendererArgs {
+            ipc: Arc::new(ipc),
+            vi: Arc::new(crate::hal::common::video::VideoInputHandle::test_handle()),
+            dims: [
+                MAIN,
+                ChannelDims {
+                    width: 640,
+                    height: 360,
+                },
+            ],
+            config: Arc::new(parking_lot::RwLock::new(cfg)),
+            device_name: "ipcam".into(),
+            shutdown: rx,
+        };
+        (RenderState::default(), args, seen, daemon)
+    }
+
+    fn count_of(seen: &Seen, cmd: i32) -> usize {
+        seen.lock()
+            .unwrap()
+            .iter()
+            .filter(|(c, _)| *c == cmd)
+            .count()
+    }
+
+    #[test]
+    fn test_tick_draws_both_overlays_on_both_channels() {
+        let (mut state, args, seen, _d) = tick_harness(OsdConfig::default());
+        let mut style = None;
+
+        tick_once(&mut state, &args, &mut style);
+
+        assert_eq!(count_of(&seen, CMD_SET_RECT), 2, "one canvas per channel");
+        assert_eq!(count_of(&seen, CMD_DRAW_STR), 4, "2 overlays x 2 channels");
+        assert_eq!(count_of(&seen, CMD_SET_STYLE), 1);
+    }
+
+    #[test]
+    fn test_tick_pushes_style_once_not_every_second() {
+        let (mut state, args, seen, _d) = tick_harness(OsdConfig::default());
+        let mut style = None;
+
+        tick_once(&mut state, &args, &mut style);
+        tick_once(&mut state, &args, &mut style);
+
+        assert_eq!(count_of(&seen, CMD_SET_STYLE), 1, "style is not per-tick");
+    }
+
+    #[test]
+    fn test_tick_disables_the_rect_when_osd_is_switched_off_globally() {
+        // The regression this guards: returning early left the canvas enabled
+        // with the last timestamp frozen on the video forever.
+        let (mut state, args, seen, _d) = tick_harness(OsdConfig::default());
+        let mut style = None;
+        tick_once(&mut state, &args, &mut style);
+        seen.lock().unwrap().clear();
+
+        args.config.write().enabled = false;
+        tick_once(&mut state, &args, &mut style);
+
+        let disables: Vec<Vec<u8>> = seen
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(c, _)| *c == CMD_SET_ENABLE)
+            .map(|(_, r)| r.clone())
+            .collect();
+        assert_eq!(disables.len(), 2, "one per channel");
+        for req in disables {
+            assert_eq!(&req[8..12], &0i32.to_le_bytes(), "enable flag must be 0");
+        }
+    }
+
+    #[test]
+    fn test_tick_erases_an_individually_disabled_overlay() {
+        // The canvas stays composited for the other overlay, so this one has to
+        // be painted over with spaces rather than just skipped.
+        let (mut state, args, seen, _d) = tick_harness(OsdConfig::default());
+        let mut style = None;
+        tick_once(&mut state, &args, &mut style);
+        seen.lock().unwrap().clear();
+
+        args.config.write().name.enabled = false;
+        tick_once(&mut state, &args, &mut style);
+
+        let all_spaces = seen
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(c, _)| *c == CMD_DRAW_STR)
+            .any(|(_, r)| {
+                let count = u16::from_le_bytes([r[16], r[17]]) as usize;
+                count > 0 && r[18..18 + count * 2].chunks(2).all(|g| g == [0x20, 0x00])
+            });
+        assert!(all_spaces, "disabled overlay must be space-filled");
+    }
+
+    #[test]
+    fn test_tick_is_a_noop_once_everything_is_already_off() {
+        let (mut state, args, seen, _d) = tick_harness(OsdConfig::default());
+        let mut style = None;
+        tick_once(&mut state, &args, &mut style);
+        args.config.write().enabled = false;
+        tick_once(&mut state, &args, &mut style);
+        seen.lock().unwrap().clear();
+
+        tick_once(&mut state, &args, &mut style);
+
+        assert!(
+            seen.lock().unwrap().is_empty(),
+            "a disabled OSD must not chatter at 1 Hz"
+        );
+    }
 }
