@@ -320,6 +320,19 @@ int main(int argc, char *argv[])
     struct pollfd fds[MAX_CLIENTS + 3];
     int nfds = 0;
 
+    struct frame_listen {
+        int *server_fd;
+        int *client_fd;
+        pthread_mutex_t *lock;
+        const char *name;
+    };
+    struct frame_listen frame_chs[] = {
+        { &g_frame_main_server_fd, &g_frame_main_client_fd,
+          &g_frame_main_client_lock, "main" },
+        { &g_frame_sub_server_fd, &g_frame_sub_client_fd,
+          &g_frame_sub_client_lock, "sub" },
+    };
+
     memset(fds, 0, sizeof(fds));
 
     /* Add control server socket */
@@ -369,75 +382,52 @@ int main(int argc, char *argv[])
             }
         }
 
-        /* ── Accept new connection on main frame socket ──────────────── */
-        if (fds[1].revents & POLLIN) {
-            int client_fd = accept(g_frame_main_server_fd, NULL, NULL);
-            if (client_fd >= 0) {
-                int has_existing = 0;
-                pthread_mutex_lock(&g_frame_main_client_lock);
-                has_existing = (g_frame_main_client_fd >= 0);
-                if (!has_existing) {
-                    g_frame_main_client_fd = client_fd;
-                }
-                pthread_mutex_unlock(&g_frame_main_client_lock);
+        /* ── Accept new connections on main/sub frame sockets ─────────── */
+        {
+            size_t ch;
+            for (ch = 0; ch < sizeof(frame_chs) / sizeof(frame_chs[0]); ch++) {
+                int poll_idx = (int)ch + 1; /* fds[1]=main, fds[2]=sub */
+                struct frame_listen *fl = &frame_chs[ch];
+                int client_fd;
 
-                if (has_existing) {
-                    log_warn("[daemon] main frame client already connected, rejecting fd=%d", client_fd);
-                    close(client_fd);
-                } else if (nfds < MAX_CLIENTS + 3) {
-                    fds[nfds].fd = client_fd;
-                    fds[nfds].events = POLLIN;
-                    fds[nfds].revents = 0;
-                    nfds++;
-                    log_info("[daemon] main frame client connected fd=%d", client_fd);
-                } else {
-                    pthread_mutex_lock(&g_frame_main_client_lock);
-                    if (g_frame_main_client_fd == client_fd) {
-                        g_frame_main_client_fd = -1;
+                if (!(fds[poll_idx].revents & POLLIN))
+                    continue;
+
+                client_fd = accept(*fl->server_fd, NULL, NULL);
+                if (client_fd < 0) {
+                    if (errno != EINTR)
+                        log_error("accept (frame-%s): %s", fl->name, strerror(errno));
+                    continue;
+                }
+
+                {
+                    int has_existing = 0;
+                    pthread_mutex_lock(fl->lock);
+                    has_existing = (*fl->client_fd >= 0);
+                    if (!has_existing)
+                        *fl->client_fd = client_fd;
+                    pthread_mutex_unlock(fl->lock);
+
+                    if (has_existing) {
+                        log_warn("[daemon] %s frame client already connected, rejecting fd=%d",
+                                 fl->name, client_fd);
+                        close(client_fd);
+                    } else if (nfds < MAX_CLIENTS + 3) {
+                        fds[nfds].fd = client_fd;
+                        fds[nfds].events = POLLIN;
+                        fds[nfds].revents = 0;
+                        nfds++;
+                        log_info("[daemon] %s frame client connected fd=%d", fl->name, client_fd);
+                    } else {
+                        pthread_mutex_lock(fl->lock);
+                        if (*fl->client_fd == client_fd)
+                            *fl->client_fd = -1;
+                        pthread_mutex_unlock(fl->lock);
+                        log_error("[daemon] max clients (%d) reached, rejecting %s frame fd=%d",
+                                  MAX_CLIENTS, fl->name, client_fd);
+                        close(client_fd);
                     }
-                    pthread_mutex_unlock(&g_frame_main_client_lock);
-                    log_error("[daemon] max clients (%d) reached, rejecting main frame fd=%d",
-                              MAX_CLIENTS, client_fd);
-                    close(client_fd);
                 }
-            } else if (errno != EINTR) {
-                log_error("accept (frame-main): %s", strerror(errno));
-            }
-        }
-
-        /* ── Accept new connection on sub frame socket ───────────────── */
-        if (fds[2].revents & POLLIN) {
-            int client_fd = accept(g_frame_sub_server_fd, NULL, NULL);
-            if (client_fd >= 0) {
-                int has_existing = 0;
-                pthread_mutex_lock(&g_frame_sub_client_lock);
-                has_existing = (g_frame_sub_client_fd >= 0);
-                if (!has_existing) {
-                    g_frame_sub_client_fd = client_fd;
-                }
-                pthread_mutex_unlock(&g_frame_sub_client_lock);
-
-                if (has_existing) {
-                    log_warn("[daemon] sub frame client already connected, rejecting fd=%d", client_fd);
-                    close(client_fd);
-                } else if (nfds < MAX_CLIENTS + 3) {
-                    fds[nfds].fd = client_fd;
-                    fds[nfds].events = POLLIN;
-                    fds[nfds].revents = 0;
-                    nfds++;
-                    log_info("[daemon] sub frame client connected fd=%d", client_fd);
-                } else {
-                    pthread_mutex_lock(&g_frame_sub_client_lock);
-                    if (g_frame_sub_client_fd == client_fd) {
-                        g_frame_sub_client_fd = -1;
-                    }
-                    pthread_mutex_unlock(&g_frame_sub_client_lock);
-                    log_error("[daemon] max clients (%d) reached, rejecting sub frame fd=%d",
-                              MAX_CLIENTS, client_fd);
-                    close(client_fd);
-                }
-            } else if (errno != EINTR) {
-                log_error("accept (frame-sub): %s", strerror(errno));
             }
         }
 
