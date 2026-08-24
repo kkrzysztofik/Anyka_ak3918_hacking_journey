@@ -346,53 +346,6 @@ static inline void *vd_ring_create(void)
 }
 
 /**
- * @brief Open existing ring buffer (client side - Rust)
- *
- * Opens the shared memory file and maps it. The Rust side uses this
- * to access frames written by the daemon.
- *
- * @return Pointer to mapped region on success, NULL on failure
- */
-static inline void *vd_ring_open(void)
-{
-    int fd;
-    void *base;
-    struct vd_ring_header *hdr;
-
-    /* Open existing shared memory file using regular file */
-    fd = open(VD_SHM_PATH, O_RDWR, 0600);
-    if (fd >= 0) {
-        /* Set close-on-exec to prevent fd leaking to child processes */
-        int flags = fcntl(fd, F_GETFD);
-        if (flags >= 0) {
-            fcntl(fd, F_SETFD, flags | FD_CLOEXEC);
-        }
-    }
-    if (fd < 0) {
-        return NULL;
-    }
-
-    /* Map the region */
-    base = mmap(NULL, VD_SHM_TOTAL_SIZE, PROT_READ | PROT_WRITE,
-                MAP_SHARED, fd, 0);
-    close(fd);
-
-    if (base == MAP_FAILED) {
-        return NULL;
-    }
-
-    /* Validate header (accept every supported version 1..VD_SHM_VERSION) */
-    hdr = vd_ring_get_header(base);
-    if (hdr->magic != VD_SHM_MAGIC ||
-        hdr->version < 1 || hdr->version > VD_SHM_VERSION) {
-        munmap(base, VD_SHM_TOTAL_SIZE);
-        return NULL;
-    }
-
-    return base;
-}
-
-/**
  * @brief Write a frame to the next available slot (daemon side)
  *
  * Uses atomic operations for sequence numbers. Performs overflow check
@@ -508,94 +461,6 @@ static inline int vd_ring_evict_oldest_pframe(void *base)
 }
 
 /**
- * @brief Read a frame from a slot (Rust consumer side)
- *
- * Called when receiving notification of a ready slot.
- * Uses CAS to atomically check and claim the slot (lease-based access).
- * Does NOT mark slot as EMPTY - caller must call vd_ring_release() after processing.
- *
- * @param base       Ring buffer base pointer
- * @param slot_idx   Slot index to read from
- * @param out_data   Buffer to copy frame data into (can be NULL if only checking)
- * @param out_cap    Capacity of out_data buffer (must be >= frame_len)
- * @param out_len    Pointer to store frame length (can be NULL)
- *
- * @return 0 on success, -1 if slot not ready or already claimed, -2 on error or buffer too small
- */
-static inline int vd_ring_read(void *base, uint32_t slot_idx, 
-                                void *out_data, uint32_t out_cap, uint32_t *out_len)
-{
-    struct vd_slot_header *slot;
-    uint32_t expected = VD_SLOT_READY;
-
-    if (base == NULL || slot_idx >= VD_SHM_SLOT_COUNT) {
-        return -2;
-    }
-
-    slot = vd_ring_get_slot_hdr(base, slot_idx);
-
-    /* Atomically CAS from READY to READING (lease-based checkout) */
-    if (!__atomic_compare_exchange_n(&slot->state, &expected, VD_SLOT_READING,
-                                     0, __ATOMIC_ACQUIRE, __ATOMIC_ACQUIRE)) {
-        return -1;  /* Slot not ready or already claimed */
-    }
-
-    /* Check buffer capacity before copying */
-    if (out_data != NULL && slot->frame_len > out_cap) {
-        /* Release slot back to EMPTY */
-        __atomic_store_n(&slot->state, VD_SLOT_EMPTY, __ATOMIC_RELEASE);
-        return -2;  /* Buffer too small */
-    }
-
-    /* Copy frame data if buffers provided */
-    if (out_data != NULL && out_len != NULL) {
-        *out_len = slot->frame_len;
-        memcpy(out_data, vd_ring_get_slot_data(base, slot_idx), slot->frame_len);
-    } else if (out_len != NULL) {
-        /* Only fetch length if requested */
-        *out_len = slot->frame_len;
-    }
-
-    return 0;
-}
-
-/**
- * @brief Release a slot back to the pool (Rust consumer)
- *
- * Called after processing a frame to release the slot back to the pool.
- * Uses CAS to atomically transition from READING to EMPTY.
- *
- * @param base     Ring buffer base pointer
- * @param slot_idx Slot index to release
- *
- * @return 0 on success, -1 if slot not in READING state, -2 on error
- */
-static inline int vd_ring_release(void *base, uint32_t slot_idx)
-{
-    struct vd_ring_header *hdr;
-    struct vd_slot_header *slot;
-    uint32_t expected = VD_SLOT_READING;
-
-    if (base == NULL || slot_idx >= VD_SHM_SLOT_COUNT) {
-        return -2;
-    }
-
-    slot = vd_ring_get_slot_hdr(base, slot_idx);
-
-    /* CAS from READING to EMPTY */
-    if (!__atomic_compare_exchange_n(&slot->state, &expected, VD_SLOT_EMPTY,
-                                     0, __ATOMIC_RELEASE, __ATOMIC_ACQUIRE)) {
-        return -1;  /* Slot not in READING state */
-    }
-
-    /* Increment read sequence */
-    hdr = vd_ring_get_header(base);
-    __atomic_add_fetch(&hdr->read_seq, 1, __ATOMIC_RELEASE);
-
-    return 0;
-}
-
-/**
  * @brief Reset ring buffer state for a new push session
  *
  * Resets sequences, flags, diagnostic counters, and all slot states to
@@ -637,17 +502,6 @@ static inline void vd_ring_shutdown(void *base)
     if (base == NULL) return;
     hdr = vd_ring_get_header(base);
     __atomic_or_fetch(&hdr->flags, VD_FLAG_SHUTDOWN, __ATOMIC_RELEASE);
-}
-
-/**
- * @brief Check if shutdown was requested
- */
-static inline int vd_ring_is_shutdown(void *base)
-{
-    struct vd_ring_header *hdr;
-    if (base == NULL) return 1;
-    hdr = vd_ring_get_header(base);
-    return (hdr->flags & VD_FLAG_SHUTDOWN) != 0;
 }
 
 /**
