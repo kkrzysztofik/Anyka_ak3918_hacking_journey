@@ -1445,7 +1445,10 @@ impl Application {
                              cannot be recovered without a restart"
                         );
                     }
-                    match platform.register_owned_frame_callback(bridge) {
+                    match platform
+                        .register_owned_frame_callback(Arc::clone(&bridge)
+                            as Arc<dyn crate::platform::frame::OwnedFrameCallback>)
+                    {
                         Ok(()) => {
                             tracing::info!(
                                 "Owned frame callback registered with platform (zero-copy)"
@@ -1459,6 +1462,30 @@ impl Application {
                             );
                         }
                     }
+                }
+
+                // Audio is strictly additive: a failed mic must never take video
+                // down, and the track is only advertised once the daemon has
+                // accepted the push request (start() publishes the ASC only on
+                // success).
+                let (audio_enabled, audio_sample_rate) = {
+                    let c = config_runtime.read();
+                    (
+                        c.stream_profile_1.audio_enabled,
+                        c.stream_profile_1.audio_sample_rate,
+                    )
+                };
+                if audio_enabled
+                    && let Some(platform) = app_state.platform()
+                    && let Err(e) = platform
+                        .audio_encoder()
+                        .start(&bridge, audio_sample_rate, 1)
+                        .await
+                {
+                    tracing::error!(
+                        error = %e,
+                        "Audio capture failed to start; continuing video-only"
+                    );
                 }
                 Some(service)
             }

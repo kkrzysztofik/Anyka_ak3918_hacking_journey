@@ -5,6 +5,7 @@ use tracing::error;
 
 use crate::hal::common::audio::AudioHalTrait;
 use crate::hal::common::{AK_FAILED_I32, aenc_attr, audio_param, pcm_param};
+use crate::platform::PlatformResult;
 
 use super::{
     AnykaIpc, CMD_AENC_CLOSE, CMD_AENC_OPEN, CMD_AENC_SET_ATTR, CMD_AI_CLOSE, CMD_AI_OPEN,
@@ -103,5 +104,15 @@ impl AudioHalTrait for AnykaIpc {
                 AK_FAILED_I32
             }
         }
+    }
+
+    fn start_audio_push(&self, sample_rate: u32, channels: u32) -> PlatformResult<()> {
+        // The inherent method on AnykaIpc (mod.rs) has the same name; Rust
+        // method resolution prefers it over this trait method, so no recursion.
+        self.start_audio_push(sample_rate, channels)
+    }
+
+    fn stop_audio_push(&self) -> PlatformResult<()> {
+        self.stop_audio_push()
     }
 }

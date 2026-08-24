@@ -437,6 +437,22 @@ pub trait AudioEncoder: Send + Sync {
 
     /// Get all audio encoder configurations.
     async fn get_configurations(&self) -> PlatformResult<Vec<AudioEncoderConfig>>;
+
+    /// Start push-based audio delivery and advertise the track on the bridge.
+    ///
+    /// The ASC is published only after the daemon accepts the push request, so
+    /// the SDP never promises a track the camera is not sending.
+    ///
+    /// Default: no-op. Audio is strictly additive — a platform without a live
+    /// mic simply leaves the track unadvertised and video unaffected.
+    async fn start(
+        &self,
+        _bridge: &Arc<crate::streaming::bridge::StreamingBridge>,
+        _sample_rate: u32,
+        _channels: u32,
+    ) -> PlatformResult<()> {
+        Ok(())
+    }
 }
 
 /// PTZ control trait for pan/tilt/zoom operations.
