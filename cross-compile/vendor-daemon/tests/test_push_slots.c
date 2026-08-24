@@ -12,6 +12,8 @@
 #include <stdint.h>
 
 #include "globals.h"
+#include "ak_ai.h"
+#include "ak_aenc.h"
 
 /* --- Stubs for symbols push.c references but this test never calls -------- */
 struct video_stream;
@@ -19,6 +21,23 @@ struct vd_frame_notify;
 
 int ak_venc_get_stream(void *h, struct video_stream *vs) { (void)h; (void)vs; return -1; }
 int ak_venc_release_stream(void *h, struct video_stream *vs) { (void)h; (void)vs; return 0; }
+void *ak_ai_open(const struct pcm_param *p) { (void)p; return NULL; }
+int ak_ai_set_aec(void *h, int e) { (void)h; (void)e; return 0; }
+int ak_ai_set_nr_agc(void *h, int e) { (void)h; (void)e; return 0; }
+int ak_ai_set_resample(void *h, int e) { (void)h; (void)e; return 0; }
+int ak_ai_set_source(void *h, enum ai_source s) { (void)h; (void)s; return 0; }
+int ak_ai_clear_frame_buffer(void *h) { (void)h; return 0; }
+int ak_ai_set_frame_interval(void *h, int i) { (void)h; (void)i; return 0; }
+int ak_ai_start_capture(void *h) { (void)h; return 0; }
+int ak_ai_stop_capture(void *h) { (void)h; return 0; }
+int ak_ai_close(void *h) { (void)h; return 0; }
+void *ak_aenc_open(const struct audio_param *p) { (void)p; return NULL; }
+int ak_aenc_set_attr(void *h, const struct aenc_attr *a) { (void)h; (void)a; return 0; }
+void *ak_aenc_request_stream(void *ai, void *enc) { (void)ai; (void)enc; return NULL; }
+int ak_aenc_get_stream(void *sh, struct list_head *lh) { (void)sh; (void)lh; return -1; }
+int ak_aenc_release_stream(struct aenc_entry *e) { (void)e; return 0; }
+int ak_aenc_cancel_stream(void *sh) { (void)sh; return 0; }
+int ak_aenc_close(void *h) { (void)h; return 0; }
 int send_response(int fd, int32_t status, const void *data, uint32_t len) {
     (void)fd; (void)status; (void)data; (void)len; return 0;
 }
