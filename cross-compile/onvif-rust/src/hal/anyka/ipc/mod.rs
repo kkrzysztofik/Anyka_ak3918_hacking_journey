@@ -16,6 +16,7 @@
 
 mod audio;
 mod imaging;
+mod osd;
 mod shm_ring;
 mod video;
 
@@ -261,6 +262,11 @@ const CMD_VENC_CANCEL_STREAM: i32 = 18;
 const CMD_VENC_START_PUSH: i32 = 19;
 const CMD_VENC_STOP_PUSH: i32 = 20;
 const CMD_VI_SET_FLIP_MIRROR: i32 = 21;
+const CMD_OSD_INIT: i32 = 22;
+const CMD_OSD_SET_RECT: i32 = 23;
+const CMD_OSD_DRAW_STR: i32 = 24;
+const CMD_OSD_SET_ENABLE: i32 = 25;
+const CMD_OSD_SET_STYLE: i32 = 26;
 const CMD_AI_OPEN: i32 = 50;
 const CMD_AI_CLOSE: i32 = 51;
 const CMD_AI_SET_ADC_VOLUME: i32 = 52;
@@ -524,6 +530,11 @@ impl AnykaIpc {
             CMD_VI_CAPTURE_ON => "VI_CAPTURE_ON",
             CMD_VI_CAPTURE_OFF => "VI_CAPTURE_OFF",
             CMD_VI_SET_FLIP_MIRROR => "VI_SET_FLIP_MIRROR",
+            CMD_OSD_INIT => "OSD_INIT",
+            CMD_OSD_SET_RECT => "OSD_SET_RECT",
+            CMD_OSD_DRAW_STR => "OSD_DRAW_STR",
+            CMD_OSD_SET_ENABLE => "OSD_SET_ENABLE",
+            CMD_OSD_SET_STYLE => "OSD_SET_STYLE",
             CMD_VPSS_INIT => "VPSS_INIT",
             CMD_VPSS_DESTROY => "VPSS_DESTROY",
             CMD_VENC_SET_CFG_PATH => "VENC_SET_CFG_PATH",

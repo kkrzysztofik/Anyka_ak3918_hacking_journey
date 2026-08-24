@@ -107,6 +107,15 @@ pub struct AnykaPlatform {
             tokio::task::JoinHandle<()>,
         )>,
     >,
+    /// 1 Hz OSD overlay task — stopped before VI teardown / on reattach.
+    osd_loop: std::sync::Mutex<
+        Option<(
+            tokio::sync::broadcast::Sender<()>,
+            tokio::task::JoinHandle<()>,
+        )>,
+    >,
+    osd_cfg: crate::config::types::OsdConfig,
+    osd_device_name: String,
     /// Path the async init path reads to restore the saved PTZ position.
     /// `None` means persistence is disabled.
     ptz_position_path: Option<std::path::PathBuf>,
@@ -167,6 +176,9 @@ pub struct AnykaPlatformIspConfig {
     pub imaging_cfg: crate::config::types::ImagingConfig,
     pub initial_rotated: bool,
     pub position_path: Option<PathBuf>,
+    pub osd_cfg: crate::config::types::OsdConfig,
+    /// Fallback camera label when `[osd.name].text` is empty.
+    pub osd_device_name: String,
 }
 
 impl AnykaPlatform {
@@ -183,6 +195,8 @@ impl AnykaPlatform {
             imaging_cfg: crate::config::types::ImagingConfig::default(),
             initial_rotated: false,
             position_path: None,
+            osd_cfg: crate::config::types::OsdConfig::default(),
+            osd_device_name: "ipcam".to_string(),
         })
     }
 
@@ -234,6 +248,9 @@ impl AnykaPlatform {
             // route through the real IPC client.
             ipc: Arc::new(AnykaIpc::new_detached().expect("detached IPC needs no daemon")),
             night_loop: std::sync::Mutex::new(None),
+            osd_loop: std::sync::Mutex::new(None),
+            osd_cfg: crate::config::types::OsdConfig::default(),
+            osd_device_name: "ipcam".to_string(),
             ptz_position_path: None,
         }
     }
@@ -265,6 +282,8 @@ impl AnykaPlatform {
             imaging_cfg,
             initial_rotated,
             position_path,
+            osd_cfg,
+            osd_device_name,
         } = cfg;
         let device_info = Self::device_descriptor();
 
@@ -346,6 +365,9 @@ impl AnykaPlatform {
             network_info,
             ipc,
             night_loop: std::sync::Mutex::new(Some((night_loop_tx, night_loop_task))),
+            osd_loop: std::sync::Mutex::new(None),
+            osd_cfg,
+            osd_device_name,
             ptz_position_path: position_path,
         })
     }
@@ -372,6 +394,7 @@ impl AnykaPlatform {
 
     /// Best-effort unwind of a partial or complete bring-up, for the supervisor.
     pub(super) async fn rollback_for_supervisor(&self) {
+        self.stop_osd_overlay().await;
         self.rollback_video_pipeline().await;
         self.initialized.store(false, Ordering::SeqCst);
     }
@@ -379,6 +402,63 @@ impl AnykaPlatform {
     /// The shared IPC client, for the supervisor.
     pub(super) fn ipc(&self) -> &Arc<AnykaIpc> {
         &self.ipc
+    }
+
+    /// Stop any running OSD tick and bring up a fresh one against the live VI.
+    ///
+    /// Failures are logged and ignored — OSD is optional decoration.
+    async fn start_osd_overlay(&self) {
+        self.stop_osd_overlay().await;
+
+        if !self.osd_cfg.enabled {
+            tracing::info!("OSD disabled by config; skipping overlay");
+            return;
+        }
+
+        let Some(vi) = self.video_input.get_handle() else {
+            tracing::warn!("OSD skipped: VI handle missing after capture_on");
+            return;
+        };
+
+        let dims = match self.ipc.osd_init(vi.as_ptr()) {
+            Ok(d) => d,
+            Err(e) => {
+                tracing::warn!(error = %e, "osd_init failed; continuing without overlay");
+                return;
+            }
+        };
+        tracing::info!(
+            main_w = dims[0].width,
+            main_h = dims[0].height,
+            sub_w = dims[1].width,
+            sub_h = dims[1].height,
+            "OSD initialised"
+        );
+
+        let (tx, rx) = broadcast::channel(1);
+        let handle =
+            crate::osd::renderer::spawn_osd_renderer(crate::osd::renderer::OsdRendererArgs {
+                ipc: Arc::clone(&self.ipc),
+                vi,
+                dims,
+                config: self.osd_cfg.clone(),
+                device_name: self.osd_device_name.clone(),
+                shutdown: rx,
+            });
+        match self.osd_loop.lock() {
+            Ok(mut guard) => *guard = Some((tx, handle)),
+            Err(poisoned) => *poisoned.into_inner() = Some((tx, handle)),
+        }
+    }
+
+    async fn stop_osd_overlay(&self) {
+        let taken = match self.osd_loop.lock() {
+            Ok(mut guard) => guard.take(),
+            Err(poisoned) => poisoned.into_inner().take(),
+        };
+        if let Some((tx, task)) = taken {
+            stop_night_loop(tx, task).await;
+        }
     }
 
     /// Initialize steps 1-5 of platform bring-up: sensor match, VI open, VPSS,
@@ -439,6 +519,10 @@ impl AnykaPlatform {
         if let Err(e) = self.video_input.reapply_flip_mirror() {
             tracing::warn!("Failed to reapply flip/mirror after capture_on: {}", e);
         }
+
+        // Step 5.6: OSD overlay. Soft-fail — a missing burn-in must never take
+        // the video stream down. Re-runs on every attach (daemon restart).
+        self.start_osd_overlay().await;
 
         // Allow the capture pipeline to stabilize before opening encoders.
         tokio::time::sleep(capture_stabilization_delay()).await;
@@ -612,6 +696,7 @@ impl Platform for AnykaPlatform {
         if let Some((tx, task)) = night_loop {
             stop_night_loop(tx, task).await;
         }
+        self.stop_osd_overlay().await;
 
         // Best-effort PTZ stop — the PTZHandle Drop will call ptz_close.
         // We log errors but do not abort shutdown for a single subsystem failure.
