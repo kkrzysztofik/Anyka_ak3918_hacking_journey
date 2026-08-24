@@ -106,13 +106,8 @@ impl LiveStreamHandler {
         audio_config: Option<Vec<u8>>,
     ) -> Result<(), StreamHubError> {
         if matches!(sub_type, SubscribeType::HttpFlvPull) {
-            let mut remuxer = ValidationHttpFlvRemuxer::new(
-                sps,
-                pps,
-                audio_config,
-                self.bridge.audio_sample_rate,
-                self.video_framerate,
-            );
+            let mut remuxer =
+                ValidationHttpFlvRemuxer::new(sps, pps, audio_config, self.video_framerate);
             send_httpflv_prior_frames(frame_sender, &mut remuxer, timestamp, bootstrap_idr)?;
         } else {
             // Combine SPS+PPS(+IDR) into a single Annex-B access unit.
@@ -474,7 +469,6 @@ impl FanoutTask {
                 sps.clone(),
                 pps.clone(),
                 audio_config,
-                self.bridge.audio_sample_rate,
                 self.video_framerate,
             ));
             self.cached_sps = Some(sps);

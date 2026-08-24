@@ -525,7 +525,6 @@ mod tests {
             vec![0x67, 0x42, 0x00, 0x1e],
             vec![0x68, 0xce, 0x06, 0xe2],
             None,
-            48_000,
             15,
         );
         let frame = FrameData::Video {
@@ -561,7 +560,6 @@ mod tests {
             vec![0x67, 0x42, 0x00, 0x1e],
             vec![0x68, 0xce, 0x06, 0xe2],
             None,
-            48_000,
             15,
         );
 
@@ -593,7 +591,6 @@ mod tests {
             vec![0x67, 0x42, 0x00, 0x1e],
             vec![0x68, 0xce, 0x06, 0xe2],
             None,
-            48_000,
             15,
         );
 
@@ -628,7 +625,6 @@ mod tests {
             vec![0x67, 0x42, 0xE0, 0x1E],
             vec![0x68, 0xCE, 0x06, 0xE2],
             None,
-            0,
             15,
         );
         send_httpflv_prior_frames(&tx, &mut remuxer, 123, None).expect("prior frames sent");

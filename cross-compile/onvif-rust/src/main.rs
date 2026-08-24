@@ -500,7 +500,6 @@ impl TStreamHandler for ValidationAvStreamHandler {
                     self.sps.clone(),
                     self.pps.clone(),
                     self.audio_config.clone(),
-                    self.audio_sample_rate,
                     self.video_framerate,
                 );
                 send_httpflv_prior_frames(
@@ -705,7 +704,6 @@ async fn run_validation_mode(config: H264PlaybackConfig, config_path: &str) -> R
         video_sps.clone(),
         video_pps.clone(),
         audio_config.clone(),
-        audio_sample_rate,
         config.frame_rate,
     );
 
@@ -979,18 +977,11 @@ fn spawn_fanout_task(
     video_sps: Vec<u8>,
     video_pps: Vec<u8>,
     audio_config: Option<Vec<u8>>,
-    audio_sample_rate: u32,
     video_framerate: u32,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let mut httpflv_remuxer = frame_tx_httpflv.as_ref().map(|_| {
-            ValidationHttpFlvRemuxer::new(
-                video_sps,
-                video_pps,
-                audio_config,
-                audio_sample_rate,
-                video_framerate,
-            )
+            ValidationHttpFlvRemuxer::new(video_sps, video_pps, audio_config, video_framerate)
         });
         while let Some(frame) = frame_rx.recv().await {
             fanout_frame(
