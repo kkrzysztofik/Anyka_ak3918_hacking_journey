@@ -422,6 +422,20 @@ impl StreamingBridge {
         }
     }
 
+    /// Publish the AAC AudioSpecificConfig, enabling the audio track.
+    ///
+    /// This is the single gate on audio: while it is `None`, `generate_av_sdp`
+    /// omits the `m=audio` line and the FLV path emits no audio sequence header,
+    /// so no client negotiates audio even if frames are arriving.
+    pub fn set_audio_config(&self, config: Vec<u8>) {
+        tracing::info!(
+            config_len = config.len(),
+            sample_rate = self.audio_sample_rate,
+            "Publishing audio config; audio track is now advertised"
+        );
+        *self.audio_config.write() = Some(config);
+    }
+
     /// Route an owned frame through the streaming pipeline — zero-copy path.
     ///
     /// Moves the existing `BytesMut` from the `OwnedFrame` directly into the
@@ -716,6 +730,23 @@ mod tests {
         *bridge.sub_stream.pps.write() = None;
         *bridge.sub_stream.bootstrap_idr.write() = None;
         bridge
+    }
+
+    #[test]
+    fn test_set_audio_config_publishes_config() {
+        // audio_config is the single gate on the audio track: generate_av_sdp
+        // omits m=audio while it is None. The SDP gate itself is covered by
+        // test_generate_av_sdp_{with,without}_audio; here we assert the setter
+        // flips the gate field.
+        let bridge = make_bridge();
+        assert!(bridge.audio_config.read().is_none());
+
+        bridge.set_audio_config(vec![0x15, 0x88]);
+
+        assert_eq!(
+            bridge.audio_config.read().as_deref(),
+            Some([0x15, 0x88].as_slice())
+        );
     }
 
     #[test]
