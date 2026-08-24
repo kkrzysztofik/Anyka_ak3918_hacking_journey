@@ -79,14 +79,6 @@ function stat(value: number | string | undefined, suffix = ''): string {
   return value === undefined ? '—' : `${value}${suffix}`;
 }
 
-/** Name the common channel layouts; fall back to a raw count for the rest. */
-function formatChannels(channels: number | undefined): string {
-  if (channels === undefined) return '—';
-  if (channels === 1) return 'Mono';
-  if (channels === 2) return 'Stereo';
-  return `${channels} ch`;
-}
-
 export default function LiveViewPage() {
   const [streamType, setStreamType] = useState<StreamType>('main');
   const [ptzSpeed, setPtzSpeed] = useState(50);
@@ -451,7 +443,7 @@ export default function LiveViewPage() {
                     className="text-foreground text-right font-mono"
                     data-testid="liveview-audio-channels-value"
                   >
-                    {formatChannels(stats.audioChannels)}
+                    {stats.audioChannels === 1 ? 'Mono' : stat(stats.audioChannels)}
                   </span>
                 </div>
               </SettingsCardContent>

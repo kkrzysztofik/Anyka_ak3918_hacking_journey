@@ -52,9 +52,7 @@ export function LiveVideoPlayer({
   // stream, or a camera with audio_enabled=false, has none.
   const [hasAudio, setHasAudio] = useState(false);
 
-  // Playback volume, viewer-local: this scales the decoded audio in this tab
-  // only. It is not mic gain, so it changes nothing for RTSP clients or anyone
-  // else watching.
+  // Viewer-local playback level, not mic gain: other clients are unaffected.
   const [volume, setVolume] = useState(1);
 
   // `muted` and `volume` are DOM properties, not attributes — React reflects

@@ -6,12 +6,12 @@ import { describe, expect, it } from 'vitest';
 import { formatAudioCodec, formatVideoCodec } from './videoCodec';
 
 describe('formatAudioCodec', () => {
-  it('names the AAC object types the camera can emit', () => {
+  it('names the AAC object type the camera emits', () => {
     expect(formatAudioCodec('mp4a.40.2')).toBe('AAC-LC');
-    expect(formatAudioCodec('mp4a.40.5')).toBe('HE-AAC');
   });
 
-  it('keeps an unknown object type visible rather than hiding it', () => {
+  it('keeps any other object type visible rather than hiding it', () => {
+    expect(formatAudioCodec('mp4a.40.5')).toBe('AAC type 5');
     expect(formatAudioCodec('mp4a.40.99')).toBe('AAC type 99');
   });
 
