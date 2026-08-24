@@ -85,7 +85,7 @@ pub struct CreateOSD {
     pub osd: OSDConfiguration,
 }
 
-/// CreateOSD response (unused — we fault).
+/// CreateOSD response — echoes the fixed token that was enabled.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename = "trt:CreateOSDResponse")]
 pub struct CreateOSDResponse {
@@ -195,7 +195,14 @@ pub struct OSDColor {
     pub color: ColorChannels,
 }
 
-/// RGB colour channels (0..=1 floats in ONVIF; we also accept palette mapping).
+/// ONVIF colourspace URI for YCbCr, the space the vendor palette is stored in.
+pub const COLORSPACE_YCBCR: &str = "http://www.onvif.org/ver10/colorspace/YCbCr";
+
+/// Colour channels, interpreted per `colorspace`.
+///
+/// We always emit YCbCr with 0..=255 channel values, because that is literally
+/// what `def_color_tables[]` in `ak_osd.h` holds — converting to RGB would only
+/// lose precision on the way back to a palette index.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ColorChannels {
     #[serde(rename = "@X")]
@@ -204,6 +211,12 @@ pub struct ColorChannels {
     pub y: f64,
     #[serde(rename = "@Z")]
     pub z: f64,
+    #[serde(
+        rename = "@Colorspace",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub colorspace: Option<String>,
 }
 
 /// GetOSDOptions payload.

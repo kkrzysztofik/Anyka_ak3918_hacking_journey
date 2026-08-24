@@ -97,11 +97,6 @@ pub fn place(
     Placement { draw_x, draw_y }
 }
 
-/// Pixel size of the string itself (for pad/erase bookkeeping).
-pub fn rect_size(glyph_count: usize, font: FontMetrics) -> (i32, i32) {
-    (font.advance * glyph_count as i32, font.height)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -172,10 +167,5 @@ mod tests {
         };
         let p = place(Corner::LowerRight, 9, sub, SUB_FONT);
         assert_eq!((p.draw_x, p.draw_y), (640 - 72, 360 - 16));
-    }
-
-    #[test]
-    fn test_rect_size_for_hello_osd_on_main() {
-        assert_eq!(rect_size(9, MAIN_FONT), (144, 32));
     }
 }

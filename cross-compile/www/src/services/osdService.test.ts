@@ -4,7 +4,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { apiClient } from '@/services/api';
-import { assertAsciiOsdText, getOsdSettings, setOsd } from '@/services/osdService';
+import {
+  VENDOR_PALETTE,
+  assertAsciiOsdText,
+  getOsdSettings,
+  paletteCss,
+  setOsd,
+} from '@/services/osdService';
 import { createMockSOAPFaultResponse, createMockSOAPResponse } from '@/test/utils';
 
 vi.mock('@/services/api', () => ({
@@ -115,6 +121,28 @@ describe('osdService', () => {
       ).rejects.toThrow(/ASCII/);
 
       expect(apiClient.post).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('vendor palette', () => {
+    it('should mirror def_color_tables from ak_osd.h', () => {
+      // The camera only understands the index, so a wrong table means the
+      // swatch and the burned-in text disagree.
+      expect(VENDOR_PALETTE).toHaveLength(16);
+      expect(VENDOR_PALETTE[1]).toEqual([0xff, 0x7f, 0x7f]);
+      expect(VENDOR_PALETTE[15]).toEqual([0x00, 0x80, 0x80]);
+    });
+
+    it('should render index 1 as white and index 2 as black', () => {
+      // Only true if the table is read as YCbCr; as RGB these would be
+      // salmon and teal.
+      expect(paletteCss(1)).toBe('rgb(254, 255, 253)');
+      expect(paletteCss(2)).toBe('rgb(0, 1, 0)');
+    });
+
+    it('should clamp an out-of-range index instead of returning undefined', () => {
+      expect(paletteCss(99)).toBe(paletteCss(15));
+      expect(paletteCss(-1)).toBe(paletteCss(0));
     });
   });
 });

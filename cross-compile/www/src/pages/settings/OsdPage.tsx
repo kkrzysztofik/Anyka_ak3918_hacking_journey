@@ -25,6 +25,7 @@ import {
   SettingsCardTitle,
 } from '@/components/ui/settings-card';
 import { Slider } from '@/components/ui/slider';
+import { Switch } from '@/components/ui/switch';
 import {
   type OsdCorner,
   type OsdDateFormat,
@@ -32,7 +33,9 @@ import {
   type OsdTimeFormat,
   assertAsciiOsdText,
   getOsdSettings,
+  paletteCss,
   setOsd,
+  setOsdEnabled,
 } from '@/services/osdService';
 
 const CORNERS: { value: OsdCorner; label: string }[] = [
@@ -53,10 +56,9 @@ const TIME_FORMATS: { value: OsdTimeFormat; label: string }[] = [
   { value: 'hh:mm:ss tt', label: '12-hour' },
 ];
 
-/** 16 greyscale swatches matching the vendor palette indices. */
+/** Swatches showing the real vendor palette, converted YCbCr → RGB. */
 function paletteSwatchStyle(index: number): CSSProperties {
-  const v = Math.round((index / 15) * 255);
-  return { backgroundColor: `rgb(${v}, ${v}, ${v})` };
+  return { backgroundColor: paletteCss(index) };
 }
 
 export default function OsdPage() {
@@ -73,7 +75,12 @@ export default function OsdPage() {
     );
   }
 
-  return <OsdForm key={data.name.text + data.datetime.position} data={data} />;
+  return (
+    <OsdForm
+      key={`${data.name.text}|${data.datetime.position}|${data.name.enabled}|${data.datetime.enabled}`}
+      data={data}
+    />
+  );
 }
 
 function OsdForm({ data }: Readonly<{ data: OsdSettings }>) {
@@ -85,30 +92,56 @@ function OsdForm({ data }: Readonly<{ data: OsdSettings }>) {
   const [timeFormat, setTimeFormat] = useState<OsdTimeFormat>(data.datetime.timeFormat);
   const [color, setColor] = useState(data.appearance.color);
   const [alpha, setAlpha] = useState(data.appearance.alpha);
+  const [nameEnabled, setNameEnabled] = useState(data.name.enabled);
+  const [datetimeEnabled, setDatetimeEnabled] = useState(data.datetime.enabled);
   const [asciiError, setAsciiError] = useState<string | null>(null);
 
   const mutation = useMutation({
     mutationFn: async () => {
       assertAsciiOsdText(nameText);
-      await setOsd({
-        token: data.name.token,
-        videoSourceToken: data.name.videoSourceToken,
-        position: namePosition,
-        textType: 'Plain',
-        plainText: nameText,
-        color,
-        alpha,
-      });
-      await setOsd({
-        token: data.datetime.token,
-        videoSourceToken: data.datetime.videoSourceToken,
-        position: datetimePosition,
-        textType: 'DateAndTime',
-        dateFormat,
-        timeFormat,
-        color,
-        alpha,
-      });
+
+      // Enable first: SetOSD on a disabled OSD is rejected, because a disabled
+      // OSD does not exist as far as ONVIF is concerned.
+      await setOsdEnabled(
+        {
+          token: data.name.token,
+          videoSourceToken: data.name.videoSourceToken,
+          position: namePosition,
+        },
+        nameEnabled,
+      );
+      if (nameEnabled) {
+        await setOsd({
+          token: data.name.token,
+          videoSourceToken: data.name.videoSourceToken,
+          position: namePosition,
+          textType: 'Plain',
+          plainText: nameText,
+          color,
+          alpha,
+        });
+      }
+
+      await setOsdEnabled(
+        {
+          token: data.datetime.token,
+          videoSourceToken: data.datetime.videoSourceToken,
+          position: datetimePosition,
+        },
+        datetimeEnabled,
+      );
+      if (datetimeEnabled) {
+        await setOsd({
+          token: data.datetime.token,
+          videoSourceToken: data.datetime.videoSourceToken,
+          position: datetimePosition,
+          textType: 'DateAndTime',
+          dateFormat,
+          timeFormat,
+          color,
+          alpha,
+        });
+      }
     },
     onSuccess: () => {
       toast.success('OSD settings saved');
@@ -161,6 +194,15 @@ function OsdForm({ data }: Readonly<{ data: OsdSettings }>) {
           </SettingsCardDescription>
         </SettingsCardHeader>
         <SettingsCardContent className="space-y-4">
+          <div className="flex items-center justify-between">
+            <Label htmlFor="osd-name-enabled">Show camera name</Label>
+            <Switch
+              id="osd-name-enabled"
+              data-testid="osd-name-enabled-switch"
+              checked={nameEnabled}
+              onCheckedChange={setNameEnabled}
+            />
+          </div>
           <div className="space-y-2">
             <Label htmlFor="osd-name-text">Text</Label>
             <Input
@@ -206,6 +248,15 @@ function OsdForm({ data }: Readonly<{ data: OsdSettings }>) {
           </SettingsCardDescription>
         </SettingsCardHeader>
         <SettingsCardContent className="space-y-4">
+          <div className="flex items-center justify-between">
+            <Label htmlFor="osd-datetime-enabled">Show timestamp</Label>
+            <Switch
+              id="osd-datetime-enabled"
+              data-testid="osd-datetime-enabled-switch"
+              checked={datetimeEnabled}
+              onCheckedChange={setDatetimeEnabled}
+            />
+          </div>
           <div className="space-y-2">
             <Label>Corner</Label>
             <Select

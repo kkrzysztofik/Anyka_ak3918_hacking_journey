@@ -32,12 +32,6 @@ pub enum OsdRect {
     DateTime = 1,
 }
 
-impl OsdRect {
-    pub fn as_i32(self) -> i32 {
-        self as i32
-    }
-}
-
 /// What the IPC layer should draw for one logical overlay.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DrawPlan {
@@ -179,13 +173,6 @@ impl RenderState {
             self.canvas_ready[idx] = false;
             self.last[idx] = Default::default();
         }
-    }
-
-    /// Forget remembered draws — call after daemon reattach / `osd_init`.
-    pub fn reset(&mut self) {
-        self.last = Default::default();
-        self.canvas_ready = [false; 2];
-        self.canvas_failed = [false; 2];
     }
 
     fn ensure_canvas(
