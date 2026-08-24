@@ -10,7 +10,6 @@
 #include "ak_error.h"
 #include "ak_vpss.h"
 #include "handlers_vi.h"
-#include "handlers_vpss.h"
 #include "handlers_osd.h"
 #include "handlers_venc.h"
 #include "handlers_audio.h"
@@ -233,10 +232,9 @@ int process_request(int fd)
 
     /* --- VPSS --- */
     case CMD_VPSS_INIT:
-        ret = handle_vpss_init(fd, req_buf, req_len);
-        break;
     case CMD_VPSS_DESTROY:
-        ret = handle_vpss_destroy(fd, req_buf, req_len);
+        /* libre_anyka_app: no exported ak_vpss_{init,destroy}; VI owns VPSS. */
+        ret = send_response(fd, STATUS_OK, NULL, 0);
         break;
 
     /* --- OSD --- */
