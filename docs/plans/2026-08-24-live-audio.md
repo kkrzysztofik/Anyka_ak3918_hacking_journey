@@ -1138,3 +1138,25 @@ Use the `superpowers:requesting-code-review` skill before merging.
 **Known-unverified assumption:** `ak_ai_set_frame_interval(128)` is outside the documented [10, 125] ms range. `aenc_demo` does it and produced valid AAC in the measurements behind this design, so it is expected to work — but if audio comes out corrupted or the interval is silently clamped, switching `stream_profile_1.audio_sample_rate` to `16000` yields a compliant 64 ms and better quality at negligible extra CPU. That is a config change, not a code change.
 
 **Deployment consequence, stated once:** `stream_profile_1.audio_enabled` defaults to `true`, so deploying this starts capturing room audio on every camera it reaches.
+
+---
+
+## Implementation status (2026-08-24)
+
+All 7 tasks complete and validated on 192.168.2.198; branch is `feat/live-audio`.
+
+**Device validation results:**
+- Daemon starts the audio chain: `[audio] push started rate=8000 ch=1 interval=128ms`.
+- RTSP negotiates two tracks: `h264,video` + `aac,audio`; HTTP-FLV carries audio too.
+- Non-silent: `n_samples 65536`, `mean_volume -30.9 dB` (8 kHz, 8 s).
+- A/V synced: both tracks start at PTS 0 in the SR-synced mux; audio advances 1024/frame, video 9000/frame.
+- Video unregressed: 51 frames / 5 s decode, no stall.
+
+**Fixes beyond the plan's code (found by device validation):**
+1. The audio push loop busy-spun on `ak_aenc_get_stream` returning 0 with an empty list, starving the SDK's `read_pcm_thread` (capture stalled after one frame at both 8 and 16 kHz). Pacing every iteration fixed it. The 128 ms out-of-range interval was NOT the cause.
+2. `handle_pushed_frame` dropped `StreamId::Audio` frames before the bridge — every audio frame was discarded.
+3. Audio RTP timestamps were milliseconds treated as sample units (RFC 3640 wants samples) — audio ran ~16× slow.
+4. RTP-Info advertised a random `init_timestamp` that never matched the first RTP packet (0-based), so strict clients stalled.
+5. The RTCP SR always reported RTP timestamp 0 because the pull path never fed sent packets into the track's `RtcpContext`.
+
+Each fix has a dedicated commit on the branch. The Task 6 call site deviates from the plan (app `start_streaming` after bridge registration, via the `AudioEncoder` trait) because the plan's proposed sync `venc-read` thread cannot host an async bridge-aware call.
