@@ -119,9 +119,12 @@ One microphone → one encoder → one push thread → existing ring → existin
 fan-out.
 
 ```
-ak_ai_get_frame ──▶ ak_aenc_get_stream ──▶ vd_ring_write(VD_STREAM_AUDIO)
-   (PCM 16-bit)         (AAC, raw)              │
-                                                ▼
+ak_aenc_request_stream(ai, aenc)   [binds input to encoder, once]
+        │
+        ▼
+ak_aenc_get_stream(stream_handle) ──▶ vd_ring_write(VD_STREAM_AUDIO)
+   (list of aenc_entry, raw AAC)        │
+   ak_aenc_release_stream per entry     ▼
                                     send_frame_notification
                                                 │
                                                 ▼
@@ -139,26 +142,53 @@ ak_ai_get_frame ──▶ ak_aenc_get_stream ──▶ vd_ring_write(VD_STREAM_A
 **C — `vendor-daemon`** (~120 lines; no Makefile change, the libs are already
 linked)
 
-- `protocol.h`: `CMD_AENC_START_PUSH = 57`, `CMD_AENC_STOP_PUSH = 58`
+- `protocol.h`: `CMD_AUDIO_START_PUSH = 57`, `CMD_AUDIO_STOP_PUSH = 58`
   (57–58 are free; the audio block ends at 56 and ISP starts at 100).
-- `push.c`: grow `g_push_streams[]` to 3; add `VD_STREAM_AUDIO` arms to
-  `push_slot_index()` (→ index 2) and `push_stream_id_to_ring_stream()`; add
-  `audio_push_thread()` doing `ak_ai_set_frame_interval` → `ak_ai_start_capture`
-  → loop `ak_ai_get_frame` / `ak_aenc_get_stream` → `vd_ring_write` →
-  `send_frame_notification`.
-- `handlers_audio.c` + `dispatcher.c`: two handlers resolving the AI and AENC
-  tokens from the object table, then spawning/stopping the thread.
+- `globals.h`: `PUSH_STREAM_SLOT_COUNT` 2 → 3.
+- `push.c`: add `VD_STREAM_AUDIO` arms to `push_slot_index()` (→ index 2) and
+  `push_stream_id_to_ring_stream()`; add `audio_push_thread()`.
+- `handlers_audio.c` + `dispatcher.c`: the two new handlers.
 
-`ak_ai_set_frame_interval` must be called *before* `ak_ai_get_frame` — noted
-explicitly in `ak_ai.h` and in `ak_aenc_demo.c:240`.
+**The start-push handler owns the whole SDK chain.** Unlike video — where Rust
+opens the encoder and passes a handle — `ak_aenc_request_stream(ai_handle,
+aenc_handle)` is the step that binds input to encoder, and the resulting stream
+handle must stay alive exactly as long as the push thread. Marshalling three
+handles across IPC to achieve that would couple token lifetimes to thread
+lifetime for no gain. So `CMD_AUDIO_START_PUSH` carries only
+`{sample_rate, channel_num, frame_interval_ms}` and the daemon does:
 
-**Rust — HAL** (~40 lines): `start_audio_push()` / `stop_audio_push()` in
-`hal/anyka/ipc/mod.rs`, mirroring `start_push()` including stale-epoch handling.
+```
+ak_ai_open(&pcm_param{sample_bits=16, ...})
+ak_ai_set_aec / set_nr_agc / set_resample   (all DISABLE)
+ak_ai_set_source(AI_SOURCE_MIC)
+ak_ai_clear_frame_buffer
+ak_ai_set_frame_interval(interval_ms)        <-- before start_capture
+ak_ai_start_capture
+ak_aenc_open(&audio_param{type=AK_AUDIO_TYPE_AAC, ...})
+ak_aenc_set_attr({aac_head = AENC_AAC_CUT_FRAME_HEAD})
+ak_aenc_request_stream(ai_handle, aenc_handle) -> stream_handle
+```
 
-**Rust — platform** (~80 lines): `AnykaAudioEncoder::start()` finally uses its
-`ffi` field — `ai_open(pcm_param)` → `aenc_open(AK_AUDIO_TYPE_AAC)` →
-`aenc_set_attr(AENC_AAC_CUT_FRAME_HEAD)` → `start_audio_push`. Invoked from
-where `video_encoder.rs:817` starts video push.
+then spawns the thread, which loops `ak_aenc_get_stream(stream_handle,
+&stream_head)`, walks the returned `aenc_entry` list writing each
+`audio_stream` to the ring, and calls `ak_aenc_release_stream(entry)` per entry.
+Teardown reverses it: `ak_aenc_cancel_stream`, `ak_aenc_close`,
+`ak_ai_stop_capture`, `ak_ai_close`.
+
+The existing cmds 50–56 stay for ONVIF-side volume and config; they are not on
+the streaming path.
+
+Frame interval is derived from the codec, not configured: AAC is 1024
+samples/frame, so `interval_ms = 1024 * 1000 / sample_rate` — 128 ms at 8 kHz,
+64 ms at 16 kHz (`ak_aenc_demo.c:216`).
+
+**Rust — HAL** (~40 lines): `start_audio_push(sample_rate, channels)` /
+`stop_audio_push()` in `hal/anyka/ipc/mod.rs`, mirroring `start_push()`
+including stale-epoch handling.
+
+**Rust — platform** (~60 lines): `AnykaAudioEncoder::start()` calls
+`start_audio_push` and publishes the ASC via `bridge.set_audio_config`. Invoked
+from where `video_encoder.rs:817` starts video push.
 
 `AENC_AAC_CUT_FRAME_HEAD` (value 2 in `aenc_aac_attr`) is load-bearing: it emits
 raw AAC frames. The alternative `AENC_AAC_SAVE_FRAME_HEAD` prepends ADTS
@@ -212,9 +242,30 @@ These two bytes appear in three places: the SDP `config=` fmtp, the FLV
 - Decode 10 s and assert the audio track is non-silent — guards against a
   wired-up-but-mute microphone, which the track-exists check alone would miss.
 
-## Main risk
+## Risks
 
-**A/V sync.** Audio RTP runs on an 8000 Hz clock and video on 90000 Hz. Both SDK
-timestamps are in milliseconds, but they must share a time origin or lip-sync
-drifts. This is the part to verify on hardware early rather than late, and it is
-why the device test decodes rather than only checking that the track exists.
+**A/V sync (main risk).** Audio RTP runs on an 8000 Hz clock and video on
+90000 Hz. Both SDK timestamps are in milliseconds, but they must share a time
+origin or lip-sync drifts. Video normalizes by subtracting its *own* first
+timestamp (`push.c:218`), and main and sub each anchor independently — harmless
+today because they are separate sessions, but audio is fanned into *both*
+queues, so it must anchor consistently. Plan: anchor the audio thread to
+`g_push_streams[0].first_timestamp_ms` once video has initialized rather than
+letting audio pick its own anchor. Verify on hardware early; this is why the
+device test decodes rather than only checking that the track exists.
+
+**Growing `PUSH_STREAM_SLOT_COUNT` to 3 breaks two hardcoded spots.**
+`handle_venc_stop_push` with an empty payload stops slots 0 and 1 by literal
+index (`push.c:707-708`), and the ring-reset-on-first-activation check uses
+`other_idx = (idx == 0) ? 1 : 0` (`push.c:634`). Both must become loops over
+`PUSH_STREAM_SLOT_COUNT` or audio will be left running by "stop all" and the
+ring will be reset out from under an active stream.
+
+**Frame interval is out of documented range at 8 kHz.** AAC's interval is
+`1024*1000/sample_rate` = 128 ms at 8 kHz, but `ak_ai.h` documents
+`ak_ai_set_frame_interval` as accepting [10, 125] ms. `aenc_demo` computes 128
+regardless and produced a valid 19,769-byte AAC file in the measurement above,
+so the SDK tolerates or clamps it. Noted rather than acted on: 16 kHz yields
+64 ms, inside the documented range, and is a config-value change with no code
+change if 8 kHz misbehaves. Check the return code of
+`ak_ai_set_frame_interval` and log it rather than ignoring it.
