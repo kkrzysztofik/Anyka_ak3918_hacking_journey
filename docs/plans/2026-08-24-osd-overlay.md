@@ -1333,10 +1333,10 @@ fn test_set_osd_rejects_a_font_size_other_than_16() { }
 fn test_set_osd_persists_and_returns_the_stored_value() { }
 
 #[test]
-fn test_create_osd_returns_action_not_supported() { /* fixed rects, honest fault */ }
+fn test_delete_osd_disables_each_overlay() { /* drops from GetOSDs and video */ }
 
 #[test]
-fn test_delete_osd_returns_action_not_supported() { }
+fn test_create_osd_re_enables_a_deleted_osd() { }
 ```
 
 **Commit:** `feat(onvif): GetOSDs, GetOSD, GetOSDOptions, SetOSD`

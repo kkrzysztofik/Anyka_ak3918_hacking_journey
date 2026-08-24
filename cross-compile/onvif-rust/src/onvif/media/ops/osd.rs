@@ -103,12 +103,12 @@ pub fn set_osd(
     request: SetOSD,
 ) -> OnvifResult<SetOSDResponse> {
     let token = request.osd.token.clone();
-    validate_osd_for_set(&request.osd)?;
+    let text = validate_osd_for_set(&request.osd)?;
 
     let mut cfg = config.write();
     match token.as_str() {
-        OSD_TOKEN_NAME => apply_name_set(&mut cfg.osd, &request.osd)?,
-        OSD_TOKEN_DATETIME => apply_datetime_set(&mut cfg.osd, &request.osd)?,
+        OSD_TOKEN_NAME => apply_name_set(&mut cfg.osd, &request.osd, text)?,
+        OSD_TOKEN_DATETIME => apply_datetime_set(&mut cfg.osd, &request.osd, text)?,
         other => {
             return Err(OnvifError::InvalidArgVal {
                 subcode: "ter:NoConfig".into(),
@@ -124,14 +124,52 @@ pub fn set_osd(
 ///
 /// The rects are fixed silicon, so this cannot mint a new token; it turns an
 /// existing one on. Anything else faults, which is what a client attempting a
-/// third OSD should see.
+/// third OSD should see. Position / TextString / colour from the request are
+/// applied before enabling so CreateOSD can restore a deleted overlay fully.
 pub fn create_osd(
     config: &ConfigRuntime,
     platform: Option<&Arc<dyn Platform>>,
     request: CreateOSD,
 ) -> OnvifResult<CreateOSDResponse> {
     let token = request.osd.token.clone();
-    set_enabled(config, platform, &token, true)?;
+    // TextString is optional on CreateOSD: the WebUI enable path sends token +
+    // Position only. When TextString is present, validate and apply it first.
+    let text = if request.osd.text_string.is_some() {
+        Some(validate_osd_for_set(&request.osd)?)
+    } else {
+        parse_corner(&request.osd.position.pos_type)?;
+        None
+    };
+
+    let mut cfg = config.write();
+    match token.as_str() {
+        OSD_TOKEN_NAME => {
+            if let Some(text) = text {
+                apply_name_set(&mut cfg.osd, &request.osd, text)?;
+            } else {
+                cfg.osd.name.position = parse_corner(&request.osd.position.pos_type)?;
+            }
+            cfg.osd.name.enabled = true;
+        }
+        OSD_TOKEN_DATETIME => {
+            if let Some(text) = text {
+                apply_datetime_set(&mut cfg.osd, &request.osd, text)?;
+            } else {
+                cfg.osd.datetime.position = parse_corner(&request.osd.position.pos_type)?;
+            }
+            cfg.osd.datetime.enabled = true;
+        }
+        other => {
+            return Err(OnvifError::InvalidArgVal {
+                subcode: "ter:NoConfig".into(),
+                reason: format!(
+                    "Unknown OSD token {other}: this camera has two fixed rects \
+                     ({OSD_TOKEN_NAME}, {OSD_TOKEN_DATETIME})"
+                ),
+            });
+        }
+    }
+    push_to_renderer(&cfg.osd, platform);
     Ok(CreateOSDResponse { osd_token: token })
 }
 
@@ -221,7 +259,7 @@ fn build_datetime_osd(vs_token: &str, osd: &OsdConfig) -> OSDConfiguration {
     }
 }
 
-fn validate_osd_for_set(osd: &OSDConfiguration) -> OnvifResult<()> {
+fn validate_osd_for_set(osd: &OSDConfiguration) -> OnvifResult<&OSDTextConfiguration> {
     let Some(text) = osd.text_string.as_ref() else {
         return Err(OnvifError::InvalidArgVal {
             subcode: "ter:InvalidArgVal".into(),
@@ -236,8 +274,9 @@ fn validate_osd_for_set(osd: &OSDConfiguration) -> OnvifResult<()> {
             reason: format!("FontSize {size} is not supported; only 16"),
         });
     }
-    if text.text_type.eq_ignore_ascii_case("Plain")
-        && let Some(plain) = text.plain_text.as_deref()
+    // Validate any submitted PlainText regardless of TextType so a DateAndTime
+    // request cannot smuggle non-encodable text into apply_name_set paths.
+    if let Some(plain) = text.plain_text.as_deref()
         && !plain.is_empty()
     {
         encode_glyphs(plain).map_err(|e| OnvifError::InvalidArgVal {
@@ -246,11 +285,14 @@ fn validate_osd_for_set(osd: &OSDConfiguration) -> OnvifResult<()> {
         })?;
     }
     parse_corner(&osd.position.pos_type)?;
-    Ok(())
+    Ok(text)
 }
 
-fn apply_name_set(cfg: &mut OsdConfig, osd: &OSDConfiguration) -> OnvifResult<()> {
-    let text = osd.text_string.as_ref().expect("validated");
+fn apply_name_set(
+    cfg: &mut OsdConfig,
+    osd: &OSDConfiguration,
+    text: &OSDTextConfiguration,
+) -> OnvifResult<()> {
     cfg.name = OsdNameConfig {
         enabled: cfg.name.enabled,
         position: parse_corner(&osd.position.pos_type)?,
@@ -260,8 +302,11 @@ fn apply_name_set(cfg: &mut OsdConfig, osd: &OSDConfiguration) -> OnvifResult<()
     Ok(())
 }
 
-fn apply_datetime_set(cfg: &mut OsdConfig, osd: &OSDConfiguration) -> OnvifResult<()> {
-    let text = osd.text_string.as_ref().expect("validated");
+fn apply_datetime_set(
+    cfg: &mut OsdConfig,
+    osd: &OSDConfiguration,
+    text: &OSDTextConfiguration,
+) -> OnvifResult<()> {
     cfg.datetime = OsdDateTimeConfig {
         enabled: cfg.datetime.enabled,
         position: parse_corner(&osd.position.pos_type)?,
@@ -468,6 +513,16 @@ mod tests {
     }
 
     #[test]
+    fn test_set_osd_rejects_non_ascii_plain_text_regardless_of_text_type() {
+        let (_pm, cfg) = setup();
+        let mut osd = build_name_osd("VS", &OsdConfig::default());
+        osd.text_string.as_mut().unwrap().text_type = "DateAndTime".into();
+        osd.text_string.as_mut().unwrap().plain_text = Some("Ogród".into());
+        let err = set_osd(cfg.as_ref(), None, SetOSD { osd }).unwrap_err();
+        assert!(matches!(err, OnvifError::InvalidArgVal { .. }));
+    }
+
+    #[test]
     fn test_set_osd_rejects_a_font_size_other_than_16() {
         let (_pm, cfg) = setup();
         let mut osd = build_name_osd("VS", &OsdConfig::default());
@@ -566,6 +621,26 @@ mod tests {
         .unwrap();
 
         assert_eq!(resp.osd_token, OSD_TOKEN_NAME);
+        assert!(cfg.read().osd.name.enabled);
+    }
+
+    #[test]
+    fn test_create_osd_applies_submitted_position() {
+        let (_pm, cfg) = setup();
+        delete_osd(
+            cfg.as_ref(),
+            None,
+            DeleteOSD {
+                osd_token: OSD_TOKEN_NAME.into(),
+            },
+        )
+        .unwrap();
+
+        let mut osd = build_name_osd("VS", &OsdConfig::default());
+        osd.position.pos_type = "LowerLeft".into();
+        create_osd(cfg.as_ref(), None, CreateOSD { osd }).unwrap();
+
+        assert_eq!(cfg.read().osd.name.position, Corner::LowerLeft);
         assert!(cfg.read().osd.name.enabled);
     }
 

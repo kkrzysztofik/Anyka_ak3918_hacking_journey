@@ -251,6 +251,14 @@ impl AppConfig {
         // OSD — colour is a 16-entry palette index; alpha is the vendor 1..=100 range.
         range(&mut errors, "osd.color", self.osd.color, 0, 15);
         range(&mut errors, "osd.alpha", self.osd.alpha, 1, 100);
+        // Empty name text falls back to the device name at render time; non-empty
+        // values must already be encodable so a bad anyka.toml cannot reach the
+        // renderer.
+        if !self.osd.name.text.is_empty()
+            && let Err(e) = crate::osd::encode::encode_glyphs(&self.osd.name.text)
+        {
+            errors.push(format!("osd.name.text: {e}"));
+        }
 
         // Discovery
         range(
@@ -1446,6 +1454,29 @@ home_pan = 0.5
 "#;
         let parsed: PtzConfig = toml::from_str(toml).expect("legacy keys must not break loading");
         assert!(parsed.enabled);
+    }
+
+    #[test]
+    fn test_validate_osd_name_text_rejects_non_ascii() {
+        let mut config = AppConfig::default();
+        config.osd.name.text = "Ogród".into();
+        let errors = config.validate().expect_err("non-ASCII name text");
+        assert!(errors.iter().any(|e| e.contains("osd.name.text")));
+    }
+
+    #[test]
+    fn test_validate_osd_name_text_rejects_over_max_glyphs() {
+        let mut config = AppConfig::default();
+        config.osd.name.text = "A".repeat(crate::osd::encode::MAX_GLYPHS + 1);
+        let errors = config.validate().expect_err("over-long name text");
+        assert!(errors.iter().any(|e| e.contains("osd.name.text")));
+    }
+
+    #[test]
+    fn test_validate_osd_name_text_accepts_max_glyphs() {
+        let mut config = AppConfig::default();
+        config.osd.name.text = "A".repeat(crate::osd::encode::MAX_GLYPHS);
+        assert!(config.validate().is_ok());
     }
 
     #[test]

@@ -35,8 +35,21 @@ static ak_vpss_osd_set_param_fn real_set_param;
 static void resolve_real_set_param(void) __attribute__((constructor));
 static void resolve_real_set_param(void)
 {
+    const char *err;
+
     real_set_param = (ak_vpss_osd_set_param_fn)dlsym(RTLD_NEXT,
                                                      "ak_vpss_osd_set_param");
+    if (!real_set_param) {
+        err = dlerror();
+        {
+            static int logged;
+            if (!logged) {
+                logged = 1;
+                log_error("[osd] dlsym(ak_vpss_osd_set_param) failed: %s",
+                          err ? err : "unknown");
+            }
+        }
+    }
 }
 
 int ak_vpss_osd_set_param(const void *vi_handle, struct vpss_osd_param *param)
@@ -49,9 +62,9 @@ int ak_vpss_osd_set_param(const void *vi_handle, struct vpss_osd_param *param)
     if (param &&
         (param->id == OSD_SET_MAIN_DMA_MEM_REQUST ||
          param->id == OSD_SET_SUB_DMA_MEM_REQUST)) {
-        /* libmpi: [i32 chn][ptr paddr][u32 size] */
+        /* libmpi: [i32 chn][u32 paddr][u32 size] — paddr is DMA, always 32-bit. */
         int32_t chn;
-        uintptr_t paddr;
+        uint32_t paddr;
         uint32_t size;
         memcpy(&chn, param->data, sizeof(chn));
         memcpy(&paddr, param->data + 4, sizeof(paddr));
@@ -62,8 +75,14 @@ int ak_vpss_osd_set_param(const void *vi_handle, struct vpss_osd_param *param)
         memset(param->data, 0, sizeof(param->data));
         memcpy(param->data, &paddr, sizeof(paddr));
         memcpy(param->data + 4, &size, sizeof(size));
-        log_info("[osd] mem_attr rewrite chn=%d paddr=%p size=%u",
-                 (int)chn, (void *)paddr, size);
+        {
+            static int logged;
+            if (!logged) {
+                logged = 1;
+                log_info("[osd] mem_attr rewrite chn=%d paddr=%p size=%u",
+                         (int)chn, (void *)(uintptr_t)paddr, size);
+            }
+        }
     } else if (param &&
                (param->id == OSD_SET_MAIN_CHANNEL_DATA ||
                 param->id == OSD_SET_SUB_CHANNEL_DATA)) {
@@ -91,8 +110,14 @@ int ak_vpss_osd_set_param(const void *vi_handle, struct vpss_osd_param *param)
         memcpy(param->data + 14, &y, 2);
         memcpy(param->data + 16, &alpha, 2);
         memcpy(param->data + 18, &en, 2);
-        log_info("[osd] ctx_attr rewrite chn=%d addr=%p %ux%u @%u,%u a=%u en=%u",
-                 (int)chn, (void *)addr, w, h, x, y, alpha, en);
+        {
+            static int logged;
+            if (!logged) {
+                logged = 1;
+                log_info("[osd] ctx_attr rewrite chn=%d addr=%p %ux%u @%u,%u a=%u en=%u",
+                         (int)chn, (void *)addr, w, h, x, y, alpha, en);
+            }
+        }
     }
 
     return real_set_param(vi_handle, param);

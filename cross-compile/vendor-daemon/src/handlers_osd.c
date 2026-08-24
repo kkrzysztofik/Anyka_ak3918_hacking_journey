@@ -68,6 +68,11 @@ int handle_osd_init(int fd, const uint8_t *req, uint32_t req_len)
         return send_response(fd, STATUS_ERROR, NULL, 0);
     }
 
+    if (g_osd_ready) {
+        ak_osd_destroy();
+        g_osd_ready = 0;
+    }
+
     if (ak_osd_set_font_file(OSD_FONT_SIZE, OSD_FONT_PATH) < 0) {
         log_error("[osd] init: set_font_file(%s) failed", OSD_FONT_PATH);
         return send_response(fd, STATUS_ERROR, NULL, 0);

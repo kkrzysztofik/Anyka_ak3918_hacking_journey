@@ -58,25 +58,25 @@ mod tests {
     }
 
     #[test]
-    fn test_format_iso_date_with_24h_clock() {
+    fn test_format_datetime_iso_24h_expected_text() {
         let s = format_datetime(sample(), DateFormat::Iso, TimeFormat::H24);
         assert_eq!(s, "2026-08-24 15:04:05");
     }
 
     #[test]
-    fn test_format_european_date_with_12h_clock() {
+    fn test_format_datetime_european_12h_expected_text() {
         let s = format_datetime(sample(), DateFormat::European, TimeFormat::H12);
         assert_eq!(s, "24/08/2026 03:04:05 PM");
     }
 
     #[test]
-    fn test_format_us_date() {
+    fn test_format_datetime_us_24h_expected_text() {
         let s = format_datetime(sample(), DateFormat::Us, TimeFormat::H24);
         assert_eq!(s, "08/24/2026 15:04:05");
     }
 
     #[test]
-    fn test_formatted_output_is_always_ascii() {
+    fn test_format_datetime_all_locales_ascii_output() {
         // Feeds straight into encode_glyphs, which rejects non-ASCII.
         for date in [DateFormat::Iso, DateFormat::European, DateFormat::Us] {
             for time in [TimeFormat::H12, TimeFormat::H24] {

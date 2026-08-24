@@ -8,8 +8,10 @@
  * chn_sub at 0x0.  ISP still scales the sub stream correctly, but OSD's
  * get_resolution / get_max_rect read chn_sub and then refuse set_rect.
  *
- * When readback shows sub width/height <= 0 and main.max looks like a
- * plausible sub size, copy main.max into res[SUB] before returning.
+ * When the max<=width quirk signature is detected and res[SUB] differs from
+ * main.max (not only when sub width or height is non-positive), copy main.max
+ * into res[SUB] before returning. Affected fields: width, height, max_width,
+ * max_height of res[SUB].
  */
 #include <dlfcn.h>
 #include <string.h>

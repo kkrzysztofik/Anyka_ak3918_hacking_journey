@@ -244,13 +244,14 @@ export async function getOsdSettings(): Promise<OsdSettings> {
 
   for (const node of list) {
     const parsed = parseOsdNode(node);
-    appearance = parsed.appearance;
     if (parsed.token === OSD_TOKEN_NAME) {
+      appearance = parsed.appearance;
       name.enabled = true;
       name.position = parsed.position;
       name.text = safeString(parsed.text?.PlainText, '');
       name.videoSourceToken = parsed.videoSourceToken;
     } else if (parsed.token === OSD_TOKEN_DATETIME) {
+      appearance = parsed.appearance;
       datetime.enabled = true;
       datetime.position = parsed.position;
       datetime.dateFormat = parseDateFormat(parsed.text?.DateFormat);

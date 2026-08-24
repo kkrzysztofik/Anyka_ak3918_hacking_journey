@@ -167,17 +167,18 @@ text     = ""    # empty → falls back to the ONVIF device name
 [osd.datetime]
 enabled     = true
 position    = "lower-right"
-date_format = "YYYY-MM-DD"   # | DD/MM/YYYY | MM/DD/YYYY
-time_format = "24h"          # | 12h
+date_format = "iso"          # | european | us
+time_format = "h24"          # | h12
 ```
 
 ### ONVIF ops (`onvif/media/ops/osd.rs`)
 
-Two fixed, non-deletable instances with tokens `osd_name` and `osd_datetime`.
+Two fixed instances with tokens `osd_name` and `osd_datetime`.
 
 - `GetOSDs`, `GetOSD`, `GetOSDOptions`, `SetOSD` — implemented.
-- `CreateOSD`, `DeleteOSD` — `ter:ActionNotSupported`. Truthful: the rects are
-  fixed silicon, so dynamic tokens would be bookkeeping over a fixed array.
+- `DeleteOSD` disables the named overlay (it drops from `GetOSDs` and vanishes
+  from video). `CreateOSD` with the same token re-enables it. Tokens are not
+  minted or destroyed — a third token still faults `ter:NoConfig`.
 - `GetOSDOptions` advertises `Type=[Text]`,
   `Position=[UpperLeft, UpperRight, LowerLeft, LowerRight]`,
   `TextString Type=[Plain, DateAndTime]`, `FontSize 16..16`, and the 16 palette

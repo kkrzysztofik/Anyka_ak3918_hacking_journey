@@ -427,7 +427,7 @@ impl AnykaPlatform {
             return;
         };
 
-        let dims = match self.ipc.osd_init(vi.as_ptr()) {
+        let dims = match self.ipc.osd_init(vi.as_ptr() as u64).await {
             Ok(d) => d,
             Err(e) => {
                 tracing::warn!(error = %e, "osd_init failed; continuing without overlay");
@@ -464,7 +464,7 @@ impl AnykaPlatform {
             Err(poisoned) => poisoned.into_inner().take(),
         };
         if let Some((tx, task)) = taken {
-            stop_night_loop(tx, task).await;
+            stop_broadcast_loop(tx, task, "OSD overlay task").await;
         }
     }
 
@@ -605,6 +605,10 @@ impl AnykaPlatform {
 
     /// Best-effort teardown of encoders + video input during step 6 rollback.
     async fn rollback_video_pipeline(&self) {
+        // Stop OSD before tearing down VI — every video rollback path must not
+        // leave the renderer holding a dead handle. Idempotent with the call in
+        // `rollback_for_supervisor`.
+        self.stop_osd_overlay().await;
         let _ = self.video_encoder.close_all_encoders();
         let _ = self.video_input.capture_off();
         let _ = self.video_input.destroy_vpss();
@@ -770,24 +774,33 @@ impl Platform for AnykaPlatform {
 // PTZ Control Implementation
 // =============================================================================
 
-/// Ask the night-mode AUTO loop to stop and join it, aborting after a timeout.
+/// Ask a broadcast-shutdown task to stop and join it, aborting after a timeout.
 ///
 /// `tokio::time::timeout` borrowing the handle (not consuming it) means the
 /// task stays joinable if it ignores the shutdown signal; abort and await it
 /// so it cannot keep ticking against a torn-down VI handle.
-async fn stop_night_loop(
+async fn stop_broadcast_loop(
     tx: tokio::sync::broadcast::Sender<()>,
     mut task: tokio::task::JoinHandle<()>,
+    label: &str,
 ) {
     let _ = tx.send(());
     if tokio::time::timeout(Duration::from_secs(2), &mut task)
         .await
         .is_err()
     {
-        tracing::warn!("night-mode AUTO loop did not stop within 2s; aborting");
+        tracing::warn!("{label} did not stop within 2s; aborting");
         task.abort();
         let _ = task.await;
     }
+}
+
+/// Ask the night-mode AUTO loop to stop and join it, aborting after a timeout.
+async fn stop_night_loop(
+    tx: tokio::sync::broadcast::Sender<()>,
+    task: tokio::task::JoinHandle<()>,
+) {
+    stop_broadcast_loop(tx, task, "night-mode AUTO loop").await;
 }
 
 use ptz_actor::PtzRates;

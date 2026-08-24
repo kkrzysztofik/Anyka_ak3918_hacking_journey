@@ -53,6 +53,12 @@ describe('OsdPage', () => {
     expect(screen.getByTestId('osd-loading')).toBeInTheDocument();
   });
 
+  it('should render error state when getOsdSettings rejects', async () => {
+    vi.mocked(getOsdSettings).mockRejectedValue(new Error('failed'));
+    renderWithProviders(<OsdPage />);
+    expect(await screen.findByTestId('osd-error')).toBeInTheDocument();
+  });
+
   it('should render fetched values', async () => {
     renderWithProviders(<OsdPage />);
     await waitForPageLoad('osd-title');

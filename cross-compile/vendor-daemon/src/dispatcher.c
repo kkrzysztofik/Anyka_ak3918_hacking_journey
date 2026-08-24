@@ -42,6 +42,10 @@ static int is_lifecycle_cmd(int32_t cmd)
     case CMD_VPSS_INIT:
     case CMD_VPSS_DESTROY:
     case CMD_OSD_INIT:
+    case CMD_OSD_SET_RECT:
+    case CMD_OSD_DRAW_STR:
+    case CMD_OSD_SET_ENABLE:
+    case CMD_OSD_SET_STYLE:
     case CMD_VENC_SET_CFG_PATH:
     case CMD_VENC_OPEN:
     case CMD_VENC_CLOSE:

@@ -62,10 +62,18 @@ function paletteSwatchStyle(index: number): CSSProperties {
 }
 
 export default function OsdPage() {
-  const { data, isLoading } = useQuery<OsdSettings>({
+  const { data, isLoading, isError } = useQuery<OsdSettings>({
     queryKey: ['osdSettings'],
     queryFn: getOsdSettings,
   });
+
+  if (isError) {
+    return (
+      <div className="text-red-500" data-testid="osd-error">
+        Failed to load OSD settings
+      </div>
+    );
+  }
 
   if (isLoading || !data) {
     return (
@@ -77,7 +85,7 @@ export default function OsdPage() {
 
   return (
     <OsdForm
-      key={`${data.name.text}|${data.datetime.position}|${data.name.enabled}|${data.datetime.enabled}`}
+      key={`${data.name.text}|${data.name.position}|${data.datetime.position}|${data.datetime.dateFormat}|${data.datetime.timeFormat}|${data.appearance.color}|${data.appearance.alpha}|${data.name.enabled}|${data.datetime.enabled}`}
       data={data}
     />
   );
@@ -151,6 +159,7 @@ function OsdForm({ data }: Readonly<{ data: OsdSettings }>) {
       toast.error('Failed to save OSD settings', {
         description: error instanceof Error ? error.message : 'An error occurred',
       });
+      queryClient.invalidateQueries({ queryKey: ['osdSettings'] });
     },
   });
 
@@ -332,6 +341,7 @@ function OsdForm({ data }: Readonly<{ data: OsdSettings }>) {
                   type="button"
                   data-testid={`osd-palette-${i}`}
                   aria-label={`Colour ${i}`}
+                  aria-pressed={color === i}
                   className={`h-8 w-8 rounded border ${color === i ? 'ring-primary ring-2 ring-offset-2' : ''}`}
                   style={paletteSwatchStyle(i)}
                   onClick={() => setColor(i)}

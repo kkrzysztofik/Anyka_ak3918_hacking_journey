@@ -67,6 +67,8 @@ pub struct MediaService {
     config: Arc<ConfigRuntime>,
     /// Platform abstraction (optional).
     platform: Option<Arc<dyn Platform>>,
+    /// Debounced AppConfig persistence (OSD lives in `[osd]`, not profiles).
+    config_persistence: Option<PersistenceHandle>,
     /// Live attach state from the vendor-daemon supervisor.
     ///
     /// `None` in stub builds and unit tests, where there is no supervisor. Absence
@@ -83,6 +85,7 @@ impl MediaService {
             profile_manager: Arc::new(ProfileManager::with_config(Arc::clone(&config))),
             config,
             platform: None,
+            config_persistence: None,
             availability: None,
         }
     }
@@ -93,6 +96,7 @@ impl MediaService {
             profile_manager: Arc::new(ProfileManager::with_config(Arc::clone(&config))),
             config,
             platform: None,
+            config_persistence: None,
             availability: None,
         }
     }
@@ -130,8 +134,15 @@ impl MediaService {
             profile_manager: Arc::new(pm),
             config,
             platform,
+            config_persistence: None,
             availability: None,
         }
+    }
+
+    /// Attach debounced AppConfig persistence for OSD (and other `[osd]` writes).
+    pub fn with_config_persistence(mut self, handle: PersistenceHandle) -> Self {
+        self.config_persistence = Some(handle);
+        self
     }
 
     /// Create a new Media Service with a custom profile manager (for tests).
@@ -143,7 +154,14 @@ impl MediaService {
             profile_manager,
             config: Arc::new(ConfigRuntime::new(Default::default())),
             platform: None,
+            config_persistence: None,
             availability: None,
+        }
+    }
+
+    fn request_config_save(&self) {
+        if let Some(handle) = &self.config_persistence {
+            handle.request_save();
         }
     }
 
@@ -572,7 +590,9 @@ impl MediaService {
 
     /// Handle SetOSD request.
     pub fn handle_set_osd(&self, request: SetOSD) -> OnvifResult<SetOSDResponse> {
-        osd_ops::set_osd(self.config.as_ref(), self.platform.as_ref(), request)
+        let response = osd_ops::set_osd(self.config.as_ref(), self.platform.as_ref(), request)?;
+        self.request_config_save();
+        Ok(response)
     }
 
     /// Handle CreateOSD request — enables one of the two fixed rects.
@@ -1101,7 +1121,7 @@ impl ServiceHandler for MediaService {
                 })
             }
 
-            // Unknown action
+            // OSD
             "GetOSDs" => {
                 let request: GetOSDs = quick_xml::de::from_str(body_xml)
                     .map_err(|e| OnvifError::WellFormed(format!("Invalid request XML: {}", e)))?;
@@ -1156,6 +1176,7 @@ impl ServiceHandler for MediaService {
                 })
             }
 
+            // Unknown action
             _ => Err(OnvifError::ActionNotSupported(action.to_string())),
         }
     }
