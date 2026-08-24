@@ -138,9 +138,10 @@ Handle resolution follows the existing
 
 - **`osd/encode.rs`** — `to_glyph_codes(&str) -> Vec<u16>`. ASCII only; non-ASCII
   rejected during `SetOSD` validation with a descriptive fault.
-- **`osd/layout.rs`** — pure `(corner, glyph_count, channel_dims) -> (rect_id, x, y)`.
-  Ports the vendor math: 8px advance, 16px line height; right-aligned
-  `x = width - 8*len`, left `x = 16`, bottom `y = height - 16`. Fully host-testable.
+- **`osd/layout.rs`** — pure `(corner, glyph_count, channel_dims, font) -> (x, y)`.
+  Stage B corrected the paper math: main channel uses 32px height / 16px advance
+  (font file doubled); sub keeps 16/8. Left inset equals font height; right-aligned
+  `x = width - advance*len`; bottom `y = height - font_height`. Fully host-testable.
 - **`osd/renderer.rs`** — one tokio task on a 1 Hz interval, re-rendering only
   changed strings. The name rect redraws approximately never; the time rect once a
   second. 1 Hz on a control socket that already carries a 25 fps push path is not
