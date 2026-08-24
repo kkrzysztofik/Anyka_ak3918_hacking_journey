@@ -14,6 +14,8 @@
 #include "protocol.h"
 #include "log.h"
 #include "ak_venc.h"
+#include "ak_ai.h"
+#include "ak_aenc.h"
 #include "vd_ring_buffer.h"
 
 /* ---- Timestamp forward-clamp bounds -------------------------------------
@@ -54,6 +56,15 @@
  * read_seq for it, so the ring permanently loses capacity.
  */
 static pthread_mutex_t g_ring_write_lock = PTHREAD_MUTEX_INITIALIZER;
+
+/* Audio SDK chain, owned start-to-finish by the audio push thread.  All three
+ * are opened in handle_audio_start_push() and torn down in reverse in
+ * handle_audio_stop_push().  File-static rather than in push_stream_state
+ * because that struct is shared with the video path and none of these fields
+ * mean anything there. */
+static void *g_ai_handle      = NULL;
+static void *g_aenc_handle    = NULL;
+static void *g_astream_handle = NULL;
 
 /**
  * push_slot_index - Map a stream_id to a g_push_streams array index.
@@ -457,6 +468,101 @@ static void *push_frame_thread(void *arg)
     return NULL;
 }
 
+/**
+ * audio_push_thread - Dedicated pthread for encoded-audio delivery.
+ *
+ * Polls ak_aenc_get_stream(), which returns a LIST of encoded frames rather
+ * than the single frame ak_venc_get_stream() yields, writes each to the ring
+ * with stream_id=VD_STREAM_AUDIO, and releases every entry.
+ *
+ * @param arg   Pointer to the struct push_stream_state for the audio slot.
+ * @return      Always NULL.
+ */
+static void *audio_push_thread(void *arg)
+{
+    struct push_stream_state *state = (struct push_stream_state *)arg;
+    uint64_t frames_pushed = 0;
+    uint32_t seq_no = 0;
+
+    log_info("event=audio_push_lifecycle state=start thread_id=%lu diag_monotonic_ms=%llu",
+             (unsigned long)pthread_self(),
+             (unsigned long long)diag_monotonic_ms());
+
+    while (state->active && !g_shutdown) {
+        struct list_head stream_head;
+        INIT_LIST_HEAD(&stream_head);
+
+        if (ak_aenc_get_stream(g_astream_handle, &stream_head) != 0) {
+            struct timespec ts = { .tv_sec = 0, .tv_nsec = PUSH_POLL_SLEEP_MS * 1000000L };
+            nanosleep(&ts, NULL);
+            continue;
+        }
+
+        struct aenc_entry *entry;
+        struct aenc_entry *tmp;
+        list_for_each_entry_safe(entry, tmp, &stream_head, list) {
+            uint32_t frame_len = entry->stream.len;
+
+            /*
+             * Anchor audio to the MAIN video stream's timestamp origin rather
+             * than to its own first frame.  Audio is fanned into both the main
+             * and sub queues by the Rust bridge, and video normalizes against
+             * its own first timestamp -- so an independent audio anchor puts
+             * the two clocks an arbitrary offset apart and lip-sync drifts by
+             * however long audio started after video.
+             *
+             * If video has not anchored yet there is nothing to sync against;
+             * drop the frame rather than invent an origin we would have to
+             * correct later.
+             */
+            if (!g_push_streams[0].timestamp_initialized) {
+                ak_aenc_release_stream(entry);
+                continue;
+            }
+            uint32_t first_ms = g_push_streams[0].first_timestamp_ms;
+            uint32_t raw_ms   = (uint32_t)entry->stream.ts;
+            uint32_t timestamp_ms = (raw_ms >= first_ms) ? (raw_ms - first_ms) : 0;
+
+            int ring_slot;
+            pthread_mutex_lock(&g_ring_write_lock);
+            /*
+             * ponytail: audio is written as VD_FRAME_TYPE_P so the ring's
+             * eviction logic sheds it before video keyframes under pressure.
+             * Video is the primary product on a security camera. Upgrade path:
+             * give the ring a per-stream priority field if audio dropouts turn
+             * out to matter more than an extra video P-frame.
+             */
+            ring_slot = vd_ring_write(g_ring_buffer, entry->stream.data, frame_len,
+                                      timestamp_ms, seq_no,
+                                      VD_FRAME_TYPE_P, VD_STREAM_AUDIO);
+            if (ring_slot >= 0) {
+                fill_slot_timing(g_ring_buffer, ring_slot);
+            }
+            pthread_mutex_unlock(&g_ring_write_lock);
+
+            if (ring_slot >= 0) {
+                struct vd_frame_notify notif;
+                notif.slot_index = (uint32_t)ring_slot;
+                notif.frame_len  = frame_len;
+                notif.flags      = VD_NOTIFY_LAST_FRAGMENT;
+                notif.stream_id  = VD_STREAM_AUDIO;
+                notif.seq_no     = seq_no;
+                if (send_frame_notification(VD_STREAM_AUDIO, &notif) != 0) {
+                    log_warn("[audio] notification write failed, client may have disconnected");
+                }
+                frames_pushed++;
+            }
+            seq_no++;
+            ak_aenc_release_stream(entry);
+        }
+    }
+
+    log_info("event=audio_push_lifecycle state=exit frames_pushed=%llu diag_monotonic_ms=%llu",
+             (unsigned long long)frames_pushed,
+             (unsigned long long)diag_monotonic_ms());
+    return NULL;
+}
+
 /* ---- Public interface ---------------------------------------------------- */
 
 /**
@@ -730,5 +836,158 @@ int handle_venc_stop_push(int fd, const uint8_t *req, uint32_t req_len)
     log_info("[push] push-based frame delivery stopped (all streams)");
     log_info("event=push_cmd cmd=20 status=ok scope=all diag_monotonic_ms=%llu",
              (unsigned long long)diag_monotonic_ms());
+    return send_response(fd, STATUS_OK, NULL, 0);
+}
+
+/**
+ * handle_audio_start_push - IPC handler for CMD_AUDIO_START_PUSH.
+ *
+ * Opens the full audio SDK chain and spawns the audio push thread.
+ *
+ * Wire format: [u32 sample_rate][u32 channel_num][u32 frame_interval_ms] = 12 bytes.
+ *
+ * @param fd      Client socket file descriptor, used to send the response.
+ * @param req     Request payload bytes (little-endian, layout described above).
+ * @param req_len Length of @p req in bytes.
+ * @return        0 on success, -1 on I/O error.
+ */
+int handle_audio_start_push(int fd, const uint8_t *req, uint32_t req_len)
+{
+    if (req_len < 12) {
+        log_warn("[audio] start_push: req too short (%u)", req_len);
+        return send_response(fd, STATUS_ERROR, NULL, 0);
+    }
+
+    uint32_t sample_rate  = req_read_u32(req, 0);
+    uint32_t channel_num  = req_read_u32(req, 4);
+    uint32_t interval_ms  = req_read_u32(req, 8);
+
+    int idx = push_slot_index(VD_STREAM_AUDIO);
+    struct push_stream_state *state = &g_push_streams[idx];
+
+    if (state->active) {
+        log_warn("[audio] already active, ignoring start_push");
+        return send_response(fd, STATUS_OK, NULL, 0);
+    }
+
+    struct pcm_param ai_param;
+    memset(&ai_param, 0, sizeof(ai_param));
+    ai_param.sample_bits = 16;          /* SDK supports 16 only */
+    ai_param.channel_num = channel_num;
+    ai_param.sample_rate = sample_rate;
+
+    g_ai_handle = ak_ai_open(&ai_param);
+    if (g_ai_handle == NULL) {
+        log_error("[audio] ak_ai_open failed rate=%u ch=%u", sample_rate, channel_num);
+        return send_response(fd, STATUS_ERROR, NULL, 0);
+    }
+
+    /* Filters off: AEC/NR/AGC are 8K-only and tuned for two-way voice, not for
+     * a monitoring mic.  Resample off because we open the ADC at the rate we
+     * actually want. */
+    ak_ai_set_aec(g_ai_handle, AUDIO_FUNC_DISABLE);
+    ak_ai_set_nr_agc(g_ai_handle, AUDIO_FUNC_DISABLE);
+    ak_ai_set_resample(g_ai_handle, AUDIO_FUNC_DISABLE);
+    ak_ai_set_source(g_ai_handle, AI_SOURCE_MIC);
+    ak_ai_clear_frame_buffer(g_ai_handle);
+
+    /* Must precede start_capture.  ak_ai.h documents the range as [10,125] ms
+     * but AAC at 8 kHz needs 128; aenc_demo sets it anyway and works, so log
+     * the return code rather than treating it as fatal. */
+    int iv_ret = ak_ai_set_frame_interval(g_ai_handle, (int)interval_ms);
+    if (iv_ret != 0) {
+        log_warn("[audio] set_frame_interval(%u) returned %d; continuing", interval_ms, iv_ret);
+    }
+    ak_ai_start_capture(g_ai_handle);
+
+    struct audio_param aenc_param;
+    memset(&aenc_param, 0, sizeof(aenc_param));
+    aenc_param.type        = AK_AUDIO_TYPE_AAC;
+    aenc_param.sample_bits = 16;
+    aenc_param.channel_num = channel_num;
+    aenc_param.sample_rate = sample_rate;
+
+    g_aenc_handle = ak_aenc_open(&aenc_param);
+    if (g_aenc_handle == NULL) {
+        log_error("[audio] ak_aenc_open failed");
+        goto fail_ai;
+    }
+
+    /* CUT, not SAVE: RTP AAC-hbr and FLV both want raw AAC frames.  SAVE
+     * prepends an ADTS header, which is right for files and wrong here -- it
+     * yields a negotiated track that decodes to garbage. */
+    struct aenc_attr attr;
+    attr.aac_head = AENC_AAC_CUT_FRAME_HEAD;
+    ak_aenc_set_attr(g_aenc_handle, &attr);
+
+    g_astream_handle = ak_aenc_request_stream(g_ai_handle, g_aenc_handle);
+    if (g_astream_handle == NULL) {
+        log_error("[audio] ak_aenc_request_stream failed");
+        goto fail_aenc;
+    }
+
+    state->stream_id = VD_STREAM_AUDIO;
+    state->active = 1;
+
+    if (pthread_create(&state->thread, NULL, audio_push_thread, state) != 0) {
+        log_error("[audio] pthread_create failed: %s", strerror(errno));
+        state->active = 0;
+        goto fail_stream;
+    }
+
+    log_info("[audio] push started rate=%u ch=%u interval=%ums",
+             sample_rate, channel_num, interval_ms);
+    return send_response(fd, STATUS_OK, NULL, 0);
+
+fail_stream:
+    ak_aenc_cancel_stream(g_astream_handle);
+    g_astream_handle = NULL;
+fail_aenc:
+    ak_aenc_close(g_aenc_handle);
+    g_aenc_handle = NULL;
+fail_ai:
+    ak_ai_stop_capture(g_ai_handle);
+    ak_ai_close(g_ai_handle);
+    g_ai_handle = NULL;
+    return send_response(fd, STATUS_ERROR, NULL, 0);
+}
+
+/**
+ * handle_audio_stop_push - IPC handler for CMD_AUDIO_STOP_PUSH.
+ *
+ * Stops the audio push thread and tears the SDK chain down in reverse order.
+ *
+ * @param fd      Client socket file descriptor, used to send the response.
+ * @param req     Request payload bytes (unused for this command).
+ * @param req_len Length of @p req in bytes (unused).
+ * @return        0 on success, -1 on I/O error.
+ */
+int handle_audio_stop_push(int fd, const uint8_t *req, uint32_t req_len)
+{
+    (void)req;
+    (void)req_len;
+
+    int idx = push_slot_index(VD_STREAM_AUDIO);
+    if (stop_push_slot(idx) != 0) {
+        log_error("[audio] failed to stop audio push slot");
+        return send_response(fd, STATUS_ERROR, NULL, 0);
+    }
+
+    /* Reverse of the open order in handle_audio_start_push(). */
+    if (g_astream_handle) {
+        ak_aenc_cancel_stream(g_astream_handle);
+        g_astream_handle = NULL;
+    }
+    if (g_aenc_handle) {
+        ak_aenc_close(g_aenc_handle);
+        g_aenc_handle = NULL;
+    }
+    if (g_ai_handle) {
+        ak_ai_stop_capture(g_ai_handle);
+        ak_ai_close(g_ai_handle);
+        g_ai_handle = NULL;
+    }
+
+    log_info("[audio] push stopped");
     return send_response(fd, STATUS_OK, NULL, 0);
 }

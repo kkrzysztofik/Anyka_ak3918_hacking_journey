@@ -289,6 +289,14 @@ int process_request(int fd)
         ret = handle_venc_stop_push(fd, req_buf, req_len);
         break;
 
+    /* --- Audio push-mode streaming --- */
+    case CMD_AUDIO_START_PUSH:
+        ret = handle_audio_start_push(fd, req_buf, req_len);
+        break;
+    case CMD_AUDIO_STOP_PUSH:
+        ret = handle_audio_stop_push(fd, req_buf, req_len);
+        break;
+
     /* --- Audio Input --- */
     case CMD_AI_OPEN:
         ret = handle_ai_open(fd, req_buf, req_len);

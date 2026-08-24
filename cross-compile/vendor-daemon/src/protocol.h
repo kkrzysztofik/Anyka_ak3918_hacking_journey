@@ -74,6 +74,12 @@ enum cmd_id {
     CMD_AENC_OPEN                 = 54,
     CMD_AENC_CLOSE                = 55,
     CMD_AENC_SET_ATTR             = 56,
+    /* Audio push-mode streaming.  Unlike VENC push, these carry no handles:
+     * ak_aenc_request_stream() binds input to encoder and its stream handle must
+     * live exactly as long as the push thread, so the daemon owns the whole
+     * chain rather than marshalling three handles across IPC. */
+    CMD_AUDIO_START_PUSH          = 57,
+    CMD_AUDIO_STOP_PUSH           = 58,
     /* Imaging / ISP */
     CMD_ISP_SET_BRIGHTNESS        = 100,
     CMD_ISP_SET_CONTRAST          = 101,
