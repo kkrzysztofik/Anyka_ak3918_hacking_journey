@@ -17,7 +17,7 @@ table-driven dual-socket accept, shorter handler docs.
 
 ---
 
-### Task 1: Shrink `list.h` to what `ak_aenc.h` needs
+## Task 1: Shrink `list.h` to what `ak_aenc.h` needs
 
 **Files:**
 - Modify: `cross-compile/vendor-daemon/include/list.h` (replace body)
@@ -79,7 +79,7 @@ EOF
 
 ---
 
-### Task 2: Trim unused rxi/log APIs (keep the library)
+## Task 2: Trim unused rxi/log APIs (keep the library)
 
 **Files:**
 - Modify: `cross-compile/vendor-daemon/src/log.h`
@@ -164,7 +164,7 @@ EOF
 
 ---
 
-### Task 3: Delete consumer-only ring helpers
+## Task 3: Delete consumer-only ring helpers
 
 **Files:**
 - Modify: `cross-compile/vendor-daemon/include/vd_ring_buffer.h`
@@ -223,7 +223,7 @@ EOF
 
 ---
 
-### Task 4: Fold VPSS no-ops into dispatcher
+## Task 4: Fold VPSS no-ops into dispatcher
 
 **Files:**
 - Modify: `cross-compile/vendor-daemon/src/dispatcher.c`
@@ -231,8 +231,10 @@ EOF
 - Delete: `cross-compile/vendor-daemon/src/handlers_vpss.h`
 
 **PERMISSION NOTE:** `AGENTS.md` forbids deleting files without explicit user
-permission. The approved design already lists deleting `handlers_vpss.*`. If
-the executing agent still needs a one-line confirm, ask once before `git rm`.
+permission. Do **not** treat the approved design, this plan, or any conditional
+note as permission. Always stop and obtain express written confirmation before
+`git rm` / deleting `handlers_vpss.*`. Proceed with the `dispatcher.c` inline
+no-ops only as authorized; perform file deletions only after that confirmation.
 
 **Step 1: Inline handlers in `dispatcher.c`**
 
@@ -250,7 +252,7 @@ Replace the two cases with:
 
 (Keep `is_lifecycle_cmd` listing `CMD_VPSS_INIT` / `CMD_VPSS_DESTROY`.)
 
-**Step 2: Remove the VPSS module files**
+**Step 2: Remove the VPSS module files (only after explicit user permission)**
 
 ```bash
 git rm cross-compile/vendor-daemon/src/handlers_vpss.c \
@@ -281,7 +283,7 @@ EOF
 
 ---
 
-### Task 5: Table-driven frame-socket accept
+## Task 5: Table-driven frame-socket accept
 
 **Files:**
 - Modify: `cross-compile/vendor-daemon/src/main.c` (accept loop ~372–442)
@@ -298,19 +300,20 @@ struct frame_listen {
     int *client_fd;
     pthread_mutex_t *lock;
     const char *name;   /* "main" / "sub" for logs */
+    int poll_idx;       /* explicit fds[] index; do not derive from loop order */
 };
 
 struct frame_listen frame_chs[] = {
     { &g_frame_main_server_fd, &g_frame_main_client_fd,
-      &g_frame_main_client_lock, "main" },
+      &g_frame_main_client_lock, "main", 1 },
     { &g_frame_sub_server_fd, &g_frame_sub_client_fd,
-      &g_frame_sub_client_lock, "sub" },
+      &g_frame_sub_client_lock, "sub", 2 },
 };
 ```
 
-Map `fds[1]` / `fds[2]` to `frame_chs[0]` / `frame_chs[1]`. One accept body:
-lock → reject if client already set → else install fd → unlock → add to poll
-or roll back.
+Iterate with `ARRAY_SIZE(frame_chs)`; use `fl->poll_idx` for `revents` / accept.
+One accept body: lock → reject if client already set → else install fd → unlock
+→ add to poll or roll back.
 
 **Step 2: Confirm control-socket accept path unchanged**
 
@@ -330,7 +333,7 @@ EOF
 
 ---
 
-### Task 6: Doxygen / comment pass
+## Task 6: Doxygen / comment pass
 
 **Files:**
 - Modify: `cross-compile/vendor-daemon/src/handlers_*.c` (not vpss — gone)
@@ -370,7 +373,7 @@ EOF
 
 ---
 
-### Task 7: Full verification
+## Task 7: Full verification
 
 **Step 1: Host ring test**
 

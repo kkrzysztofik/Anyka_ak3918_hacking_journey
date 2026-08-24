@@ -326,12 +326,13 @@ int main(int argc, char *argv[])
         int *client_fd;
         pthread_mutex_t *lock;
         const char *name;
+        int poll_idx; /* index into fds[] for this listener */
     };
     struct frame_listen frame_chs[] = {
         { &g_frame_main_server_fd, &g_frame_main_client_fd,
-          &g_frame_main_client_lock, "main" },
+          &g_frame_main_client_lock, "main", 1 },
         { &g_frame_sub_server_fd, &g_frame_sub_client_fd,
-          &g_frame_sub_client_lock, "sub" },
+          &g_frame_sub_client_lock, "sub", 2 },
     };
 
     memset(fds, 0, sizeof(fds));
@@ -386,12 +387,11 @@ int main(int argc, char *argv[])
         /* ── Accept new connections on main/sub frame sockets ─────────── */
         {
             size_t ch;
-            for (ch = 0; ch < sizeof(frame_chs) / sizeof(frame_chs[0]); ch++) {
-                int poll_idx = (int)ch + 1; /* fds[1]=main, fds[2]=sub */
+            for (ch = 0; ch < ARRAY_SIZE(frame_chs); ch++) {
                 struct frame_listen *fl = &frame_chs[ch];
                 int client_fd;
 
-                if (!(fds[poll_idx].revents & POLLIN))
+                if (!(fds[fl->poll_idx].revents & POLLIN))
                     continue;
 
                 client_fd = accept(*fl->server_fd, NULL, NULL);
