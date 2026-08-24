@@ -217,6 +217,43 @@ pub fn audio_channels_from_config(audio_config: &[u8]) -> u32 {
     }
 }
 
+/// MPEG-4 sampling-frequency index table (ISO/IEC 14496-3 Table 1.18).
+const AAC_SAMPLE_RATES: [u32; 13] = [
+    96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000, 7350,
+];
+
+/// Build the 2-byte AAC-LC AudioSpecificConfig for a sample rate and channel count.
+///
+/// These two bytes are consumed in three places — the SDP `config=` fmtp, the
+/// FLV AudioSpecificConfig sequence header, and RTP AAC-hbr sizing — so they are
+/// computed once here rather than at each call site.
+///
+/// Layout: 5 bits object type (2 = AAC-LC), 4 bits sampling frequency index,
+/// 4 bits channel configuration, 3 bits zero padding.
+pub fn aac_audio_specific_config(sample_rate: u32, channels: u32) -> Vec<u8> {
+    const AAC_LC_OBJECT_TYPE: u8 = 2;
+    const FALLBACK_INDEX: u8 = 11; // 8000 Hz
+
+    let freq_index = AAC_SAMPLE_RATES
+        .iter()
+        .position(|&r| r == sample_rate)
+        .map(|i| i as u8)
+        .unwrap_or_else(|| {
+            tracing::warn!(
+                sample_rate,
+                "Unsupported AAC sample rate; falling back to 8000 Hz in AudioSpecificConfig"
+            );
+            FALLBACK_INDEX
+        });
+
+    let channel_config = (channels & 0x0F) as u8;
+
+    vec![
+        (AAC_LC_OBJECT_TYPE << 3) | (freq_index >> 1),
+        ((freq_index & 0x01) << 7) | (channel_config << 3),
+    ]
+}
+
 /// Format audio config bytes as uppercase hex.
 pub fn audio_config_hex(audio_config: &[u8]) -> String {
     audio_config
@@ -361,6 +398,36 @@ mod tests {
     #[test]
     fn test_audio_config_hex_formats_uppercase_hex() {
         assert_eq!(audio_config_hex(&[0x12, 0xab, 0x00]), "12AB00");
+    }
+
+    #[test]
+    fn test_aac_audio_specific_config_8khz_mono() {
+        // AAC-LC (objectType 2), 8000 Hz (freq index 11), 1 channel.
+        // Bit layout: 00010 1011 0001 000 -> 0x15 0x88
+        assert_eq!(aac_audio_specific_config(8000, 1), vec![0x15, 0x88]);
+    }
+
+    #[test]
+    fn test_aac_audio_specific_config_16khz_mono() {
+        // AAC-LC, 16000 Hz (freq index 8), 1 channel -> 0x14 0x08
+        assert_eq!(aac_audio_specific_config(16000, 1), vec![0x14, 0x08]);
+    }
+
+    #[test]
+    fn test_aac_audio_specific_config_roundtrips_through_sdp_helpers() {
+        // The ASC must survive the helpers that actually consume it, or the SDP
+        // advertises a config no client can parse.
+        let asc = aac_audio_specific_config(8000, 1);
+        assert_eq!(audio_channels_from_config(&asc), 1);
+        assert_eq!(audio_config_hex(&asc), "1588");
+    }
+
+    #[test]
+    fn test_aac_audio_specific_config_unsupported_rate_falls_back_to_8khz() {
+        // An unmapped rate must not silently emit a wrong freq index; falling back
+        // to 8 kHz keeps the stream decodable and the mismatch audible rather than
+        // producing an ASC that decoders reject outright.
+        assert_eq!(aac_audio_specific_config(12345, 1), vec![0x15, 0x88]);
     }
 
     #[test]
