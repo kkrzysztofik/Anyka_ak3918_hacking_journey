@@ -1,7 +1,7 @@
 /**
  * LiveVideoPlayer Tests
  */
-import { waitFor } from '@testing-library/react';
+import { fireEvent, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { renderWithProviders } from '@/test/componentTestHelpers';
@@ -211,6 +211,41 @@ describe('LiveVideoPlayer', () => {
 
     toggle.click();
     await waitFor(() => expect(video.muted).toBe(true));
+  });
+
+  it('scales playback volume from the slider', async () => {
+    const { getByTestId } = renderWithProviders(<LiveVideoPlayer streamType="main" />);
+    await waitFor(() => expect(mockPlayer.on).toHaveBeenCalled());
+
+    const mediaHandler = mockPlayer.on.mock.calls.find((c) => c[0] === 'media_info')?.[1];
+    mediaHandler({ width: 1280, height: 720, videoCodec: 'avc1.4de028', audioCodec: 'mp4a.40.2' });
+
+    const slider = await waitFor(() => getByTestId('liveview-volume-slider'));
+    const video = getByTestId('liveview-video') as HTMLVideoElement;
+
+    fireEvent.change(slider, { target: { value: '0.4' } });
+    await waitFor(() => expect(video.volume).toBeCloseTo(0.4));
+    // Any audible level implies not muted, whatever the toggle said before.
+    expect(video.muted).toBe(false);
+  });
+
+  it('mutes at slider zero and restores an audible level when unmuted', async () => {
+    // Unmuting into volume 0 is silence the user cannot diagnose from the UI.
+    const { getByTestId } = renderWithProviders(<LiveVideoPlayer streamType="main" />);
+    await waitFor(() => expect(mockPlayer.on).toHaveBeenCalled());
+
+    const mediaHandler = mockPlayer.on.mock.calls.find((c) => c[0] === 'media_info')?.[1];
+    mediaHandler({ width: 1280, height: 720, videoCodec: 'avc1.4de028', audioCodec: 'mp4a.40.2' });
+
+    const slider = await waitFor(() => getByTestId('liveview-volume-slider'));
+    const video = getByTestId('liveview-video') as HTMLVideoElement;
+
+    fireEvent.change(slider, { target: { value: '0' } });
+    await waitFor(() => expect(video.muted).toBe(true));
+
+    getByTestId('liveview-mute-toggle').click();
+    await waitFor(() => expect(video.muted).toBe(false));
+    expect(video.volume).toBeGreaterThan(0);
   });
 
   it('does not trust the SPS-derived fps from MEDIA_INFO', async () => {

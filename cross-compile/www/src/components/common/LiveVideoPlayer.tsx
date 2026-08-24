@@ -52,12 +52,19 @@ export function LiveVideoPlayer({
   // stream, or a camera with audio_enabled=false, has none.
   const [hasAudio, setHasAudio] = useState(false);
 
-  // React stops reflecting `muted` to the DOM property after the initial
-  // render, so drive later changes from the element itself.
+  // Playback volume, viewer-local: this scales the decoded audio in this tab
+  // only. It is not mic gain, so it changes nothing for RTSP clients or anyone
+  // else watching.
+  const [volume, setVolume] = useState(1);
+
+  // `muted` and `volume` are DOM properties, not attributes — React reflects
+  // neither reliably after the initial render, so drive both from the element.
   useEffect(() => {
     const video = videoRef.current;
-    if (video) video.muted = muted;
-  }, [muted]);
+    if (!video) return;
+    video.muted = muted;
+    video.volume = volume;
+  }, [muted, volume]);
 
   // Everything the effect needs but must not re-run for. Parents pass inline
   // arrows, and getBasicAuthHeader's identity changes with credentials; if the
@@ -209,16 +216,39 @@ export function LiveVideoPlayer({
       />
 
       {hasAudio && (
-        <button
-          type="button"
-          onClick={() => setMuted((previous) => !previous)}
-          className="absolute right-3 bottom-3 rounded-md bg-black/60 p-2 text-white transition-colors hover:bg-black/80 focus-visible:ring-2 focus-visible:ring-white focus-visible:outline-none"
-          aria-pressed={!muted}
-          aria-label={muted ? 'Unmute audio' : 'Mute audio'}
-          data-testid="liveview-mute-toggle"
-        >
-          {muted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
-        </button>
+        <div className="absolute right-3 bottom-3 flex items-center gap-2 rounded-md bg-black/60 px-2 py-1.5">
+          <button
+            type="button"
+            onClick={() => {
+              // Unmuting into a zero volume is silence with no visible cause,
+              // so a toggle out of mute restores an audible level.
+              if (muted && volume === 0) setVolume(1);
+              setMuted((previous) => !previous);
+            }}
+            className="rounded text-white transition-colors hover:text-zinc-300 focus-visible:ring-2 focus-visible:ring-white focus-visible:outline-none"
+            aria-pressed={!muted}
+            aria-label={muted ? 'Unmute audio' : 'Mute audio'}
+            data-testid="liveview-mute-toggle"
+          >
+            {muted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
+          </button>
+          <input
+            type="range"
+            min={0}
+            max={1}
+            step={0.05}
+            // Show what is audible, not what is stored: while muted that is zero.
+            value={muted ? 0 : volume}
+            onChange={(event) => {
+              const next = Number(event.target.value);
+              setVolume(next);
+              setMuted(next === 0);
+            }}
+            className="h-1 w-20 cursor-pointer accent-white"
+            aria-label="Volume"
+            data-testid="liveview-volume-slider"
+          />
+        </div>
       )}
     </div>
   );
