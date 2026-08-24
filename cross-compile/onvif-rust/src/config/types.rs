@@ -10,6 +10,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::onvif::types::common::DiscoveryMode;
+use crate::osd::format::{DateFormat, TimeFormat};
+use crate::osd::layout::Corner;
 
 // ============================================================================
 // Root configuration
@@ -42,6 +44,9 @@ pub struct AppConfig {
     pub stream_profile_3: StreamProfileConfig,
     #[serde(default = "StreamProfileConfig::default_sub")]
     pub stream_profile_4: StreamProfileConfig,
+    /// On-screen display (camera name + timestamp burned into video).
+    #[serde(default)]
+    pub osd: OsdConfig,
 }
 
 impl Default for AppConfig {
@@ -73,6 +78,7 @@ impl Default for AppConfig {
             stream_profile_2: p2,
             stream_profile_3: p3,
             stream_profile_4: p4,
+            osd: OsdConfig::default(),
         }
     }
 }
@@ -107,6 +113,15 @@ impl AppConfig {
         ) {
             if val < min || val > max {
                 errors.push(format!("{name}: {val} not in [{min}, {max}]"));
+            }
+        }
+
+        fn osd_name_text(errors: &mut Vec<String>, text: &str) {
+            if text.is_empty() {
+                return;
+            }
+            if let Err(e) = crate::osd::encode::encode_glyphs(text) {
+                errors.push(format!("osd.name.text: {e}"));
             }
         }
 
@@ -241,6 +256,14 @@ impl AppConfig {
                 "imaging.night.night_threshold ({n}) must be below day_threshold ({day})"
             ));
         }
+
+        // OSD — colour is a 16-entry palette index; alpha is the vendor 1..=100 range.
+        range(&mut errors, "osd.color", self.osd.color, 0, 15);
+        range(&mut errors, "osd.alpha", self.osd.alpha, 1, 100);
+        // Empty name text falls back to the device name at render time; non-empty
+        // values must already be encodable so a bad anyka.toml cannot reach the
+        // renderer.
+        osd_name_text(&mut errors, &self.osd.name.text);
 
         // Discovery
         range(
@@ -749,6 +772,79 @@ impl Default for NightConfig {
             // `[autoir]` block: day_to_night_lum / night_to_day_lum.
             lum_night_threshold: 6400,
             lum_day_threshold: 2048,
+        }
+    }
+}
+
+// ============================================================================
+// Section: [osd]
+// ============================================================================
+
+/// One text overlay: the camera name.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct OsdNameConfig {
+    pub enabled: bool,
+    pub position: Corner,
+    /// Empty means "fall back to the ONVIF device name".
+    pub text: String,
+}
+
+impl Default for OsdNameConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            position: Corner::UpperLeft,
+            text: String::new(),
+        }
+    }
+}
+
+/// Timestamp overlay settings.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct OsdDateTimeConfig {
+    pub enabled: bool,
+    pub position: Corner,
+    pub date_format: DateFormat,
+    pub time_format: TimeFormat,
+}
+
+impl Default for OsdDateTimeConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            position: Corner::LowerRight,
+            date_format: DateFormat::Iso,
+            time_format: TimeFormat::H24,
+        }
+    }
+}
+
+/// On-screen display settings.
+///
+/// `color` and `alpha` are device-global, not per-item: the vendor API
+/// (`ak_osd_set_color`, `ak_osd_set_alpha`) takes no channel or rect argument.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct OsdConfig {
+    pub enabled: bool,
+    /// Index into the vendor's 16-entry colour table, 0..=15.
+    pub color: u8,
+    /// Overlay opacity, 1..=100.
+    pub alpha: u8,
+    pub name: OsdNameConfig,
+    pub datetime: OsdDateTimeConfig,
+}
+
+impl Default for OsdConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            color: 1,
+            alpha: 80,
+            name: OsdNameConfig::default(),
+            datetime: OsdDateTimeConfig::default(),
         }
     }
 }
@@ -1363,5 +1459,53 @@ home_pan = 0.5
 "#;
         let parsed: PtzConfig = toml::from_str(toml).expect("legacy keys must not break loading");
         assert!(parsed.enabled);
+    }
+
+    #[test]
+    fn test_validate_osd_name_text_rejects_non_ascii() {
+        let mut config = AppConfig::default();
+        config.osd.name.text = "Ogród".into();
+        let errors = config.validate().expect_err("non-ASCII name text");
+        assert!(errors.iter().any(|e| e.contains("osd.name.text")));
+    }
+
+    #[test]
+    fn test_validate_osd_name_text_rejects_over_max_glyphs() {
+        let mut config = AppConfig::default();
+        config.osd.name.text = "A".repeat(crate::osd::encode::MAX_GLYPHS + 1);
+        let errors = config.validate().expect_err("over-long name text");
+        assert!(errors.iter().any(|e| e.contains("osd.name.text")));
+    }
+
+    #[test]
+    fn test_validate_osd_name_text_accepts_max_glyphs() {
+        let mut config = AppConfig::default();
+        config.osd.name.text = "A".repeat(crate::osd::encode::MAX_GLYPHS);
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn test_osd_config_defaults_are_sane() {
+        let cfg = OsdConfig::default();
+        assert!(cfg.enabled);
+        assert_eq!(cfg.alpha, 80);
+        assert_eq!(cfg.name.position, Corner::UpperLeft);
+        assert_eq!(cfg.datetime.position, Corner::LowerRight);
+    }
+
+    #[test]
+    fn test_osd_config_round_trips_through_toml() {
+        let cfg = OsdConfig::default();
+        let text = toml::to_string(&cfg).unwrap();
+        let back: OsdConfig = toml::from_str(&text).unwrap();
+        assert_eq!(cfg, back);
+    }
+
+    #[test]
+    fn test_app_config_parses_without_an_osd_section() {
+        // Existing deployed anyka.toml files have no [osd] section and must keep
+        // loading — a missing section means "defaults", not "reject the config".
+        let cfg: AppConfig = toml::from_str("").unwrap();
+        assert!(cfg.osd.enabled);
     }
 }

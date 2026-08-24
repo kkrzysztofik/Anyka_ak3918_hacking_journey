@@ -32,7 +32,7 @@ pub fn get_service_capabilities() -> OnvifResult<GetServiceCapabilitiesResponse>
             snapshot_uri: Some(true),
             rotation: Some(false),
             video_source_mode: Some(false),
-            osd: Some(false),
+            osd: Some(true),
             temporary_osd_text: Some(false),
             exi_compression: Some(false),
             profile_capabilities: Some(ProfileCapabilities {
@@ -64,7 +64,9 @@ mod tests {
         assert_eq!(caps.snapshot_uri, Some(true));
         assert_eq!(caps.rotation, Some(false));
         assert_eq!(caps.video_source_mode, Some(false));
-        assert_eq!(caps.osd, Some(false));
+        // OSD is implemented (GetOSDs/GetOSD/GetOSDOptions/SetOSD); the
+        // temporary-text variant is not.
+        assert_eq!(caps.osd, Some(true));
         assert_eq!(caps.temporary_osd_text, Some(false));
         assert_eq!(caps.exi_compression, Some(false));
 

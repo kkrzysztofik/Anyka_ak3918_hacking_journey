@@ -1306,7 +1306,10 @@ impl Application {
                 }
             };
 
-            let imaging_cfg = config_runtime.read().imaging.clone();
+            let (imaging_cfg, osd_cfg, osd_device_name) = {
+                let c = config_runtime.read();
+                (c.imaging.clone(), c.osd.clone(), c.device.hostname.clone())
+            };
             let position_path = std::path::Path::new(config_path)
                 .parent()
                 .unwrap_or(std::path::Path::new("/etc/onvif"))
@@ -1320,6 +1323,8 @@ impl Application {
                     imaging_cfg,
                     initial_rotated,
                     position_path: Some(position_path),
+                    osd_cfg,
+                    osd_device_name,
                 },
             ) {
                 Ok(p) => {

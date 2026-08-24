@@ -107,6 +107,15 @@ pub struct AnykaPlatform {
             tokio::task::JoinHandle<()>,
         )>,
     >,
+    /// 1 Hz OSD overlay task — stopped before VI teardown / on reattach.
+    osd_loop: std::sync::Mutex<
+        Option<(
+            tokio::sync::broadcast::Sender<()>,
+            tokio::task::JoinHandle<()>,
+        )>,
+    >,
+    osd_cfg: Arc<parking_lot::RwLock<crate::config::types::OsdConfig>>,
+    osd_device_name: String,
     /// Path the async init path reads to restore the saved PTZ position.
     /// `None` means persistence is disabled.
     ptz_position_path: Option<std::path::PathBuf>,
@@ -167,9 +176,17 @@ pub struct AnykaPlatformIspConfig {
     pub imaging_cfg: crate::config::types::ImagingConfig,
     pub initial_rotated: bool,
     pub position_path: Option<PathBuf>,
+    pub osd_cfg: crate::config::types::OsdConfig,
+    /// Fallback camera label when `[osd.name].text` is empty.
+    pub osd_device_name: String,
 }
 
 impl AnykaPlatform {
+    /// Shared live OSD settings (for ONVIF `SetOSD` to update the running renderer).
+    pub fn osd_config(&self) -> Arc<parking_lot::RwLock<crate::config::types::OsdConfig>> {
+        Arc::clone(&self.osd_cfg)
+    }
+
     /// Create a new Anyka platform instance.
     ///
     /// Uses auto-detection for the ISP config path and brings PTZ up. See
@@ -183,6 +200,8 @@ impl AnykaPlatform {
             imaging_cfg: crate::config::types::ImagingConfig::default(),
             initial_rotated: false,
             position_path: None,
+            osd_cfg: crate::config::types::OsdConfig::default(),
+            osd_device_name: "ipcam".to_string(),
         })
     }
 
@@ -234,6 +253,11 @@ impl AnykaPlatform {
             // route through the real IPC client.
             ipc: Arc::new(AnykaIpc::new_detached().expect("detached IPC needs no daemon")),
             night_loop: std::sync::Mutex::new(None),
+            osd_loop: std::sync::Mutex::new(None),
+            osd_cfg: Arc::new(parking_lot::RwLock::new(
+                crate::config::types::OsdConfig::default(),
+            )),
+            osd_device_name: "ipcam".to_string(),
             ptz_position_path: None,
         }
     }
@@ -265,6 +289,8 @@ impl AnykaPlatform {
             imaging_cfg,
             initial_rotated,
             position_path,
+            osd_cfg,
+            osd_device_name,
         } = cfg;
         let device_info = Self::device_descriptor();
 
@@ -346,6 +372,9 @@ impl AnykaPlatform {
             network_info,
             ipc,
             night_loop: std::sync::Mutex::new(Some((night_loop_tx, night_loop_task))),
+            osd_loop: std::sync::Mutex::new(None),
+            osd_cfg: Arc::new(parking_lot::RwLock::new(osd_cfg)),
+            osd_device_name,
             ptz_position_path: position_path,
         })
     }
@@ -372,6 +401,7 @@ impl AnykaPlatform {
 
     /// Best-effort unwind of a partial or complete bring-up, for the supervisor.
     pub(super) async fn rollback_for_supervisor(&self) {
+        self.stop_osd_overlay().await;
         self.rollback_video_pipeline().await;
         self.initialized.store(false, Ordering::SeqCst);
     }
@@ -379,6 +409,63 @@ impl AnykaPlatform {
     /// The shared IPC client, for the supervisor.
     pub(super) fn ipc(&self) -> &Arc<AnykaIpc> {
         &self.ipc
+    }
+
+    /// Stop any running OSD tick and bring up a fresh one against the live VI.
+    ///
+    /// Failures are logged and ignored — OSD is optional decoration.
+    async fn start_osd_overlay(&self) {
+        self.stop_osd_overlay().await;
+
+        if !self.osd_cfg.read().enabled {
+            tracing::info!("OSD disabled by config; skipping overlay");
+            return;
+        }
+
+        let Some(vi) = self.video_input.get_handle() else {
+            tracing::warn!("OSD skipped: VI handle missing after capture_on");
+            return;
+        };
+
+        let dims = match self.ipc.osd_init(vi.as_ptr() as u64).await {
+            Ok(d) => d,
+            Err(e) => {
+                tracing::warn!(error = %e, "osd_init failed; continuing without overlay");
+                return;
+            }
+        };
+        tracing::info!(
+            main_w = dims[0].width,
+            main_h = dims[0].height,
+            sub_w = dims[1].width,
+            sub_h = dims[1].height,
+            "OSD initialised"
+        );
+
+        let (tx, rx) = broadcast::channel(1);
+        let handle =
+            crate::osd::renderer::spawn_osd_renderer(crate::osd::renderer::OsdRendererArgs {
+                ipc: Arc::clone(&self.ipc),
+                vi,
+                dims,
+                config: Arc::clone(&self.osd_cfg),
+                device_name: self.osd_device_name.clone(),
+                shutdown: rx,
+            });
+        match self.osd_loop.lock() {
+            Ok(mut guard) => *guard = Some((tx, handle)),
+            Err(poisoned) => *poisoned.into_inner() = Some((tx, handle)),
+        }
+    }
+
+    async fn stop_osd_overlay(&self) {
+        let taken = match self.osd_loop.lock() {
+            Ok(mut guard) => guard.take(),
+            Err(poisoned) => poisoned.into_inner().take(),
+        };
+        if let Some((tx, task)) = taken {
+            stop_broadcast_loop(tx, task, "OSD overlay task").await;
+        }
     }
 
     /// Initialize steps 1-5 of platform bring-up: sensor match, VI open, VPSS,
@@ -439,6 +526,10 @@ impl AnykaPlatform {
         if let Err(e) = self.video_input.reapply_flip_mirror() {
             tracing::warn!("Failed to reapply flip/mirror after capture_on: {}", e);
         }
+
+        // Step 5.6: OSD overlay. Soft-fail — a missing burn-in must never take
+        // the video stream down. Re-runs on every attach (daemon restart).
+        self.start_osd_overlay().await;
 
         // Allow the capture pipeline to stabilize before opening encoders.
         tokio::time::sleep(capture_stabilization_delay()).await;
@@ -514,6 +605,10 @@ impl AnykaPlatform {
 
     /// Best-effort teardown of encoders + video input during step 6 rollback.
     async fn rollback_video_pipeline(&self) {
+        // Stop OSD before tearing down VI — every video rollback path must not
+        // leave the renderer holding a dead handle. Idempotent with the call in
+        // `rollback_for_supervisor`.
+        self.stop_osd_overlay().await;
         let _ = self.video_encoder.close_all_encoders();
         let _ = self.video_input.capture_off();
         let _ = self.video_input.destroy_vpss();
@@ -576,6 +671,10 @@ impl Platform for AnykaPlatform {
         })
     }
 
+    fn apply_osd_config(&self, cfg: crate::config::types::OsdConfig) {
+        *self.osd_cfg.write() = cfg;
+    }
+
     async fn initialize(&self) -> PlatformResult<()> {
         self.init_video_input().await?;
         self.init_video_encoders().await?;
@@ -612,6 +711,7 @@ impl Platform for AnykaPlatform {
         if let Some((tx, task)) = night_loop {
             stop_night_loop(tx, task).await;
         }
+        self.stop_osd_overlay().await;
 
         // Best-effort PTZ stop — the PTZHandle Drop will call ptz_close.
         // We log errors but do not abort shutdown for a single subsystem failure.
@@ -674,24 +774,33 @@ impl Platform for AnykaPlatform {
 // PTZ Control Implementation
 // =============================================================================
 
-/// Ask the night-mode AUTO loop to stop and join it, aborting after a timeout.
+/// Ask a broadcast-shutdown task to stop and join it, aborting after a timeout.
 ///
 /// `tokio::time::timeout` borrowing the handle (not consuming it) means the
 /// task stays joinable if it ignores the shutdown signal; abort and await it
 /// so it cannot keep ticking against a torn-down VI handle.
-async fn stop_night_loop(
+async fn stop_broadcast_loop(
     tx: tokio::sync::broadcast::Sender<()>,
     mut task: tokio::task::JoinHandle<()>,
+    label: &str,
 ) {
     let _ = tx.send(());
     if tokio::time::timeout(Duration::from_secs(2), &mut task)
         .await
         .is_err()
     {
-        tracing::warn!("night-mode AUTO loop did not stop within 2s; aborting");
+        tracing::warn!("{label} did not stop within 2s; aborting");
         task.abort();
         let _ = task.await;
     }
+}
+
+/// Ask the night-mode AUTO loop to stop and join it, aborting after a timeout.
+async fn stop_night_loop(
+    tx: tokio::sync::broadcast::Sender<()>,
+    task: tokio::task::JoinHandle<()>,
+) {
+    stop_broadcast_loop(tx, task, "night-mode AUTO loop").await;
 }
 
 use ptz_actor::PtzRates;

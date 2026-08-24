@@ -158,6 +158,9 @@ fn build_auth_requirements() -> AuthMap {
     );
     map.insert(("media", "GetStreamUri"), AuthLevel::User);
     map.insert(("media", "GetSnapshotUri"), AuthLevel::User);
+    map.insert(("media", "GetOSDs"), AuthLevel::User);
+    map.insert(("media", "GetOSD"), AuthLevel::User);
+    map.insert(("media", "GetOSDOptions"), AuthLevel::User);
 
     // Operator level - media configuration
     map.insert(("media", "CreateProfile"), AuthLevel::Operator);
@@ -166,6 +169,9 @@ fn build_auth_requirements() -> AuthMap {
         ("media", "SetVideoSourceConfiguration"),
         AuthLevel::Operator,
     );
+    map.insert(("media", "SetOSD"), AuthLevel::Operator);
+    map.insert(("media", "CreateOSD"), AuthLevel::Operator);
+    map.insert(("media", "DeleteOSD"), AuthLevel::Operator);
     map.insert(
         ("media", "AddVideoSourceConfiguration"),
         AuthLevel::Operator,

@@ -48,11 +48,16 @@ use tokio::sync::watch;
 use super::ProfileManager;
 use super::ops::audio as audio_ops;
 use super::ops::capabilities as capability_ops;
+use super::ops::osd as osd_ops;
 use super::ops::profiles as profile_ops;
 use super::ops::streaming as streaming_ops;
 use super::ops::video_encoders as video_encoder_ops;
 use super::ops::video_sources as video_source_ops;
 use super::types::DEFAULT_RTSP_PORT;
+use crate::onvif::types::media_osd::{
+    CreateOSD, CreateOSDResponse, DeleteOSD, DeleteOSDResponse, GetOSD, GetOSDOptions,
+    GetOSDOptionsResponse, GetOSDResponse, GetOSDs, GetOSDsResponse, SetOSD, SetOSDResponse,
+};
 
 /// ONVIF Media Service.
 pub struct MediaService {
@@ -62,6 +67,8 @@ pub struct MediaService {
     config: Arc<ConfigRuntime>,
     /// Platform abstraction (optional).
     platform: Option<Arc<dyn Platform>>,
+    /// Debounced AppConfig persistence (OSD lives in `[osd]`, not profiles).
+    config_persistence: Option<PersistenceHandle>,
     /// Live attach state from the vendor-daemon supervisor.
     ///
     /// `None` in stub builds and unit tests, where there is no supervisor. Absence
@@ -78,6 +85,7 @@ impl MediaService {
             profile_manager: Arc::new(ProfileManager::with_config(Arc::clone(&config))),
             config,
             platform: None,
+            config_persistence: None,
             availability: None,
         }
     }
@@ -88,6 +96,7 @@ impl MediaService {
             profile_manager: Arc::new(ProfileManager::with_config(Arc::clone(&config))),
             config,
             platform: None,
+            config_persistence: None,
             availability: None,
         }
     }
@@ -125,8 +134,15 @@ impl MediaService {
             profile_manager: Arc::new(pm),
             config,
             platform,
+            config_persistence: None,
             availability: None,
         }
+    }
+
+    /// Attach debounced AppConfig persistence for OSD (and other `[osd]` writes).
+    pub fn with_config_persistence(mut self, handle: PersistenceHandle) -> Self {
+        self.config_persistence = Some(handle);
+        self
     }
 
     /// Create a new Media Service with a custom profile manager (for tests).
@@ -138,7 +154,14 @@ impl MediaService {
             profile_manager,
             config: Arc::new(ConfigRuntime::new(Default::default())),
             platform: None,
+            config_persistence: None,
             availability: None,
+        }
+    }
+
+    fn request_config_save(&self) {
+        if let Some(handle) = &self.config_persistence {
+            handle.request_save();
         }
     }
 
@@ -546,6 +569,45 @@ impl MediaService {
     // ========================================================================
     // Service Capabilities Handler
     // ========================================================================
+
+    /// Handle GetOSDs request.
+    pub fn handle_get_osds(&self, _request: GetOSDs) -> OnvifResult<GetOSDsResponse> {
+        osd_ops::get_osds(&self.profile_manager, self.config.as_ref())
+    }
+
+    /// Handle GetOSD request.
+    pub fn handle_get_osd(&self, request: GetOSD) -> OnvifResult<GetOSDResponse> {
+        osd_ops::get_osd(&self.profile_manager, self.config.as_ref(), request)
+    }
+
+    /// Handle GetOSDOptions request.
+    pub fn handle_get_osd_options(
+        &self,
+        _request: GetOSDOptions,
+    ) -> OnvifResult<GetOSDOptionsResponse> {
+        osd_ops::get_osd_options(&self.profile_manager)
+    }
+
+    /// Handle SetOSD request.
+    pub fn handle_set_osd(&self, request: SetOSD) -> OnvifResult<SetOSDResponse> {
+        let response = osd_ops::set_osd(self.config.as_ref(), self.platform.as_ref(), request)?;
+        self.request_config_save();
+        Ok(response)
+    }
+
+    /// Handle CreateOSD request — enables one of the two fixed rects.
+    pub fn handle_create_osd(&self, request: CreateOSD) -> OnvifResult<CreateOSDResponse> {
+        let response = osd_ops::create_osd(self.config.as_ref(), self.platform.as_ref(), request)?;
+        self.request_config_save();
+        Ok(response)
+    }
+
+    /// Handle DeleteOSD request — disables one of the two fixed rects.
+    pub fn handle_delete_osd(&self, request: DeleteOSD) -> OnvifResult<DeleteOSDResponse> {
+        let response = osd_ops::delete_osd(self.config.as_ref(), self.platform.as_ref(), request)?;
+        self.request_config_save();
+        Ok(response)
+    }
 
     /// Handle GetServiceCapabilities request.
     pub fn handle_get_service_capabilities(
@@ -1058,6 +1120,61 @@ impl ServiceHandler for MediaService {
                 let request: SetAudioSourceConfiguration = quick_xml::de::from_str(body_xml)
                     .map_err(|e| OnvifError::WellFormed(format!("Invalid request XML: {}", e)))?;
                 let response = self.handle_set_audio_source_configuration(request)?;
+                quick_xml::se::to_string(&response).map_err(|e| {
+                    OnvifError::Internal(format!("Failed to serialize response: {}", e))
+                })
+            }
+
+            // OSD
+            "GetOSDs" => {
+                let request: GetOSDs = quick_xml::de::from_str(body_xml)
+                    .map_err(|e| OnvifError::WellFormed(format!("Invalid request XML: {}", e)))?;
+                let response = self.handle_get_osds(request)?;
+                quick_xml::se::to_string(&response).map_err(|e| {
+                    OnvifError::Internal(format!("Failed to serialize response: {}", e))
+                })
+            }
+
+            "GetOSD" => {
+                let request: GetOSD = quick_xml::de::from_str(body_xml)
+                    .map_err(|e| OnvifError::WellFormed(format!("Invalid request XML: {}", e)))?;
+                let response = self.handle_get_osd(request)?;
+                quick_xml::se::to_string(&response).map_err(|e| {
+                    OnvifError::Internal(format!("Failed to serialize response: {}", e))
+                })
+            }
+
+            "GetOSDOptions" => {
+                let request: GetOSDOptions = quick_xml::de::from_str(body_xml)
+                    .map_err(|e| OnvifError::WellFormed(format!("Invalid request XML: {}", e)))?;
+                let response = self.handle_get_osd_options(request)?;
+                quick_xml::se::to_string(&response).map_err(|e| {
+                    OnvifError::Internal(format!("Failed to serialize response: {}", e))
+                })
+            }
+
+            "SetOSD" => {
+                let request: SetOSD = quick_xml::de::from_str(body_xml)
+                    .map_err(|e| OnvifError::WellFormed(format!("Invalid request XML: {}", e)))?;
+                let response = self.handle_set_osd(request)?;
+                quick_xml::se::to_string(&response).map_err(|e| {
+                    OnvifError::Internal(format!("Failed to serialize response: {}", e))
+                })
+            }
+
+            "CreateOSD" => {
+                let request: CreateOSD = quick_xml::de::from_str(body_xml)
+                    .map_err(|e| OnvifError::WellFormed(format!("Invalid request XML: {}", e)))?;
+                let response = self.handle_create_osd(request)?;
+                quick_xml::se::to_string(&response).map_err(|e| {
+                    OnvifError::Internal(format!("Failed to serialize response: {}", e))
+                })
+            }
+
+            "DeleteOSD" => {
+                let request: DeleteOSD = quick_xml::de::from_str(body_xml)
+                    .map_err(|e| OnvifError::WellFormed(format!("Invalid request XML: {}", e)))?;
+                let response = self.handle_delete_osd(request)?;
                 quick_xml::se::to_string(&response).map_err(|e| {
                     OnvifError::Internal(format!("Failed to serialize response: {}", e))
                 })

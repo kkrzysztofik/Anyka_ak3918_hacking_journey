@@ -2,6 +2,7 @@
 #include <stdint.h>
 
 #include "handlers_vi.h"
+#include "handlers_osd.h"
 #include "ipc.h"
 #include "protocol.h"
 #include "log.h"
@@ -93,6 +94,8 @@ int handle_vi_close(int fd, const uint8_t *req, uint32_t req_len)
         return send_response(fd, VD_STATUS_STALE_EPOCH, NULL, 0);
 
     log_debug("[vi] close handle=%p", handle);
+    /* OSD buffers are bound to the VI handle — destroy before close. */
+    osd_shutdown();
     int ret = ak_vi_close(handle);
     if (ret == 0)
         vd_obj_unregister(VD_OBJ_KIND_VI, handle);

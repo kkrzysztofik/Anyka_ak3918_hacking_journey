@@ -9,6 +9,7 @@ import React, { useState } from 'react';
 import {
   Activity,
   Camera,
+  Captions,
   Cctv,
   ChevronUp,
   Clock,
@@ -59,6 +60,7 @@ const navItems: NavItem[] = [
       { path: '/settings/network', label: 'Network', icon: Network },
       { path: '/settings/time', label: 'Time', icon: Clock },
       { path: '/settings/imaging', label: 'Imaging', icon: Image },
+      { path: '/settings/osd', label: 'OSD', icon: Captions },
       { path: '/settings/profiles', label: 'Profiles', icon: Layers },
       { path: '/settings/users', label: 'Users', icon: Users },
       { path: '/settings/maintenance', label: 'Maintenance', icon: Settings },

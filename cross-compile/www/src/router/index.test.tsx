@@ -36,6 +36,10 @@ vi.mock('@/pages/settings/ImagingPage', () => ({
   default: () => <div data-testid="page-imaging">Imaging Page</div>,
 }));
 
+vi.mock('@/pages/settings/OsdPage', () => ({
+  default: () => <div data-testid="page-osd">OSD Page</div>,
+}));
+
 vi.mock('@/pages/settings/UserManagementPage', () => ({
   default: () => <div data-testid="page-users">User Management Page</div>,
 }));
@@ -110,6 +114,7 @@ describe('Router', () => {
       { path: '#/settings/network', testId: 'page-network' },
       { path: '#/settings/time', testId: 'page-time' },
       { path: '#/settings/imaging', testId: 'page-imaging' },
+      { path: '#/settings/osd', testId: 'page-osd' },
       { path: '#/settings/users', testId: 'page-users' },
       { path: '#/settings/maintenance', testId: 'page-maintenance' },
       { path: '#/settings/profiles', testId: 'page-profiles' },

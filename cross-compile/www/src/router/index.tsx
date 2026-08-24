@@ -42,6 +42,7 @@ const IdentificationPage = React.lazy(() => import('@/pages/settings/Identificat
 const NetworkPage = React.lazy(() => import('@/pages/settings/NetworkPage'));
 const TimePage = React.lazy(() => import('@/pages/settings/TimePage'));
 const ImagingPage = React.lazy(() => import('@/pages/settings/ImagingPage'));
+const OsdPage = React.lazy(() => import('@/pages/settings/OsdPage'));
 const UserManagementPage = React.lazy(() => import('@/pages/settings/UserManagementPage'));
 const MaintenancePage = React.lazy(() => import('@/pages/settings/MaintenancePage'));
 const ProfilesPage = React.lazy(() => import('@/pages/settings/ProfilesPage'));
@@ -73,6 +74,7 @@ function AppRoutes() {
               <Route path="network" element={<NetworkPage />} />
               <Route path="time" element={<TimePage />} />
               <Route path="imaging" element={<ImagingPage />} />
+              <Route path="osd" element={<OsdPage />} />
               <Route path="users" element={<UserManagementPage />} />
               <Route path="maintenance" element={<MaintenancePage />} />
               <Route path="profiles" element={<ProfilesPage />} />

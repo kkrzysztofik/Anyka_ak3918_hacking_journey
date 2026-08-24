@@ -469,6 +469,9 @@ impl OnvifServer {
             app_state.platform().map(Arc::clone),
             app_state.profile_persistence().cloned(),
         );
+        if let Some(handle) = app_state.config_persistence() {
+            media_service = media_service.with_config_persistence(handle.clone());
+        }
         if let Some(rx) = app_state.availability() {
             media_service = media_service.with_availability(rx.clone());
         }

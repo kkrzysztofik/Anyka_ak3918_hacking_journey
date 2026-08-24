@@ -24,6 +24,7 @@ pub mod common;
 pub mod device;
 pub mod imaging;
 pub mod media;
+pub mod media_osd;
 pub mod ptz;
 
 // Re-export common types at module level for convenience

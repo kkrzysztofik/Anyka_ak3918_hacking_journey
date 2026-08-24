@@ -162,7 +162,10 @@ fn mock_ffi_vi_bring_up_succeeds_flip_mirror_fails() -> MockVideoHalTrait {
     mock
 }
 
-#[tokio::test]
+// Multi-thread flavor because Step 5.6 (OSD bring-up) reaches `AnykaIpc::send_request`,
+// which uses `block_in_place` and panics on a current-thread runtime. See the
+// `# Panics` note on `send_request`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_init_video_input_step_5_5_flip_mirror_failure_is_soft_fail() {
     // Proves the `if let Err(e) = ... { warn!(...) }` shape at Step 5.5 —
     // if a future refactor tightens that to `?`, this test catches the

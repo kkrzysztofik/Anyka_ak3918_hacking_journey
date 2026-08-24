@@ -57,6 +57,14 @@ enum cmd_id {
      * because this is a wire protocol: renumbering existing commands would
      * break any client/daemon pair mid-upgrade). */
     CMD_VI_SET_FLIP_MIRROR        = 21,
+    /* OSD (appended — see the renumbering warning below).
+     * Backed by libmpi_osd.so.  Rust owns all policy: timezone, string
+     * formatting, layout math and the 1 Hz tick.  These are dumb primitives. */
+    CMD_OSD_INIT                  = 22,
+    CMD_OSD_SET_RECT              = 23,
+    CMD_OSD_DRAW_STR              = 24,
+    CMD_OSD_SET_ENABLE            = 25,
+    CMD_OSD_SET_STYLE             = 26,
     /* Audio Input */
     CMD_AI_OPEN                   = 50,
     CMD_AI_CLOSE                  = 51,
