@@ -1,0 +1,213 @@
+//! Minimal BER helpers for SNMPv2c (not a full ASN.1 stack).
+
+use thiserror::Error;
+
+pub const TAG_INTEGER: u8 = 0x02;
+pub const TAG_OCTET_STRING: u8 = 0x04;
+pub const TAG_NULL: u8 = 0x05;
+pub const TAG_OID: u8 = 0x06;
+pub const TAG_SEQUENCE: u8 = 0x30;
+
+/// Object identifier.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Oid(pub Vec<u32>);
+
+impl Oid {
+    /// Build an OID from arcs. Requires at least two arcs with first in 0..=2.
+    pub fn from_slice(arcs: &[u32]) -> Result<Self, BerError> {
+        if arcs.len() < 2 || arcs[0] > 2 {
+            return Err(BerError::InvalidOid);
+        }
+        if arcs[0] < 2 && arcs[1] >= 40 {
+            return Err(BerError::InvalidOid);
+        }
+        Ok(Self(arcs.to_vec()))
+    }
+
+    /// Encode OID content bytes (no tag/length).
+    pub fn encode(&self) -> Result<Vec<u8>, BerError> {
+        if self.0.len() < 2 {
+            return Err(BerError::InvalidOid);
+        }
+        let mut out = Vec::new();
+        let first = self.0[0]
+            .checked_mul(40)
+            .and_then(|v| v.checked_add(self.0[1]))
+            .ok_or(BerError::InvalidOid)?;
+        if first > u8::MAX as u32 {
+            return Err(BerError::InvalidOid);
+        }
+        out.push(first as u8);
+        for &arc in &self.0[2..] {
+            encode_base128(arc, &mut out);
+        }
+        Ok(out)
+    }
+
+    /// Decode OID content bytes (no tag/length).
+    pub fn decode(bytes: &[u8]) -> Result<Self, BerError> {
+        if bytes.is_empty() {
+            return Err(BerError::InvalidOid);
+        }
+        let first = bytes[0] as u32;
+        let mut arcs = vec![first / 40, first % 40];
+        let mut i = 1;
+        while i < bytes.len() {
+            let (arc, next) = decode_base128(bytes, i)?;
+            arcs.push(arc);
+            i = next;
+        }
+        Self::from_slice(&arcs)
+    }
+}
+
+fn encode_base128(mut value: u32, out: &mut Vec<u8>) {
+    let mut stack = [0u8; 5];
+    let mut n = 0;
+    loop {
+        stack[n] = (value & 0x7f) as u8;
+        n += 1;
+        value >>= 7;
+        if value == 0 {
+            break;
+        }
+    }
+    while n > 1 {
+        n -= 1;
+        out.push(stack[n] | 0x80);
+    }
+    out.push(stack[0]);
+}
+
+fn decode_base128(bytes: &[u8], mut i: usize) -> Result<(u32, usize), BerError> {
+    let mut value: u32 = 0;
+    loop {
+        if i >= bytes.len() {
+            return Err(BerError::Truncated);
+        }
+        let b = bytes[i];
+        i += 1;
+        value = value
+            .checked_shl(7)
+            .and_then(|v| v.checked_add(u32::from(b & 0x7f)))
+            .ok_or(BerError::InvalidOid)?;
+        if b & 0x80 == 0 {
+            return Ok((value, i));
+        }
+    }
+}
+
+#[derive(Debug, Error, PartialEq, Eq)]
+pub enum BerError {
+    #[error("invalid OID")]
+    InvalidOid,
+    #[error("truncated BER")]
+    Truncated,
+    #[error("unexpected tag")]
+    UnexpectedTag,
+    #[error("unsupported BER")]
+    Unsupported,
+}
+
+/// Read tag, length, and content slice; returns (tag, content, rest).
+pub fn read_tlv(input: &[u8]) -> Result<(u8, &[u8], &[u8]), BerError> {
+    if input.len() < 2 {
+        return Err(BerError::Truncated);
+    }
+    let tag = input[0];
+    let (len, after_len) = read_length(&input[1..])?;
+    if after_len.len() < len {
+        return Err(BerError::Truncated);
+    }
+    let (content, rest) = after_len.split_at(len);
+    Ok((tag, content, rest))
+}
+
+fn read_length(input: &[u8]) -> Result<(usize, &[u8]), BerError> {
+    if input.is_empty() {
+        return Err(BerError::Truncated);
+    }
+    let first = input[0];
+    if first & 0x80 == 0 {
+        return Ok((first as usize, &input[1..]));
+    }
+    let nbytes = (first & 0x7f) as usize;
+    if nbytes == 0 || nbytes > 4 || input.len() < 1 + nbytes {
+        return Err(BerError::Unsupported);
+    }
+    let mut len = 0usize;
+    for &b in &input[1..1 + nbytes] {
+        len = (len << 8) | b as usize;
+    }
+    Ok((len, &input[1 + nbytes..]))
+}
+
+pub fn write_tlv(tag: u8, content: &[u8], out: &mut Vec<u8>) {
+    out.push(tag);
+    write_length(content.len(), out);
+    out.extend_from_slice(content);
+}
+
+fn write_length(len: usize, out: &mut Vec<u8>) {
+    if len < 0x80 {
+        out.push(len as u8);
+        return;
+    }
+    // Definite long form — enough for SNMP PDUs we emit.
+    let bytes = len.to_be_bytes();
+    let start = bytes
+        .iter()
+        .position(|&b| b != 0)
+        .unwrap_or(bytes.len() - 1);
+    let significant = &bytes[start..];
+    out.push(0x80 | significant.len() as u8);
+    out.extend_from_slice(significant);
+}
+
+pub fn decode_integer(content: &[u8]) -> Result<i32, BerError> {
+    if content.is_empty() || content.len() > 4 {
+        return Err(BerError::Unsupported);
+    }
+    let mut value: i32 = if content[0] & 0x80 != 0 { -1 } else { 0 };
+    for &b in content {
+        value = (value << 8) | i32::from(b);
+    }
+    Ok(value)
+}
+
+pub fn encode_integer(value: i32) -> Vec<u8> {
+    let mut bytes = value.to_be_bytes().to_vec();
+    // Minimal two's-complement encoding.
+    while bytes.len() > 1
+        && ((bytes[0] == 0x00 && bytes[1] & 0x80 == 0)
+            || (bytes[0] == 0xff && bytes[1] & 0x80 != 0))
+    {
+        bytes.remove(0);
+    }
+    bytes
+}
+
+pub fn expect_tag(input: &[u8], tag: u8) -> Result<(&[u8], &[u8]), BerError> {
+    let (got, content, rest) = read_tlv(input)?;
+    if got != tag {
+        return Err(BerError::UnexpectedTag);
+    }
+    Ok((content, rest))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_oid_sysdescr_round_trip() {
+        let oid = Oid::from_slice(&[1, 3, 6, 1, 2, 1, 1, 1, 0]).expect("oid");
+        let encoded = oid.encode().expect("encode");
+        assert_eq!(
+            encoded,
+            vec![0x2b, 0x06, 0x01, 0x02, 0x01, 0x01, 0x01, 0x00]
+        );
+        let decoded = Oid::decode(&encoded).expect("decode");
+        assert_eq!(decoded, oid);
+    }
+}
