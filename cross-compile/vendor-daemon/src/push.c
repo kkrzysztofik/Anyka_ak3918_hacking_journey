@@ -58,8 +58,8 @@ static pthread_mutex_t g_ring_write_lock = PTHREAD_MUTEX_INITIALIZER;
 /**
  * push_slot_index - Map a stream_id to a g_push_streams array index.
  *
- * @param stream_id  Stream identifier (VD_STREAM_MAIN or VD_STREAM_SUB).
- * @return           Array index (0 or 1) on success, -1 for unknown stream_id.
+ * @param stream_id  Stream identifier (VD_STREAM_MAIN, VD_STREAM_SUB or VD_STREAM_AUDIO).
+ * @return           Array index (0, 1 or 2) on success, -1 for unknown stream_id.
  */
 static int push_slot_index(uint32_t stream_id)
 {
@@ -68,6 +68,8 @@ static int push_slot_index(uint32_t stream_id)
         return 0;
     case VD_STREAM_SUB:
         return 1;
+    case VD_STREAM_AUDIO:
+        return 2;
     default:
         return -1;
     }
@@ -76,7 +78,8 @@ static int push_slot_index(uint32_t stream_id)
 /**
  * push_stream_id_to_ring_stream - Map a push stream_id to the ring buffer stream_id constant.
  *
- * @param stream_id  Push stream identifier (VD_STREAM_MAIN or VD_STREAM_SUB).
+ * @param stream_id  Push stream identifier (VD_STREAM_MAIN, VD_STREAM_SUB or
+ *                   VD_STREAM_AUDIO).
  * @return           Corresponding ring buffer VD_STREAM_* constant.
  */
 static uint32_t push_stream_id_to_ring_stream(uint32_t stream_id)
@@ -84,6 +87,8 @@ static uint32_t push_stream_id_to_ring_stream(uint32_t stream_id)
     switch (stream_id) {
     case VD_STREAM_SUB:
         return VD_STREAM_SUB;
+    case VD_STREAM_AUDIO:
+        return VD_STREAM_AUDIO;
     case VD_STREAM_MAIN:
     default:
         return VD_STREAM_MAIN;
@@ -628,11 +633,19 @@ int handle_venc_start_push(int fd, const uint8_t *req, uint32_t req_len)
     state->last_sane_interval_ms = 66;
     state->ts_corr_ms = 0;
 
-    /* Reset ring buffer if this is the first push activation (both slots
-     * were inactive).  Clears stale sequences/flags from a previous session
-     * so the consumer doesn't see immediate overflow. */
-    int other_idx = (idx == 0) ? 1 : 0;
-    if (!g_push_streams[other_idx].active && g_ring_buffer) {
+    /* Reset ring buffer if this is the first push activation (no other slot
+     * was active).  Clears stale sequences/flags from a previous session so the
+     * consumer doesn't see immediate overflow.  With three slots a two-slot
+     * 0/1 flip no longer answers "am I the first?", and getting it wrong resets
+     * the ring underneath a stream that is already publishing. */
+    int any_other_active = 0;
+    for (int i = 0; i < PUSH_STREAM_SLOT_COUNT; i++) {
+        if (i != idx && g_push_streams[i].active) {
+            any_other_active = 1;
+            break;
+        }
+    }
+    if (!any_other_active && g_ring_buffer) {
         vd_ring_reset(g_ring_buffer);
         log_info("event=ring_reset reason=push_start stream=%u diag_monotonic_ms=%llu",
                  stream_id, (unsigned long long)diag_monotonic_ms());
@@ -705,8 +718,9 @@ int handle_venc_stop_push(int fd, const uint8_t *req, uint32_t req_len)
     }
 
     int failed = 0;
-    failed |= (stop_push_slot(0) != 0);
-    failed |= (stop_push_slot(1) != 0);
+    for (int i = 0; i < PUSH_STREAM_SLOT_COUNT; i++) {
+        failed |= (stop_push_slot(i) != 0);
+    }
     if (failed) {
         log_error("[push] failed to stop push-based frame delivery (all streams)");
         log_error("event=push_cmd cmd=20 status=error scope=all reason=stop_failed diag_monotonic_ms=%llu",
