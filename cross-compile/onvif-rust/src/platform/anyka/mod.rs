@@ -114,7 +114,7 @@ pub struct AnykaPlatform {
             tokio::task::JoinHandle<()>,
         )>,
     >,
-    osd_cfg: crate::config::types::OsdConfig,
+    osd_cfg: Arc<parking_lot::RwLock<crate::config::types::OsdConfig>>,
     osd_device_name: String,
     /// Path the async init path reads to restore the saved PTZ position.
     /// `None` means persistence is disabled.
@@ -182,6 +182,11 @@ pub struct AnykaPlatformIspConfig {
 }
 
 impl AnykaPlatform {
+    /// Shared live OSD settings (for ONVIF `SetOSD` to update the running renderer).
+    pub fn osd_config(&self) -> Arc<parking_lot::RwLock<crate::config::types::OsdConfig>> {
+        Arc::clone(&self.osd_cfg)
+    }
+
     /// Create a new Anyka platform instance.
     ///
     /// Uses auto-detection for the ISP config path and brings PTZ up. See
@@ -249,7 +254,9 @@ impl AnykaPlatform {
             ipc: Arc::new(AnykaIpc::new_detached().expect("detached IPC needs no daemon")),
             night_loop: std::sync::Mutex::new(None),
             osd_loop: std::sync::Mutex::new(None),
-            osd_cfg: crate::config::types::OsdConfig::default(),
+            osd_cfg: Arc::new(parking_lot::RwLock::new(
+                crate::config::types::OsdConfig::default(),
+            )),
             osd_device_name: "ipcam".to_string(),
             ptz_position_path: None,
         }
@@ -366,7 +373,7 @@ impl AnykaPlatform {
             ipc,
             night_loop: std::sync::Mutex::new(Some((night_loop_tx, night_loop_task))),
             osd_loop: std::sync::Mutex::new(None),
-            osd_cfg,
+            osd_cfg: Arc::new(parking_lot::RwLock::new(osd_cfg)),
             osd_device_name,
             ptz_position_path: position_path,
         })
@@ -410,7 +417,7 @@ impl AnykaPlatform {
     async fn start_osd_overlay(&self) {
         self.stop_osd_overlay().await;
 
-        if !self.osd_cfg.enabled {
+        if !self.osd_cfg.read().enabled {
             tracing::info!("OSD disabled by config; skipping overlay");
             return;
         }
@@ -441,7 +448,7 @@ impl AnykaPlatform {
                 ipc: Arc::clone(&self.ipc),
                 vi,
                 dims,
-                config: self.osd_cfg.clone(),
+                config: Arc::clone(&self.osd_cfg),
                 device_name: self.osd_device_name.clone(),
                 shutdown: rx,
             });
@@ -658,6 +665,10 @@ impl Platform for AnykaPlatform {
             OptionalInitResult::Failed { error, .. } => PtzDiagnostics::failed(error.clone()),
             OptionalInitResult::Success(ptz) => ptz.diagnostics(),
         })
+    }
+
+    fn apply_osd_config(&self, cfg: crate::config::types::OsdConfig) {
+        *self.osd_cfg.write() = cfg;
     }
 
     async fn initialize(&self) -> PlatformResult<()> {

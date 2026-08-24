@@ -32,7 +32,7 @@ pub fn get_service_capabilities() -> OnvifResult<GetServiceCapabilitiesResponse>
             snapshot_uri: Some(true),
             rotation: Some(false),
             video_source_mode: Some(false),
-            osd: Some(false),
+            osd: Some(true),
             temporary_osd_text: Some(false),
             exi_compression: Some(false),
             profile_capabilities: Some(ProfileCapabilities {

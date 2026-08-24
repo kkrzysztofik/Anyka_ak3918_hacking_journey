@@ -860,6 +860,11 @@ pub trait Platform: Send + Sync {
         None
     }
 
+    /// Push a new OSD config into the live 1 Hz renderer (if any).
+    ///
+    /// Default: no-op. Anyka updates the shared lock the renderer polls each tick.
+    fn apply_osd_config(&self, _cfg: crate::config::types::OsdConfig) {}
+
     /// Get audio input interface.
     fn audio_input(&self) -> Arc<dyn AudioInput>;
 

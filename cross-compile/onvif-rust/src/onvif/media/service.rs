@@ -48,11 +48,16 @@ use tokio::sync::watch;
 use super::ProfileManager;
 use super::ops::audio as audio_ops;
 use super::ops::capabilities as capability_ops;
+use super::ops::osd as osd_ops;
 use super::ops::profiles as profile_ops;
 use super::ops::streaming as streaming_ops;
 use super::ops::video_encoders as video_encoder_ops;
 use super::ops::video_sources as video_source_ops;
 use super::types::DEFAULT_RTSP_PORT;
+use crate::onvif::types::media_osd::{
+    CreateOSD, CreateOSDResponse, DeleteOSD, DeleteOSDResponse, GetOSD, GetOSDOptions,
+    GetOSDOptionsResponse, GetOSDResponse, GetOSDs, GetOSDsResponse, SetOSD, SetOSDResponse,
+};
 
 /// ONVIF Media Service.
 pub struct MediaService {
@@ -546,6 +551,44 @@ impl MediaService {
     // ========================================================================
     // Service Capabilities Handler
     // ========================================================================
+
+    /// Handle GetOSDs request.
+    pub fn handle_get_osds(&self, _request: GetOSDs) -> OnvifResult<GetOSDsResponse> {
+        osd_ops::get_osds(&self.profile_manager, self.config.as_ref())
+    }
+
+    /// Handle GetOSD request.
+    pub fn handle_get_osd(&self, request: GetOSD) -> OnvifResult<GetOSDResponse> {
+        osd_ops::get_osd(&self.profile_manager, self.config.as_ref(), request)
+    }
+
+    /// Handle GetOSDOptions request.
+    pub fn handle_get_osd_options(
+        &self,
+        _request: GetOSDOptions,
+    ) -> OnvifResult<GetOSDOptionsResponse> {
+        osd_ops::get_osd_options(&self.profile_manager)
+    }
+
+    /// Handle SetOSD request.
+    pub fn handle_set_osd(&self, request: SetOSD) -> OnvifResult<SetOSDResponse> {
+        osd_ops::set_osd(
+            &self.profile_manager,
+            self.config.as_ref(),
+            self.platform.as_ref(),
+            request,
+        )
+    }
+
+    /// Handle CreateOSD request (always ActionNotSupported).
+    pub fn handle_create_osd(&self, request: CreateOSD) -> OnvifResult<CreateOSDResponse> {
+        osd_ops::create_osd(request)
+    }
+
+    /// Handle DeleteOSD request (always ActionNotSupported).
+    pub fn handle_delete_osd(&self, request: DeleteOSD) -> OnvifResult<DeleteOSDResponse> {
+        osd_ops::delete_osd(request)
+    }
 
     /// Handle GetServiceCapabilities request.
     pub fn handle_get_service_capabilities(
@@ -1064,6 +1107,60 @@ impl ServiceHandler for MediaService {
             }
 
             // Unknown action
+            "GetOSDs" => {
+                let request: GetOSDs = quick_xml::de::from_str(body_xml)
+                    .map_err(|e| OnvifError::WellFormed(format!("Invalid request XML: {}", e)))?;
+                let response = self.handle_get_osds(request)?;
+                quick_xml::se::to_string(&response).map_err(|e| {
+                    OnvifError::Internal(format!("Failed to serialize response: {}", e))
+                })
+            }
+
+            "GetOSD" => {
+                let request: GetOSD = quick_xml::de::from_str(body_xml)
+                    .map_err(|e| OnvifError::WellFormed(format!("Invalid request XML: {}", e)))?;
+                let response = self.handle_get_osd(request)?;
+                quick_xml::se::to_string(&response).map_err(|e| {
+                    OnvifError::Internal(format!("Failed to serialize response: {}", e))
+                })
+            }
+
+            "GetOSDOptions" => {
+                let request: GetOSDOptions = quick_xml::de::from_str(body_xml)
+                    .map_err(|e| OnvifError::WellFormed(format!("Invalid request XML: {}", e)))?;
+                let response = self.handle_get_osd_options(request)?;
+                quick_xml::se::to_string(&response).map_err(|e| {
+                    OnvifError::Internal(format!("Failed to serialize response: {}", e))
+                })
+            }
+
+            "SetOSD" => {
+                let request: SetOSD = quick_xml::de::from_str(body_xml)
+                    .map_err(|e| OnvifError::WellFormed(format!("Invalid request XML: {}", e)))?;
+                let response = self.handle_set_osd(request)?;
+                quick_xml::se::to_string(&response).map_err(|e| {
+                    OnvifError::Internal(format!("Failed to serialize response: {}", e))
+                })
+            }
+
+            "CreateOSD" => {
+                let request: CreateOSD = quick_xml::de::from_str(body_xml)
+                    .map_err(|e| OnvifError::WellFormed(format!("Invalid request XML: {}", e)))?;
+                let response = self.handle_create_osd(request)?;
+                quick_xml::se::to_string(&response).map_err(|e| {
+                    OnvifError::Internal(format!("Failed to serialize response: {}", e))
+                })
+            }
+
+            "DeleteOSD" => {
+                let request: DeleteOSD = quick_xml::de::from_str(body_xml)
+                    .map_err(|e| OnvifError::WellFormed(format!("Invalid request XML: {}", e)))?;
+                let response = self.handle_delete_osd(request)?;
+                quick_xml::se::to_string(&response).map_err(|e| {
+                    OnvifError::Internal(format!("Failed to serialize response: {}", e))
+                })
+            }
+
             _ => Err(OnvifError::ActionNotSupported(action.to_string())),
         }
     }

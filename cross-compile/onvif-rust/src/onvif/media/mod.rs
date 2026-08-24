@@ -139,3 +139,4 @@ pub use crate::onvif::types::media::{
     SetVideoSourceConfigurationResponse,
     StreamingCapabilities,
 };
+pub use crate::onvif::types::media_osd::*;

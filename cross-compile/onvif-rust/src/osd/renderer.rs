@@ -120,7 +120,8 @@ pub struct OsdRendererArgs {
     pub ipc: Arc<AnykaIpc>,
     pub vi: Arc<VideoInputHandle>,
     pub dims: [ChannelDims; 2],
-    pub config: OsdConfig,
+    /// Live settings — updated by ONVIF `SetOSD` / WebUI without restarting the task.
+    pub config: Arc<parking_lot::RwLock<OsdConfig>>,
     /// Fallback when `[osd.name].text` is empty.
     pub device_name: String,
     pub shutdown: broadcast::Receiver<()>,
@@ -142,15 +143,7 @@ async fn run_osd_renderer(mut args: OsdRendererArgs) {
     let mut interval = tokio::time::interval(Duration::from_secs(1));
     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
-    // Style once at start; colour/alpha are device-global.
-    if let Err(e) = args.ipc.osd_set_style(
-        i32::from(args.config.color),
-        0,
-        0,
-        i32::from(args.config.alpha),
-    ) {
-        warn!(error = %e, "osd_set_style failed; continuing without style");
-    }
+    let mut last_style: Option<(u8, u8)> = None;
 
     loop {
         tokio::select! {
@@ -159,52 +152,63 @@ async fn run_osd_renderer(mut args: OsdRendererArgs) {
                 break;
             }
             _ = interval.tick() => {
-                tick_once(&mut state, &args);
+                tick_once(&mut state, &args, &mut last_style);
             }
         }
     }
 }
 
-fn tick_once(state: &mut RenderState, args: &OsdRendererArgs) {
-    if !args.config.enabled {
+fn tick_once(state: &mut RenderState, args: &OsdRendererArgs, last_style: &mut Option<(u8, u8)>) {
+    let cfg = args.config.read().clone();
+    if !cfg.enabled {
         return;
     }
 
-    let name_text = if args.config.name.text.is_empty() {
+    let style = (cfg.color, cfg.alpha);
+    if last_style.as_ref() != Some(&style) {
+        if let Err(e) = args
+            .ipc
+            .osd_set_style(i32::from(cfg.color), 0, 0, i32::from(cfg.alpha))
+        {
+            warn!(error = %e, "osd_set_style failed; continuing without style");
+        } else {
+            *last_style = Some(style);
+        }
+    }
+
+    let name_owned;
+    let name_text = if cfg.name.text.is_empty() {
         args.device_name.as_str()
     } else {
-        args.config.name.text.as_str()
+        name_owned = cfg.name.text.clone();
+        name_owned.as_str()
     };
 
     for channel in 0u8..=1 {
         let dims = args.dims[channel as usize];
 
-        if args.config.name.enabled {
+        if cfg.name.enabled {
             apply_plan(
                 state,
                 args,
                 channel,
                 OsdRect::Name,
                 name_text,
-                args.config.name.position,
+                cfg.name.position,
                 dims,
             );
         }
 
-        if args.config.datetime.enabled {
+        if cfg.datetime.enabled {
             let when = Local::now();
-            let text = format_datetime(
-                when,
-                args.config.datetime.date_format,
-                args.config.datetime.time_format,
-            );
+            let text = format_datetime(when, cfg.datetime.date_format, cfg.datetime.time_format);
             apply_plan(
                 state,
                 args,
                 channel,
                 OsdRect::DateTime,
                 &text,
-                args.config.datetime.position,
+                cfg.datetime.position,
                 dims,
             );
         }

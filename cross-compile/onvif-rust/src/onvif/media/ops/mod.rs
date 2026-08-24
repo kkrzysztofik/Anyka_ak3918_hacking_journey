@@ -10,6 +10,7 @@
 
 pub mod audio;
 pub mod capabilities;
+pub mod osd;
 pub mod profiles;
 pub mod streaming;
 pub mod video_encoders;
