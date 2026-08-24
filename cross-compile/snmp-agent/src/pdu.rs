@@ -51,6 +51,11 @@ pub struct VarBind {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SnmpValue {
     Null,
+    Integer(i32),
+    OctetString(Vec<u8>),
+    ObjectId(Oid),
+    /// TimeTicks (application tag 3) — hundredths of a second.
+    TimeTicks(u32),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -157,13 +162,42 @@ fn parse_varbind_list(mut input: &[u8]) -> Result<Vec<VarBind>, PduError> {
         if !rest.is_empty() {
             return Err(PduError::Malformed);
         }
-        let value = match val_tag {
-            TAG_NULL if val_c.is_empty() => SnmpValue::Null,
-            _ => return Err(PduError::Malformed),
-        };
+        let value = decode_value(val_tag, val_c)?;
         out.push(VarBind { name, value });
     }
     Ok(out)
+}
+
+const TAG_TIMETICKS: u8 = 0x43; // Application 3
+
+fn decode_value(tag: u8, content: &[u8]) -> Result<SnmpValue, PduError> {
+    match tag {
+        TAG_NULL if content.is_empty() => Ok(SnmpValue::Null),
+        TAG_INTEGER => Ok(SnmpValue::Integer(ber::decode_integer(content)?)),
+        TAG_OCTET_STRING => Ok(SnmpValue::OctetString(content.to_vec())),
+        TAG_OID => Ok(SnmpValue::ObjectId(Oid::decode(content)?)),
+        TAG_TIMETICKS => {
+            let v = ber::decode_integer(content)?;
+            if v < 0 {
+                return Err(PduError::Malformed);
+            }
+            Ok(SnmpValue::TimeTicks(v as u32))
+        }
+        _ => Err(PduError::Malformed),
+    }
+}
+
+fn encode_value(value: &SnmpValue, out: &mut Vec<u8>) -> Result<(), PduError> {
+    match value {
+        SnmpValue::Null => ber::write_tlv(TAG_NULL, &[], out),
+        SnmpValue::Integer(v) => ber::write_tlv(TAG_INTEGER, &ber::encode_integer(*v), out),
+        SnmpValue::OctetString(b) => ber::write_tlv(TAG_OCTET_STRING, b, out),
+        SnmpValue::ObjectId(oid) => ber::write_tlv(TAG_OID, &oid.encode()?, out),
+        SnmpValue::TimeTicks(t) => {
+            ber::write_tlv(TAG_TIMETICKS, &ber::encode_integer(*t as i32), out);
+        }
+    }
+    Ok(())
 }
 
 fn encode_pdu(pdu: &Pdu) -> Result<Vec<u8>, PduError> {
@@ -185,9 +219,7 @@ fn encode_pdu(pdu: &Pdu) -> Result<Vec<u8>, PduError> {
         let mut vb_bytes = Vec::new();
         let oid_content = vb.name.encode()?;
         ber::write_tlv(TAG_OID, &oid_content, &mut vb_bytes);
-        match vb.value {
-            SnmpValue::Null => ber::write_tlv(TAG_NULL, &[], &mut vb_bytes),
-        }
+        encode_value(&vb.value, &mut vb_bytes)?;
         ber::write_tlv(TAG_SEQUENCE, &vb_bytes, &mut vbl);
     }
     ber::write_tlv(TAG_SEQUENCE, &vbl, &mut body);
