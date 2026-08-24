@@ -1,5 +1,5 @@
 [workspace]
-members = ["onvif-rust", "streaming-lib", "anyka-init"]
+members = ["onvif-rust", "streaming-lib", "anyka-init", "snmp-agent"]
 resolver = "2"
 
 # tower-http 0.7.0's ServeDir rate_limited! macro uses std AtomicU64, which

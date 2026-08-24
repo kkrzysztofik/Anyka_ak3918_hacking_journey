@@ -1,0 +1,20 @@
+[package]
+name = "snmp-agent"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[[bin]]
+name = "snmp-agent"
+path = "src/main.rs"
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+toml = "1.1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "std"] }
+thiserror = "2.0"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "time", "sync"] }
+
+[dev-dependencies]
+tempfile = "3"
