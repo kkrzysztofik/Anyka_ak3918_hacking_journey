@@ -13,6 +13,14 @@ use tokio::sync::RwLock;
 /// Default pidfile path for SIGHUP from onvif-rust.
 pub const DEFAULT_PIDFILE: &str = "/tmp/snmp-agent.pid";
 
+/// How long to wait before retrying a bind that failed.
+// ponytail: fixed interval, not exponential. Move to backoff only if a real
+// deployment shows the retries themselves costing anything.
+#[cfg(not(test))]
+const BIND_RETRY: std::time::Duration = std::time::Duration::from_secs(30);
+#[cfg(test)]
+const BIND_RETRY: std::time::Duration = std::time::Duration::from_millis(50);
+
 /// Live MIB sources backed by config + process start time.
 pub struct LiveSources {
     pub config: SnmpConfig,
@@ -124,6 +132,10 @@ pub async fn run(
 
     let mut buf = [0u8; 2048];
     loop {
+        let (enabled, port) = {
+            let g = state.read().await;
+            (g.config.enabled, g.config.port)
+        };
         tokio::select! {
             _ = reload.recv() => {
                 match SnmpConfig::load(&config_path) {
@@ -164,6 +176,15 @@ pub async fn run(
                     Err(e) => {
                         tracing::error!(error = %e, "config reload failed; keeping last-good");
                     }
+                }
+            }
+            _ = tokio::time::sleep(BIND_RETRY), if socket.is_none() && enabled => {
+                match bind_socket(port).await {
+                    Ok(s) => {
+                        tracing::info!(port, "snmp-agent bound on retry");
+                        socket = Some(s);
+                    }
+                    Err(e) => tracing::debug!(error = %e, port, "bind retry failed"),
                 }
             }
             result = async {
@@ -532,5 +553,46 @@ sys_name = "udp-cam"
         handle.abort();
         let _ = handle.await;
         drop(holder);
+    }
+
+    #[tokio::test]
+    async fn test_bind_retry_recovers_after_the_port_frees() {
+        // Uses the #[cfg(test)] BIND_RETRY (50ms): start_paused does not mix
+        // cleanly with real UDP sockets.
+        let dir = tempfile::tempdir().unwrap();
+        let cfg_path = dir.path().join("snmp.toml");
+        let pidfile = dir.path().join("retry.pid");
+
+        let holder = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let port = holder.local_addr().unwrap().port();
+        std::fs::write(
+            &cfg_path,
+            format!("enabled = true\nport = {port}\ncommunity = \"public\"\nsys_name = \"retry\"\n"),
+        )
+        .unwrap();
+
+        let (_tx, rx) = tokio::sync::mpsc::channel(1);
+        let handle = tokio::spawn(async move {
+            let _ = run(cfg_path, pidfile, rx).await;
+        });
+
+        tokio::time::sleep(Duration::from_millis(50)).await; // initial bind fails
+        drop(holder);
+        tokio::time::sleep(BIND_RETRY + Duration::from_millis(100)).await;
+
+        let client = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        client
+            .send_to(&get_sysname_bytes("public"), ("127.0.0.1", port))
+            .await
+            .unwrap();
+        let mut buf = [0u8; 2048];
+        let (n, _) = tokio::time::timeout(Duration::from_secs(5), client.recv_from(&mut buf))
+            .await
+            .expect("agent must answer after the retry")
+            .unwrap();
+        assert!(SnmpMessage::parse(&buf[..n]).is_ok());
+
+        handle.abort();
+        let _ = handle.await;
     }
 }
