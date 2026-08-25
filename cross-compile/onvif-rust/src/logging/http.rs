@@ -351,12 +351,45 @@ fn sanitize_soap_body(body: &str) -> String {
 }
 
 /// Mask JSON `"community":"…"` (SNMP REST) so it never reaches `/mnt/logs`.
+///
+/// String scan (no regex): matches the rest of this module and keeps `regex`
+/// as a test-only dependency.
 fn sanitize_json_community(body: &str) -> String {
-    static RE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
-        // Known-good pattern; panic only if the literal is broken at compile time.
-        regex::Regex::new(r#""community"\s*:\s*"[^"]*""#).expect("community redact regex")
-    });
-    RE.replace_all(body, r#""community":"***""#).into_owned()
+    const KEY: &str = "\"community\"";
+    let mut result = String::with_capacity(body.len());
+    let mut remaining = body;
+    while let Some(key_start) = remaining.find(KEY) {
+        result.push_str(&remaining[..key_start]);
+        result.push_str(KEY);
+        let after_key = &remaining[key_start + KEY.len()..];
+        let Some(colon_rel) = after_key.find(':') else {
+            result.push_str(after_key);
+            return result;
+        };
+        if !after_key[..colon_rel].chars().all(char::is_whitespace) {
+            // Not a JSON key:value — keep scanning after this KEY occurrence.
+            remaining = &remaining[key_start + KEY.len()..];
+            continue;
+        }
+        result.push_str(&after_key[..=colon_rel]);
+        let after_colon = &after_key[colon_rel + 1..];
+        let trimmed = after_colon.trim_start();
+        let ws_len = after_colon.len() - trimmed.len();
+        result.push_str(&after_colon[..ws_len]);
+        if !trimmed.starts_with('"') {
+            remaining = after_colon;
+            continue;
+        }
+        result.push_str("\"***\"");
+        let after_open = &trimmed[1..];
+        if let Some(end) = after_open.find('"') {
+            remaining = &after_open[end + 1..];
+        } else {
+            remaining = "";
+        }
+    }
+    result.push_str(remaining);
+    result
 }
 
 /// Sanitize a specific XML element by replacing its content with "***".
@@ -430,12 +463,18 @@ fn process_opening_tag(after_open: &str, element_name: &str) -> TagProcessResult
 mod tests {
     use super::*;
 
-#[test]
+    #[test]
     fn test_sanitize_masks_json_community() {
         let body = r#"{"enabled":true,"port":161,"community":"s3cret","sys_name":"cam"}"#;
         let out = sanitize_soap_body(body);
-        assert!(!out.contains("s3cret"), "community must never reach the log: {out}");
-        assert!(out.contains("\"port\":161"), "unrelated fields survive: {out}");
+        assert!(
+            !out.contains("s3cret"),
+            "community must never reach the log: {out}"
+        );
+        assert!(
+            out.contains("\"port\":161"),
+            "unrelated fields survive: {out}"
+        );
     }
 
     #[test]
