@@ -223,4 +223,22 @@ mod tests {
             assert!(sighup_agent(&path).is_ok(), "{name} must be ignored");
         }
     }
+
+    /// The agent parses this file with its own struct. If either side gains a
+    /// field, this fails instead of the mismatch reaching a camera.
+    #[test]
+    fn test_keys_match_snmp_agent_config() {
+        let toml = toml::to_string(&SnmpSettings::default()).unwrap();
+        let keys: Vec<String> = toml
+            .lines()
+            .filter_map(|l| l.split('=').next())
+            .map(|k| k.trim().to_string())
+            .filter(|k| !k.is_empty())
+            .collect();
+        assert_eq!(
+            keys,
+            ["enabled", "port", "community", "sys_contact", "sys_name", "sys_location"],
+            "keys changed: update snmp-agent/src/config.rs SnmpConfig to match"
+        );
+    }
 }
