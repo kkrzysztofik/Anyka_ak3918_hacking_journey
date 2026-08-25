@@ -347,7 +347,16 @@ fn sanitize_soap_body(body: &str) -> String {
         result = sanitize_xml_element(&result, element);
     }
 
-    result
+    sanitize_json_community(&result)
+}
+
+/// Mask JSON `"community":"…"` (SNMP REST) so it never reaches `/mnt/logs`.
+fn sanitize_json_community(body: &str) -> String {
+    static RE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        // Known-good pattern; panic only if the literal is broken at compile time.
+        regex::Regex::new(r#""community"\s*:\s*"[^"]*""#).expect("community redact regex")
+    });
+    RE.replace_all(body, r#""community":"***""#).into_owned()
 }
 
 /// Sanitize a specific XML element by replacing its content with "***".
@@ -420,6 +429,14 @@ fn process_opening_tag(after_open: &str, element_name: &str) -> TagProcessResult
 #[cfg(test)]
 mod tests {
     use super::*;
+
+#[test]
+    fn test_sanitize_masks_json_community() {
+        let body = r#"{"enabled":true,"port":161,"community":"s3cret","sys_name":"cam"}"#;
+        let out = sanitize_soap_body(body);
+        assert!(!out.contains("s3cret"), "community must never reach the log: {out}");
+        assert!(out.contains("\"port\":161"), "unrelated fields survive: {out}");
+    }
 
     #[test]
     fn test_sanitize_password() {
