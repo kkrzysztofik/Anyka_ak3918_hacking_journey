@@ -113,6 +113,13 @@ exec = "/mnt/anyka_hack/onvif/onvif-rust.bin"
 log = "/mnt/logs/onvif.log"
 core_dump = true
 
+[services.snmp]
+enabled = true
+exec = "/mnt/anyka_hack/snmp/snmp-agent.bin"
+args = ["--config", "/mnt/anyka_hack/snmp.toml"]
+log = "/mnt/logs/snmp-agent.log"
+core_dump = true
+
 [services.dropbear]
 enabled = false
 exec = "/mnt/anyka_hack/dropbear/dropbearmulti"

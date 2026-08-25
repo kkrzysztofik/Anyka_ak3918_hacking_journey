@@ -130,6 +130,10 @@ require_payload() {
     log_error "Missing ${SRC_HACK}/onvif/onvif-rust.bin — run ./scripts/build_sd_contents.sh first"
     missing=1
   fi
+  if [[ ! -f "${SRC_HACK}/snmp/snmp-agent.bin" ]]; then
+    log_error "Missing ${SRC_HACK}/snmp/snmp-agent.bin — run ./scripts/build_sd_contents.sh first"
+    missing=1
+  fi
   if [[ ! -f "${SRC_HACK}/vendor-daemon/vendor-daemon.bin" ]]; then
     log_error "Missing ${SRC_HACK}/vendor-daemon/vendor-daemon.bin — run ./scripts/build_sd_contents.sh first"
     missing=1
