@@ -1396,6 +1396,49 @@ impl Application {
         }
     }
 
+    /// Register the bridge as the owned frame callback with the platform.
+    ///
+    /// Wires the IDR requester first (so SPS/PPS can be recovered if the
+    /// startup parameter sets were missed), then registers the callback.
+    /// Returns whether the callback registered: audio must only start when
+    /// frames can actually reach the bridge.
+    fn register_frame_callback(
+        bridge: &Arc<crate::streaming::bridge::StreamingBridge>,
+        app_state: &AppState,
+    ) -> bool {
+        let Some(platform) = app_state.platform() else {
+            return false;
+        };
+        // Give the bridge a way to ask for an IDR before handing it over: the
+        // callback registration below is what starts caching SPS/PPS, and it
+        // may already have missed the only parameter sets the encoder emits on
+        // its own.
+        if let Some(request_idr) = platform.idr_requester() {
+            *bridge.idr_requester.write() = Some(request_idr);
+        } else {
+            tracing::warn!(
+                "platform exposes no IDR request; a stream that misses SPS/PPS \
+                 cannot be recovered without a restart"
+            );
+        }
+        match platform.register_owned_frame_callback(
+            Arc::clone(bridge) as Arc<dyn crate::platform::frame::OwnedFrameCallback>
+        ) {
+            Ok(()) => {
+                tracing::info!("Owned frame callback registered with platform (zero-copy)");
+                true
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "Failed to register owned frame callback (streaming will work but \
+                     won't receive live frames from encoder): {}",
+                    e
+                );
+                false
+            }
+        }
+    }
+
     /// Start the streaming service (RTSP + HTTP-FLV) if enabled in config.
     ///
     /// This is non-fatal: if streaming fails to start, the application continues
@@ -1437,41 +1480,7 @@ impl Application {
         match service.start().await {
             Ok(bridge) => {
                 // Register the bridge as an owned frame callback with the platform (zero-copy path).
-                let callback_registered = if let Some(platform) = app_state.platform() {
-                    // Give the bridge a way to ask for an IDR before handing it
-                    // over: the callback registration below is what starts
-                    // caching SPS/PPS, and it may already have missed the only
-                    // parameter sets the encoder emits on its own.
-                    if let Some(request_idr) = platform.idr_requester() {
-                        *bridge.idr_requester.write() = Some(request_idr);
-                    } else {
-                        tracing::warn!(
-                            "platform exposes no IDR request; a stream that misses SPS/PPS \
-                             cannot be recovered without a restart"
-                        );
-                    }
-                    match platform
-                        .register_owned_frame_callback(Arc::clone(&bridge)
-                            as Arc<dyn crate::platform::frame::OwnedFrameCallback>)
-                    {
-                        Ok(()) => {
-                            tracing::info!(
-                                "Owned frame callback registered with platform (zero-copy)"
-                            );
-                            true
-                        }
-                        Err(e) => {
-                            tracing::warn!(
-                                "Failed to register owned frame callback (streaming will work but \
-                                 won't receive live frames from encoder): {}",
-                                e
-                            );
-                            false
-                        }
-                    }
-                } else {
-                    false
-                };
+                let callback_registered = Self::register_frame_callback(&bridge, app_state);
 
                 // Audio is strictly additive: a failed mic must never take video
                 // down, and the track is only advertised once the daemon has
