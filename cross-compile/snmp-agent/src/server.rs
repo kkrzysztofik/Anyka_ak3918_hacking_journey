@@ -250,9 +250,11 @@ mod tests {
 
     #[test]
     fn test_handle_datagram_wrong_community_silent_drop() {
-        let mut cfg = SnmpConfig::default();
-        cfg.community = "public".into();
-        cfg.sys_name = "cam-1".into();
+        let cfg = SnmpConfig {
+            community: "public".into(),
+            sys_name: "cam-1".into(),
+            ..Default::default()
+        };
         let sources = Fixed { cfg, ticks: 1 };
         let req = get_sysname_bytes("wrong");
         assert!(handle_datagram(&req, &sources).is_none());
@@ -260,9 +262,11 @@ mod tests {
 
     #[test]
     fn test_handle_datagram_returns_sysname() {
-        let mut cfg = SnmpConfig::default();
-        cfg.community = "public".into();
-        cfg.sys_name = "cam-1".into();
+        let cfg = SnmpConfig {
+            community: "public".into(),
+            sys_name: "cam-1".into(),
+            ..Default::default()
+        };
         let sources = Fixed { cfg, ticks: 1 };
         let req = get_sysname_bytes("public");
         let resp = handle_datagram(&req, &sources).expect("response");

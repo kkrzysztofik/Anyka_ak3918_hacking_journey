@@ -85,10 +85,12 @@ mod tests {
     }
 
     fn sources() -> FixedSources {
-        let mut cfg = SnmpConfig::default();
-        cfg.sys_contact = "ops@example".into();
-        cfg.sys_name = "cam-1".into();
-        cfg.sys_location = "lab".into();
+        let cfg = SnmpConfig {
+            sys_contact: "ops@example".into(),
+            sys_name: "cam-1".into(),
+            sys_location: "lab".into(),
+            ..Default::default()
+        };
         FixedSources { cfg, ticks: 42 }
     }
 
