@@ -337,4 +337,46 @@ describe('NetworkPage', () => {
       expect(ipInput).toHaveValue('192.168.1.100');
     });
   });
+
+  it('should render SNMP settings from the fetched config', async () => {
+    vi.mocked(getSnmpConfig).mockResolvedValue({
+      enabled: true,
+      port: 1161,
+      community: 'monitor',
+      sys_contact: '',
+      sys_name: '',
+      sys_location: '',
+    });
+
+    await renderNetworkPage();
+
+    expect(screen.getByTestId('network-snmp-port-input')).toHaveValue(1161);
+    expect(screen.getByTestId('network-snmp-community-input')).toHaveValue('monitor');
+  });
+
+  it('should save SNMP settings on confirmation', async () => {
+    const user = userEvent.setup();
+    await renderNetworkPage();
+
+    await makeFormDirty(user, 'network-snmp-port-input', '2161');
+    await user.click(screen.getByTestId('network-save-button'));
+    await user.click(await screen.findByTestId('network-confirm-save-button'));
+
+    await waitFor(() => {
+      expect(putSnmpConfig).toHaveBeenCalledWith(
+        expect.objectContaining({ enabled: true, port: 2161, community: 'public' }),
+      );
+    });
+  });
+
+  it('should block saving when the community is empty', async () => {
+    const user = userEvent.setup();
+    await renderNetworkPage();
+
+    await user.clear(screen.getByTestId('network-snmp-community-input'));
+    await user.click(screen.getByTestId('network-save-button'));
+
+    expect(await screen.findByText('Community must not be empty')).toBeInTheDocument();
+    expect(putSnmpConfig).not.toHaveBeenCalled();
+  });
 });
