@@ -222,6 +222,15 @@ const AAC_SAMPLE_RATES: [u32; 13] = [
     96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000, 7350,
 ];
 
+/// Whether `rate` is a sample rate the AAC AudioSpecificConfig table supports.
+///
+/// Capture, SDP, and the AudioSpecificConfig must all agree on one rate; a rate
+/// outside this table has no index, so refusing it up front is the only way to
+/// keep the three consistent.
+pub fn is_supported_aac_sample_rate(rate: u32) -> bool {
+    AAC_SAMPLE_RATES.contains(&rate)
+}
+
 /// Build the 2-byte AAC-LC AudioSpecificConfig for a sample rate and channel count.
 ///
 /// These two bytes are consumed in three places — the SDP `config=` fmtp, the

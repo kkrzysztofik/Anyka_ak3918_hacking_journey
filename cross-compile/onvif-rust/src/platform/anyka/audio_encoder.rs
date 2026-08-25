@@ -132,6 +132,7 @@ mod tests {
             LowLatencyFrameQueue::new("test-main", 4),
             LowLatencyFrameQueue::new("test-sub", 4),
             8000,
+            true,
         ))
     }
 

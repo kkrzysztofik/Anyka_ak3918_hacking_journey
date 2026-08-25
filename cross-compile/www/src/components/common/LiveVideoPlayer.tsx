@@ -137,8 +137,12 @@ export function LiveVideoPlayer({
             height,
             videoCodec: formatVideoCodec(videoCodec),
             audioCodec: formatAudioCodec(audioCodec),
-            ...(sampleRate !== undefined ? { audioSampleRate: sampleRate } : {}),
-            ...(channels !== undefined ? { audioChannels: channels } : {}),
+            // Explicitly reset the audio metadata fields when absent: the sub
+            // stream has no audio, and handleStats merges this update into the
+            // previous one, so omitting the keys would keep the old sample rate
+            // and channel count after a main→sub switch.
+            audioSampleRate: sampleRate,
+            audioChannels: channels,
           });
         });
 

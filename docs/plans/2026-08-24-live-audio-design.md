@@ -118,7 +118,7 @@ table below already covers it.
 One microphone → one encoder → one push thread → existing ring → existing bridge
 fan-out.
 
-```
+```c
 ak_aenc_request_stream(ai, aenc)   [binds input to encoder, once]
         │
         ▼
@@ -157,7 +157,7 @@ handles across IPC to achieve that would couple token lifetimes to thread
 lifetime for no gain. So `CMD_AUDIO_START_PUSH` carries only
 `{sample_rate, channel_num, frame_interval_ms}` and the daemon does:
 
-```
+```c
 ak_ai_open(&pcm_param{sample_bits=16, ...})
 ak_ai_set_aec / set_nr_agc / set_resample   (all DISABLE)
 ak_ai_set_source(AI_SOURCE_MIC)

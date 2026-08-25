@@ -5,7 +5,7 @@
  */
 export function formatAudioCodec(codec?: string): string | undefined {
   if (!codec) return undefined;
-  const match = codec.match(/^mp4a\.40\.(\d+)$/i);
+  const match = /^mp4a\.40\.(\d+)$/i.exec(codec);
   if (!match) return codec;
   const objectType = Number.parseInt(match[1], 10);
   return objectType === 2 ? 'AAC-LC' : `AAC type ${objectType}`;

@@ -344,6 +344,8 @@ pub struct StreamingBridge {
     pub audio_config: RwLock<Option<Vec<u8>>>,
     /// Audio sample rate in Hz.
     pub audio_sample_rate: u32,
+    /// Whether the sub stream carries audio (profile-level gate).
+    pub sub_audio_enabled: bool,
     /// Hook to ask the encoder for an IDR frame, argument `is_main`.
     ///
     /// The vendor encoder emits SPS/PPS only around the startup IDR kick
@@ -364,11 +366,13 @@ impl StreamingBridge {
         main_queue: Arc<LowLatencyFrameQueue>,
         sub_queue: Arc<LowLatencyFrameQueue>,
         audio_sample_rate: u32,
+        sub_audio_enabled: bool,
     ) -> Self {
         Self::new_with_cached_params(
             main_queue,
             sub_queue,
             audio_sample_rate,
+            sub_audio_enabled,
             CachedParameterSets::default(),
             CachedParameterSets::default(),
         )
@@ -383,6 +387,7 @@ impl StreamingBridge {
         main_queue: Arc<LowLatencyFrameQueue>,
         sub_queue: Arc<LowLatencyFrameQueue>,
         audio_sample_rate: u32,
+        sub_audio_enabled: bool,
         main_cached: CachedParameterSets,
         sub_cached: CachedParameterSets,
     ) -> Self {
@@ -405,6 +410,7 @@ impl StreamingBridge {
             },
             audio_config: RwLock::new(None),
             audio_sample_rate,
+            sub_audio_enabled,
             idr_requester: RwLock::new(None),
         }
     }
@@ -468,13 +474,16 @@ impl StreamingBridge {
                     timestamp: timestamp_ms,
                     data: frame.data.clone(),
                 };
-                // Audio goes to both streams.
+                // Audio goes to the main stream always (it is the primary
+                // product); the sub stream only when its profile enables audio.
                 self.main_stream
                     .frame_queue
                     .push(frame_data.clone(), timestamp_ms, false);
-                self.sub_stream
-                    .frame_queue
-                    .push(frame_data, timestamp_ms, false);
+                if self.sub_audio_enabled {
+                    self.sub_stream
+                        .frame_queue
+                        .push(frame_data, timestamp_ms, false);
+                }
             }
         }
     }
@@ -721,6 +730,7 @@ mod tests {
             LowLatencyFrameQueue::new("test-main", 8),
             LowLatencyFrameQueue::new("test-sub", 8),
             48_000,
+            true,
         );
         // Tests must not inherit process-wide SPS/PPS cache from other cases.
         *bridge.main_stream.sps.write() = None;
@@ -1154,6 +1164,30 @@ mod tests {
 
         assert!(bridge.main_stream.frame_queue.try_recv().is_some());
         assert!(bridge.sub_stream.frame_queue.try_recv().is_some());
+    }
+
+    #[test]
+    fn test_bridge_audio_skips_sub_stream_when_profile_disables_it() {
+        // stream_profile_2.audio_enabled=false must keep audio out of the sub
+        // queue even though the shared bridge carries one audio config.
+        let bridge = StreamingBridge::new(
+            LowLatencyFrameQueue::new("test-main", 8),
+            LowLatencyFrameQueue::new("test-sub", 8),
+            48_000,
+            false,
+        );
+
+        let data = BytesMut::from(&[0xFF, 0xF1, 0x50, 0x80][..]);
+        let frame = OwnedFrame {
+            data,
+            timestamp: 2_000,
+            frame_type: FrameType::AudioPacket,
+            stream_id: StreamId::Audio,
+        };
+        bridge.route_owned_frame(frame);
+
+        assert!(bridge.main_stream.frame_queue.try_recv().is_some());
+        assert!(bridge.sub_stream.frame_queue.try_recv().is_none());
     }
 
     #[test]

@@ -474,6 +474,35 @@ static void *push_frame_thread(void *arg)
 }
 
 /**
+ * audio_normalize_timestamp - Normalize an audio SDK timestamp against the
+ * main video stream's anchor, tracking 32-bit clock rollovers.
+ *
+ * The 32-bit SDK clock wraps ~every 49.7 days.  After a wrap raw_ms drops
+ * below the fixed first_ms anchor and a plain subtraction would emit 0 for
+ * every frame until the clock lapped the anchor again.  Track a 64-bit epoch
+ * from consecutive-sample rollovers exactly like the video path does (a
+ * backward jump > half the 32-bit space = one wrap).
+ *
+ * @param state     The audio slot's push state (holds last_raw/epoch).
+ * @param raw_ms    Raw 32-bit timestamp from the SDK.
+ * @param first_ms  Main stream's timestamp anchor.
+ * @return          Normalized timestamp, clamped to [0, UINT32_MAX].
+ */
+static uint32_t audio_normalize_timestamp(struct push_stream_state *state,
+                                          uint32_t raw_ms, uint32_t first_ms)
+{
+    if (raw_ms < state->last_raw_timestamp_ms &&
+        state->last_raw_timestamp_ms - raw_ms > UINT32_MAX / 2) {
+        state->raw_timestamp_epoch_ms += UINT64_C(1) << 32;
+    }
+    uint64_t raw64 = state->raw_timestamp_epoch_ms + raw_ms;
+    state->last_raw_timestamp_ms = raw_ms;
+    uint64_t first64 = (uint64_t)first_ms;
+    uint64_t delta = (raw64 >= first64) ? (raw64 - first64) : 0;
+    return (delta > UINT32_MAX) ? UINT32_MAX : (uint32_t)delta;
+}
+
+/**
  * audio_push_thread - Dedicated pthread for encoded-audio delivery.
  *
  * Polls ak_aenc_get_stream(), which returns a LIST of encoded frames rather
@@ -541,7 +570,14 @@ static void *audio_push_thread(void *arg)
                 continue;
             }
             uint32_t raw_ms   = (uint32_t)entry->stream.ts;
-            uint32_t timestamp_ms = (raw_ms >= first_ms) ? (raw_ms - first_ms) : 0;
+            uint32_t timestamp_ms = audio_normalize_timestamp(state, raw_ms, first_ms);
+
+            if (g_ring_buffer == NULL || frame_len > VD_SHM_SLOT_DATA_SIZE) {
+                ring_drops++;
+                seq_no++;
+                ak_aenc_release_stream(entry);
+                continue;
+            }
 
             int ring_slot;
             pthread_mutex_lock(&g_ring_write_lock);
@@ -630,6 +666,22 @@ static void stop_audio_chain(void)
     }
 
     log_info("[audio] push stopped");
+}
+
+/**
+ * push_stop_audio - Stop the audio push slot and tear its SDK chain down.
+ *
+ * Returns 0 on a clean join, -1 if the worker is wedged (daemon restart is the
+ * recovery path; the ring must then be left mapped for the runaway thread).
+ */
+int push_stop_audio(void)
+{
+    int idx = push_slot_index(VD_STREAM_AUDIO);
+    if (stop_push_slot(idx) != 0) {
+        return -1;
+    }
+    stop_audio_chain();
+    return 0;
 }
 
 /* ---- Public interface ---------------------------------------------------- */
@@ -952,6 +1004,11 @@ int handle_audio_start_push(int fd, const uint8_t *req, uint32_t req_len)
     uint32_t channel_num  = req_read_u32(req, 4);
     uint32_t interval_ms  = req_read_u32(req, 8);
 
+    if (sample_rate == 0 || channel_num == 0 || channel_num > 2) {
+        log_warn("[audio] start_push: bad params rate=%u ch=%u", sample_rate, channel_num);
+        return send_response(fd, STATUS_ERROR, NULL, 0);
+    }
+
     int idx = push_slot_index(VD_STREAM_AUDIO);
     struct push_stream_state *state = &g_push_streams[idx];
 
@@ -1025,6 +1082,9 @@ int handle_audio_start_push(int fd, const uint8_t *req, uint32_t req_len)
 
     state->stream_id = VD_STREAM_AUDIO;
     state->active = 1;
+    /* Reset timestamp rollover state on start, like handle_venc_start_push. */
+    state->last_raw_timestamp_ms = 0;
+    state->raw_timestamp_epoch_ms = 0;
 
     if (pthread_create(&state->thread, NULL, audio_push_thread, state) != 0) {
         log_error("[audio] pthread_create failed: %s", strerror(errno));

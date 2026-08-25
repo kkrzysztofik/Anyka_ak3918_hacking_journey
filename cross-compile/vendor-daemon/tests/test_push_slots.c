@@ -78,6 +78,23 @@ int main(void)
     assert(push_stream_id_to_ring_stream(VD_STREAM_SUB)   == VD_STREAM_SUB);
     assert(push_stream_id_to_ring_stream(VD_STREAM_AUDIO) == VD_STREAM_AUDIO);
 
+    /* Audio timestamp normalization: plain subtraction before any rollover. */
+    struct push_stream_state st = {0};
+    assert(audio_normalize_timestamp(&st, 5000, 1000) == 4000);
+    assert(st.last_raw_timestamp_ms == 5000);
+
+    /* Below the anchor (e.g. after a wrap) saturates to 0, not unsigned wrap. */
+    st.last_raw_timestamp_ms = 0;
+    st.raw_timestamp_epoch_ms = 0;
+    assert(audio_normalize_timestamp(&st, 900, 1000) == 0);
+
+    /* A backward jump > half the 32-bit space is one clock rollover: the
+     * epoch adds 2^32 so the normalized timestamp stays monotonic. */
+    st.last_raw_timestamp_ms = UINT32_MAX - 100;
+    st.raw_timestamp_epoch_ms = 0;
+    assert(audio_normalize_timestamp(&st, 200, 1000) ==
+           (uint32_t)((UINT64_C(1) << 32) + 200 - 1000));
+
     printf("test_push_slots: PASS\n");
     return 0;
 }

@@ -1428,11 +1428,16 @@ impl Application {
             }
         }
 
+        // streaming_config.audio_sample_rate is the value normalized in
+        // StreamingConfig::from_config (validated against the AAC table, default
+        // 8000); capture it before the config is moved into the service so the
+        // same value flows to capture, ASC generation, and SDP.
+        let audio_sample_rate = streaming_config.audio_sample_rate;
         let mut service = crate::streaming::service::StreamingService::new(streaming_config);
         match service.start().await {
             Ok(bridge) => {
                 // Register the bridge as an owned frame callback with the platform (zero-copy path).
-                if let Some(platform) = app_state.platform() {
+                let callback_registered = if let Some(platform) = app_state.platform() {
                     // Give the bridge a way to ask for an IDR before handing it
                     // over: the callback registration below is what starts
                     // caching SPS/PPS, and it may already have missed the only
@@ -1453,6 +1458,7 @@ impl Application {
                             tracing::info!(
                                 "Owned frame callback registered with platform (zero-copy)"
                             );
+                            true
                         }
                         Err(e) => {
                             tracing::warn!(
@@ -1460,22 +1466,26 @@ impl Application {
                                  won't receive live frames from encoder): {}",
                                 e
                             );
+                            false
                         }
                     }
-                }
+                } else {
+                    false
+                };
 
                 // Audio is strictly additive: a failed mic must never take video
                 // down, and the track is only advertised once the daemon has
                 // accepted the push request (start() publishes the ASC only on
-                // success).
-                let (audio_enabled, audio_sample_rate) = {
+                // success).  Only start audio when frames can actually reach the
+                // bridge: without the owned frame callback there is no path from
+                // the encoder to the StreamingBridge, so an audio track would be
+                // negotiated but never receive RTP frames.
+                let audio_enabled = {
                     let c = config_runtime.read();
-                    (
-                        c.stream_profile_1.audio_enabled,
-                        c.stream_profile_1.audio_sample_rate,
-                    )
+                    c.stream_profile_1.audio_enabled
                 };
-                if audio_enabled
+                if callback_registered
+                    && audio_enabled
                     && let Some(platform) = app_state.platform()
                     && let Err(e) = platform
                         .audio_encoder()
