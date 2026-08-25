@@ -177,11 +177,18 @@ const TAG_GAUGE32: u8 = 0x42; // Application 2
 const TAG_TIMETICKS: u8 = 0x43; // Application 3
 
 fn decode_u32_app(content: &[u8]) -> Result<u32, PduError> {
-    let v = ber::decode_integer(content)?;
-    if v < 0 {
+    // Up to 5 bytes: real agents pad values with the top bit set with a leading zero.
+    if content.is_empty() || content.len() > 5 {
         return Err(PduError::Malformed);
     }
-    Ok(v as u32)
+    if content.len() == 5 && content[0] != 0 {
+        return Err(PduError::Malformed);
+    }
+    let mut value: u64 = 0;
+    for &b in content {
+        value = (value << 8) | u64::from(b);
+    }
+    u32::try_from(value).map_err(|_| PduError::Malformed)
 }
 
 fn decode_value(tag: u8, content: &[u8]) -> Result<SnmpValue, PduError> {
@@ -203,15 +210,9 @@ fn encode_value(value: &SnmpValue, out: &mut Vec<u8>) -> Result<(), PduError> {
         SnmpValue::Integer(v) => ber::write_tlv(TAG_INTEGER, &ber::encode_integer(*v), out),
         SnmpValue::OctetString(b) => ber::write_tlv(TAG_OCTET_STRING, b, out),
         SnmpValue::ObjectId(oid) => ber::write_tlv(TAG_OID, &oid.encode()?, out),
-        SnmpValue::Counter32(v) => {
-            ber::write_tlv(TAG_COUNTER32, &ber::encode_integer(*v as i32), out);
-        }
-        SnmpValue::Gauge32(v) => {
-            ber::write_tlv(TAG_GAUGE32, &ber::encode_integer(*v as i32), out);
-        }
-        SnmpValue::TimeTicks(t) => {
-            ber::write_tlv(TAG_TIMETICKS, &ber::encode_integer(*t as i32), out);
-        }
+        SnmpValue::Counter32(v) => ber::write_tlv(TAG_COUNTER32, &ber::encode_unsigned(*v), out),
+        SnmpValue::Gauge32(v) => ber::write_tlv(TAG_GAUGE32, &ber::encode_unsigned(*v), out),
+        SnmpValue::TimeTicks(t) => ber::write_tlv(TAG_TIMETICKS, &ber::encode_unsigned(*t), out),
     }
     Ok(())
 }
@@ -366,8 +367,40 @@ mod tests {
     }
 
     #[test]
-    fn test_decode_value_rejects_unknown_tag_and_negative_counter() {
+    fn test_decode_value_rejects_unknown_tag_and_oversized_unsigned() {
         assert!(matches!(decode_value(0x99, &[]), Err(PduError::Malformed)));
-        assert!(matches!(decode_u32_app(&[0xff]), Err(PduError::Malformed)));
+        assert_eq!(decode_u32_app(&[0xff]).unwrap(), 255);
+        assert!(matches!(
+            decode_u32_app(&[0x01, 0, 0, 0, 0]),
+            Err(PduError::Malformed)
+        ));
+        assert!(matches!(
+            decode_u32_app(&[0, 0, 0, 0, 0, 0]),
+            Err(PduError::Malformed)
+        ));
+    }
+
+#[test]
+    fn test_counter32_max_round_trips() {
+        let oid = Oid::from_slice(&[1, 3, 6, 1, 2, 1, 2, 2, 1, 10, 1]).unwrap();
+        let msg = SnmpMessage {
+            version: SNMP_V2C_VERSION,
+            community: "public".into(),
+            pdu: Pdu {
+                pdu_type: PduType::GetResponse,
+                request_id: 1,
+                error_status: 0,
+                error_index: 0,
+                variable_bindings: vec![VarBind {
+                    name: oid,
+                    value: SnmpValue::Counter32(u32::MAX),
+                }],
+            },
+        };
+        let again = SnmpMessage::parse(&msg.encode().unwrap()).unwrap();
+        assert_eq!(
+            again.pdu.variable_bindings[0].value,
+            SnmpValue::Counter32(u32::MAX)
+        );
     }
 }

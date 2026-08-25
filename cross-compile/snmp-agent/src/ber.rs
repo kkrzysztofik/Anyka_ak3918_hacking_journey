@@ -187,6 +187,23 @@ pub fn encode_integer(value: i32) -> Vec<u8> {
     bytes
 }
 
+/// Encode a u32 for the unsigned application types (Counter32/Gauge32/TimeTicks).
+///
+/// BER integers are two's complement, so a value with the top bit set needs a
+/// leading zero to stay non-negative — this is what net-snmp emits. Routing
+/// these through `encode_integer` instead strips leading `0xff` bytes and turns
+/// `0xFFFF_FFFF` into `255` on the wire.
+pub fn encode_unsigned(value: u32) -> Vec<u8> {
+    let mut bytes = value.to_be_bytes().to_vec();
+    while bytes.len() > 1 && bytes[0] == 0 {
+        bytes.remove(0);
+    }
+    if bytes[0] & 0x80 != 0 {
+        bytes.insert(0, 0);
+    }
+    bytes
+}
+
 pub fn expect_tag(input: &[u8], tag: u8) -> Result<(&[u8], &[u8]), BerError> {
     let (got, content, rest) = read_tlv(input)?;
     if got != tag {
@@ -277,5 +294,15 @@ mod tests {
             expect_tag(&[0x04, 0x00], TAG_INTEGER),
             Err(BerError::UnexpectedTag)
         );
+    }
+
+#[test]
+    fn test_encode_unsigned_never_strips_ff() {
+        assert_eq!(encode_unsigned(0), vec![0x00]);
+        assert_eq!(encode_unsigned(200), vec![0x00, 0xc8]);
+        assert_eq!(encode_unsigned(0x7fff_ffff), vec![0x7f, 0xff, 0xff, 0xff]);
+        // The bug: encode_integer(-1) would give [0xff] and read back as 255.
+        assert_eq!(encode_unsigned(u32::MAX), vec![0x00, 0xff, 0xff, 0xff, 0xff]);
+        assert_eq!(encode_unsigned(0xffff_ff00), vec![0x00, 0xff, 0xff, 0xff, 0x00]);
     }
 }
