@@ -1,7 +1,7 @@
-# SNMPv2c read-only agent defaults (machine may overwrite via ONVIF/WebUI).
-enabled = true
+# SNMPv2c read-only agent. Disabled until a community is provisioned via WebUI.
+enabled = false
 port = 161
-community = "public"
+community = ""
 sys_contact = ""
 sys_name = ""
 sys_location = ""

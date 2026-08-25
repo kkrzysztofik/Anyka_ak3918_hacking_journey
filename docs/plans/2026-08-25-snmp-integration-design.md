@@ -45,12 +45,12 @@ with ONVIF/streaming is the wrong default.
 
 ## Architecture
 
-```
+```text
 ┌─────────────┐  write snmp.toml   ┌──────────────────┐
 │  WebUI /    │ ─────────────────► │  snmp.toml       │
-│  ONVIF      │  Get/SetNetwork    │  enabled, port,  │
-│  (onvif-    │  Protocols +       │  community=public│
-│   rust)     │  identity fields   │  sysName/...     │
+│  REST API   │  /api/snmp         │  enabled, port,  │
+│  (onvif-    │                    │  community,      │
+│   rust)     │                    │  sysName/...     │
 └─────────────┘                    └────────┬─────────┘
                                             │ SIGHUP reload
 ┌─────────────┐  supervise         ┌────────▼─────────┐

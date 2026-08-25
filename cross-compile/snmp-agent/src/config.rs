@@ -8,7 +8,7 @@ use thiserror::Error;
 pub const DEFAULT_CONFIG_PATH: &str = "/mnt/anyka_hack/snmp.toml";
 
 fn default_enabled() -> bool {
-    true
+    false
 }
 
 fn default_port() -> u16 {
@@ -16,7 +16,7 @@ fn default_port() -> u16 {
 }
 
 fn default_community() -> String {
-    "public".to_string()
+    String::new()
 }
 
 /// SNMPv2c agent settings.
@@ -86,9 +86,9 @@ mod tests {
     #[test]
     fn test_default_config_values() {
         let c = SnmpConfig::default();
-        assert!(c.enabled);
+        assert!(!c.enabled);
         assert_eq!(c.port, 161);
-        assert_eq!(c.community, "public");
+        assert_eq!(c.community, "");
         assert_eq!(c.sys_contact, "");
         assert_eq!(c.sys_name, "");
         assert_eq!(c.sys_location, "");

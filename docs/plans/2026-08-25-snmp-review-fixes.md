@@ -1481,7 +1481,8 @@ Check `$?` after each command directly. Do not read a verdict out of an RTK-filt
 
 ```bash
 cd /home/kmk/dev/anyka-dev/.worktrees/snmp/cross-compile
-$CARGO clean -p onvif-rust
+# Rebuild the onvif-rust package if HTTP log sanitizer tests look stale:
+# $CARGO test -p onvif-rust --target x86_64-unknown-linux-gnu logging::http
 for i in $(seq 1 10); do
   $CARGO test -p onvif-rust --target x86_64-unknown-linux-gnu > /tmp/cold_$i.log 2>&1
   echo "run $i EXIT=$? sighup=$(grep -c 'SIGHUP' /tmp/cold_$i.log)"
@@ -1528,7 +1529,8 @@ snmpwalk -v2c -c public -t 2 127.0.0.1:16161 1.3.6.1.2.1.2.2.1.8   # ifOperStatu
 for i in /sys/class/net/*/; do echo "$(basename $i) = $(cat $i/operstate)"; done
 
 snmpset -v2c -c public -t 2 127.0.0.1:16161 1.3.6.1.2.1.1.5.0 s pwned   # expect notWritable
-pkill -f 'snmp-agent --config /tmp/verify.toml'; rm -f /tmp/verify.toml /tmp/verify.log
+# Stop the verification agent by its recorded PID (do not delete files without permission):
+# kill "$SNMP_VERIFY_PID"
 ```
 
 Expected: any interface the kernel reports as `down` shows `INTEGER: 2`, not `1`. `snmpset` fails with `notWritable` and `sysName` is unchanged.

@@ -80,6 +80,61 @@ pub fn handle_varbinds(
     (ERR_NO_ERROR, 0, out)
 }
 
+/// Cap on GETBULK max-repetitions so one UDP datagram cannot walk the whole MIB.
+const MAX_BULK_REPETITIONS: usize = 10;
+/// Soft cap on total response varbinds from one GETBULK.
+const MAX_BULK_VARBINDS: usize = 64;
+
+/// RFC 3416 GetBulk: first `non_repeaters` bindings once, then up to
+/// `max_repetitions` GetNext rounds on the remainder.
+pub fn handle_getbulk(
+    non_repeaters: i32,
+    max_repetitions: i32,
+    binds: &[VarBind],
+    sources: &dyn MibSources,
+) -> (i32, i32, Vec<VarBind>) {
+    let non_rep = (non_repeaters.max(0) as usize).min(binds.len());
+    let max_rep = (max_repetitions.max(0) as usize).min(MAX_BULK_REPETITIONS);
+
+    let mut out = Vec::new();
+    for vb in &binds[..non_rep] {
+        let (name, value) = resolve_get_next(&vb.name, sources)
+            .unwrap_or_else(|| (vb.name.clone(), SnmpValue::EndOfMibView));
+        out.push(VarBind { name, value });
+    }
+
+    let mut cursors: Vec<crate::ber::Oid> =
+        binds[non_rep..].iter().map(|b| b.name.clone()).collect();
+    for _ in 0..max_rep {
+        if cursors.is_empty() || out.len() >= MAX_BULK_VARBINDS {
+            break;
+        }
+        let mut all_end = true;
+        for cursor in &mut cursors {
+            if out.len() >= MAX_BULK_VARBINDS {
+                break;
+            }
+            match resolve_get_next(cursor, sources) {
+                Some((name, value)) => {
+                    all_end = false;
+                    *cursor = name.clone();
+                    out.push(VarBind { name, value });
+                }
+                None => {
+                    out.push(VarBind {
+                        name: cursor.clone(),
+                        value: SnmpValue::EndOfMibView,
+                    });
+                }
+            }
+        }
+        if all_end {
+            break;
+        }
+    }
+    (ERR_NO_ERROR, 0, out)
+}
+
 /// `noSuchInstance` when we serve the group but not that instance, else `noSuchObject`.
 fn miss_kind(oid: &crate::ber::Oid) -> SnmpValue {
     const SERVED: [[u32; 7]; 2] = [[1, 3, 6, 1, 2, 1, 1], [1, 3, 6, 1, 2, 1, 2]];

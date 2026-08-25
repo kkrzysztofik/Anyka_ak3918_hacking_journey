@@ -376,7 +376,9 @@ describe('NetworkPage', () => {
     await user.clear(screen.getByTestId('network-snmp-community-input'));
     await user.click(screen.getByTestId('network-save-button'));
 
-    expect(await screen.findByText('Community must not be empty')).toBeInTheDocument();
+    expect(await screen.findByTestId('network-snmp-community-error')).toHaveTextContent(
+      'Community must not be empty',
+    );
     expect(putSnmpConfig).not.toHaveBeenCalled();
   });
 });

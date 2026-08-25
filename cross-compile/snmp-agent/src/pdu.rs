@@ -12,6 +12,7 @@ const PDU_GET_REQUEST: u8 = 0xa0;
 const PDU_GET_NEXT_REQUEST: u8 = 0xa1;
 const PDU_GET_RESPONSE: u8 = 0xa2;
 const PDU_SET_REQUEST: u8 = 0xa3;
+const PDU_GET_BULK_REQUEST: u8 = 0xa5;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PduType {
@@ -19,6 +20,8 @@ pub enum PduType {
     GetNextRequest,
     GetResponse,
     SetRequest,
+    /// SNMPv2c GetBulkRequest — `error_status`/`error_index` hold non-repeaters / max-repetitions.
+    GetBulkRequest,
 }
 
 impl PduType {
@@ -28,6 +31,7 @@ impl PduType {
             Self::GetNextRequest => PDU_GET_NEXT_REQUEST,
             Self::GetResponse => PDU_GET_RESPONSE,
             Self::SetRequest => PDU_SET_REQUEST,
+            Self::GetBulkRequest => PDU_GET_BULK_REQUEST,
         }
     }
 
@@ -37,6 +41,7 @@ impl PduType {
             PDU_GET_NEXT_REQUEST => Some(Self::GetNextRequest),
             PDU_GET_RESPONSE => Some(Self::GetResponse),
             PDU_SET_REQUEST => Some(Self::SetRequest),
+            PDU_GET_BULK_REQUEST => Some(Self::GetBulkRequest),
             _ => None,
         }
     }
@@ -361,8 +366,10 @@ mod tests {
     fn test_pdu_type_tags_cover_getnext_and_set() {
         assert_eq!(PduType::GetNextRequest.tag(), 0xa1);
         assert_eq!(PduType::SetRequest.tag(), 0xa3);
+        assert_eq!(PduType::GetBulkRequest.tag(), 0xa5);
         assert_eq!(PduType::from_tag(0xa1), Some(PduType::GetNextRequest));
         assert_eq!(PduType::from_tag(0xa3), Some(PduType::SetRequest));
+        assert_eq!(PduType::from_tag(0xa5), Some(PduType::GetBulkRequest));
         assert_eq!(PduType::from_tag(0x99), None);
     }
 

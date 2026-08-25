@@ -16,7 +16,7 @@
 
 ---
 
-### Task 1: Scaffold `snmp-agent` workspace crate
+## Task 1: Scaffold `snmp-agent` workspace crate
 
 **Files:**
 - Create: `cross-compile/snmp-agent/Cargo.toml`
@@ -94,7 +94,7 @@ git commit -m "feat(snmp): scaffold snmp-agent workspace crate"
 
 ---
 
-### Task 2: `snmp.toml` config load/defaults (TDD)
+## Task 2: `snmp.toml` config load/defaults (TDD)
 
 **Files:**
 - Create: `cross-compile/snmp-agent/src/config.rs`
@@ -243,7 +243,7 @@ git commit -m "feat(snmp): load snmp.toml with public/161 defaults"
 
 ---
 
-### Task 3: Minimal SNMPv2c BER helpers (TDD)
+## Task 3: Minimal SNMPv2c BER helpers (TDD)
 
 **Files:**
 - Create: `cross-compile/snmp-agent/src/ber.rs`
@@ -269,7 +269,7 @@ git commit -m "feat(snmp): minimal BER/PDU encode-decode for v2c GET"
 
 ---
 
-### Task 4: MIB-II `system` + GETNEXT order (TDD)
+## Task 4: MIB-II `system` + GETNEXT order (TDD)
 
 **Files:**
 - Create: `cross-compile/snmp-agent/src/mib/mod.rs`
@@ -293,7 +293,7 @@ git commit -m "feat(snmp): MIB-II system group GET/GETNEXT"
 
 ---
 
-### Task 5: MIB-II `interfaces` from `/proc` fixtures (TDD)
+## Task 5: MIB-II `interfaces` from `/proc` fixtures (TDD)
 
 **Files:**
 - Create: `cross-compile/snmp-agent/src/mib/interfaces.rs`
@@ -311,7 +311,7 @@ git commit -m "feat(snmp): MIB-II ifTable from /proc/net/dev"
 
 ---
 
-### Task 6: UDP server, community check, SIGHUP reload
+## Task 6: UDP server, community check, SIGHUP reload
 
 **Files:**
 - Create: `cross-compile/snmp-agent/src/server.rs`
@@ -335,7 +335,7 @@ git commit -m "feat(snmp): UDP agent loop with SIGHUP config reload"
 
 ---
 
-### Task 7: Wire `anyka-init` + SD payload service
+## Task 7: Wire `anyka-init` + SD payload service
 
 **Files:**
 - Modify: `SD_card_contents/anyka_hack/anyka.toml` — add `[services.snmp]`
@@ -363,7 +363,7 @@ git commit -m "feat(snmp): supervise snmp-agent from anyka-init"
 
 ---
 
-### Task 8: ONVIF `NetworkProtocolType::SNMP` + `snmp.toml` persistence
+## Task 8: ONVIF `NetworkProtocolType::SNMP` + `snmp.toml` persistence
 
 **Files:**
 - Modify: `cross-compile/onvif-rust/src/onvif/types/device.rs` — add `SNMP` variant to `NetworkProtocolType`
@@ -391,7 +391,7 @@ git commit -m "feat(snmp): ONVIF Get/SetNetworkProtocols SNMP extension"
 
 ---
 
-### Task 9: WebUI Network page — SNMP controls
+## Task 9: WebUI Network page — SNMP controls
 
 **Files:**
 - Modify: `cross-compile/www/src/services/networkService.ts` — extend `NetworkProtocols` with `snmp: { enabled, port }` (and community via small REST or fold into existing diagnostics-style overlay if cleaner)
@@ -417,7 +417,7 @@ git commit -m "feat(www): SNMP enable/port/community on Network page"
 
 ---
 
-### Task 10: Cross-build, SD image, device smoke docs
+## Task 10: Cross-build, SD image, device smoke docs
 
 **Files:**
 - Modify: build/deploy scripts that copy `onvif-rust.bin` to also build/copy `snmp-agent`
@@ -446,7 +446,7 @@ git commit -m "docs(snmp): deploy path and snmpwalk smoke instructions"
 
 ---
 
-### Task 11: Quality gates
+## Task 11: Quality gates
 
 ```bash
 source /home/kmk/dev/anyka-dev/setenv.sh

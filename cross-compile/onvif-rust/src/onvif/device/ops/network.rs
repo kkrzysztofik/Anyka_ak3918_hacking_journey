@@ -554,104 +554,66 @@ pub async fn handle_get_network_protocols(
 ) -> OnvifResult<GetNetworkProtocolsResponse> {
     tracing::debug!("GetNetworkProtocols request");
 
-    let snmp = crate::config::snmp::SnmpSettings::read(&crate::config::snmp::config_path())
-        .unwrap_or_default();
-
     // Try to get protocol info from platform
     if let Some(platform) = platform
         && let Some(network_info) = platform.network_info()
         && let Ok(protocols) = network_info.get_network_protocols().await
     {
-        // Convert platform protocol info to ONVIF types
-        let mut network_protocols: Vec<NetworkProtocol> = protocols
+        let network_protocols: Vec<NetworkProtocol> = protocols
             .iter()
-            .map(|p| {
+            .filter_map(|p| {
                 let name = match p.name.to_uppercase().as_str() {
                     "HTTP" => NetworkProtocolType::HTTP,
                     "HTTPS" => NetworkProtocolType::HTTPS,
                     "RTSP" => NetworkProtocolType::RTSP,
-                    "SNMP" => NetworkProtocolType::SNMP,
-                    _ => NetworkProtocolType::HTTP, // Default fallback
+                    _ => return None,
                 };
-                NetworkProtocol {
+                Some(NetworkProtocol {
                     name,
                     enabled: p.enabled,
                     port: p.ports.iter().map(|&p| p as i32).collect(),
-                }
+                })
             })
             .collect();
-        if !network_protocols
-            .iter()
-            .any(|p| p.name == NetworkProtocolType::SNMP)
-        {
-            network_protocols.push(NetworkProtocol {
-                name: NetworkProtocolType::SNMP,
-                enabled: snmp.enabled,
-                port: vec![i32::from(snmp.port)],
-            });
-        }
         return Ok(GetNetworkProtocolsResponse { network_protocols });
     }
 
-    // Return default protocol info from config if no platform
     let cfg = config.read();
-    let http_port = cfg.server.port as i32;
-    let rtsp_port = cfg.media.rtsp_port as i32;
-
     Ok(GetNetworkProtocolsResponse {
         network_protocols: vec![
             NetworkProtocol {
                 name: NetworkProtocolType::HTTP,
                 enabled: true,
-                port: vec![http_port],
+                port: vec![cfg.server.port as i32],
             },
             NetworkProtocol {
                 name: NetworkProtocolType::RTSP,
                 enabled: true,
-                port: vec![rtsp_port],
-            },
-            NetworkProtocol {
-                name: NetworkProtocolType::SNMP,
-                enabled: snmp.enabled,
-                port: vec![i32::from(snmp.port)],
+                port: vec![cfg.media.rtsp_port as i32],
             },
         ],
     })
 }
 
-/// Handle SetNetworkProtocols request.
-///
-/// HTTP/RTSP ports go to `config.toml` (this process). SNMP enable/port go to
-/// `snmp.toml` for the separate agent (community stays in that file / WebUI).
+/// Handle SetNetworkProtocols request (HTTP/RTSP only; SNMP is `/api/snmp`).
 pub async fn handle_set_network_protocols(
     config: &Arc<ConfigRuntime>,
     request: SetNetworkProtocols,
 ) -> OnvifResult<SetNetworkProtocolsResponse> {
+    let (http_port, rtsp_port) = parse_http_rtsp_ports(&request)?;
+    apply_http_rtsp_ports(config, http_port, rtsp_port);
+    Ok(SetNetworkProtocolsResponse {})
+}
+
+fn parse_http_rtsp_ports(request: &SetNetworkProtocols) -> OnvifResult<(Option<i32>, Option<i32>)> {
     let mut http_port: Option<i32> = None;
     let mut rtsp_port: Option<i32> = None;
-    let mut snmp_update: Option<(bool, u16)> = None;
-
     for proto in &request.network_protocols {
         match proto.name {
-            NetworkProtocolType::SNMP => {
-                // SNMP may be disabled; empty port list keeps the previous port.
-                let port = if proto.port.is_empty() {
-                    crate::config::snmp::SnmpSettings::read(&crate::config::snmp::config_path())
-                        .unwrap_or_default()
-                        .port
-                } else {
-                    let port = *proto.port.first().ok_or_else(|| {
-                        OnvifError::invalid_arg_val("NoConfig", "protocol entry carries no port")
-                    })?;
-                    if !(1..=65535).contains(&port) {
-                        return Err(OnvifError::invalid_arg_val(
-                            "NoConfig",
-                            "port must be between 1 and 65535",
-                        ));
-                    }
-                    port as u16
-                };
-                snmp_update = Some((proto.enabled, port));
+            NetworkProtocolType::HTTPS => {
+                return Err(OnvifError::ActionNotSupported(
+                    "HTTPS: no TLS listener exists".to_string(),
+                ));
             }
             NetworkProtocolType::HTTP | NetworkProtocolType::RTSP => {
                 if !proto.enabled {
@@ -675,14 +637,16 @@ pub async fn handle_set_network_protocols(
                     _ => unreachable!(),
                 }
             }
-            NetworkProtocolType::HTTPS => {
-                return Err(OnvifError::ActionNotSupported(
-                    "HTTPS: no TLS listener exists".to_string(),
-                ));
-            }
         }
     }
+    Ok((http_port, rtsp_port))
+}
 
+fn apply_http_rtsp_ports(
+    config: &Arc<ConfigRuntime>,
+    http_port: Option<i32>,
+    rtsp_port: Option<i32>,
+) {
     let mut cfg = config.write();
     if let Some(port) = http_port {
         cfg.server.port = port as u16;
@@ -690,21 +654,6 @@ pub async fn handle_set_network_protocols(
     if let Some(port) = rtsp_port {
         cfg.media.rtsp_port = port as u16;
     }
-    drop(cfg);
-
-    if let Some((enabled, port)) = snmp_update {
-        let path = crate::config::snmp::config_path();
-        crate::config::snmp::SnmpSettings::update_at(&path, |s| {
-            s.enabled = enabled;
-            s.port = port;
-        })
-        .map_err(|e| OnvifError::Internal(format!("snmp.toml: {e}")))?;
-        let _ = crate::config::snmp::sighup_agent(std::path::Path::new(
-            crate::config::snmp::DEFAULT_PIDFILE,
-        ));
-    }
-
-    Ok(SetNetworkProtocolsResponse {})
 }
 
 #[cfg(test)]
@@ -1124,41 +1073,21 @@ mod tests {
             .await
             .unwrap();
 
-        // Should have at least HTTP protocol
         assert!(!response.network_protocols.is_empty());
         assert!(
             response
                 .network_protocols
                 .iter()
-                .any(|p| p.name == NetworkProtocolType::SNMP),
-            "SNMP vendor extension must be advertised"
+                .any(|p| p.name == NetworkProtocolType::HTTP),
+            "HTTP must be advertised"
         );
-    }
-
-    #[tokio::test]
-    async fn test_set_network_protocols_snmp_persists_and_allows_disable() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("snmp.toml");
-        crate::config::snmp::set_config_path_for_test(Some(path.clone()));
-
-        let config = create_test_config();
-        let request = SetNetworkProtocols {
-            network_protocols: vec![NetworkProtocol {
-                name: NetworkProtocolType::SNMP,
-                enabled: false,
-                port: vec![1161],
-            }],
-        };
-        handle_set_network_protocols(&config, request)
-            .await
-            .expect("snmp set must succeed");
-
-        let stored = crate::config::snmp::SnmpSettings::read(&path).unwrap();
-        assert!(!stored.enabled);
-        assert_eq!(stored.port, 1161);
-        assert_eq!(stored.community, "public");
-
-        crate::config::snmp::set_config_path_for_test(None);
+        assert!(
+            response
+                .network_protocols
+                .iter()
+                .any(|p| p.name == NetworkProtocolType::RTSP),
+            "RTSP must be advertised"
+        );
     }
 
     #[tokio::test]

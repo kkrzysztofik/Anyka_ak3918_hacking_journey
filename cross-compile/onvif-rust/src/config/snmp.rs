@@ -1,8 +1,7 @@
 //! Machine-owned SNMP agent settings (`snmp.toml`).
 //!
 //! Field set must stay compatible with `snmp-agent` `SnmpConfig` (same keys).
-//! Official ONVIF `NetworkProtocolType` is HTTP/HTTPS/RTSP only — `SNMP` is a
-//! vendor extension on that enum; community stays in this file / WebUI REST.
+//! SNMP is exposed via REST `/api/snmp` and this file — not ONVIF NetworkProtocolType.
 
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
@@ -20,6 +19,12 @@ pub const DEFAULT_PIDFILE: &str = "/tmp/snmp-agent.pid";
 fn path_override() -> &'static Mutex<Option<PathBuf>> {
     static OVERRIDE: OnceLock<Mutex<Option<PathBuf>>> = OnceLock::new();
     OVERRIDE.get_or_init(|| Mutex::new(None))
+}
+
+/// Serializes all snmp.toml read-modify-write updates (REST and ONVIF).
+fn update_lock() -> &'static Mutex<()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
 }
 
 /// Resolve the snmp.toml path (test override or production default).
@@ -54,19 +59,19 @@ pub struct SnmpSettings {
 }
 
 fn default_enabled() -> bool {
-    true
+    false
 }
 fn default_port() -> u16 {
     161
 }
 fn default_community() -> String {
-    "public".to_string()
+    String::new()
 }
 
 impl Default for SnmpSettings {
     fn default() -> Self {
         Self {
-            enabled: true,
+            enabled: false,
             port: 161,
             community: default_community(),
             sys_contact: String::new(),
@@ -102,8 +107,14 @@ impl SnmpSettings {
     }
 
     pub fn update_at(path: &Path, edit: impl FnOnce(&mut Self)) -> Result<(), std::io::Error> {
+        let _guard = update_lock().lock().unwrap_or_else(|e| e.into_inner());
         let mut cfg = Self::read(path)?;
         edit(&mut cfg);
+        if cfg.enabled && cfg.community.is_empty() {
+            return Err(std::io::Error::other(
+                "community must not be empty when SNMP is enabled",
+            ));
+        }
         cfg.write(path)
     }
 }
@@ -163,6 +174,15 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("missing.toml");
         assert_eq!(SnmpSettings::read(&path).unwrap(), SnmpSettings::default());
+    }
+
+    #[test]
+    fn test_update_at_rejects_enabled_without_community() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("snmp.toml");
+        SnmpSettings::default().write(&path).unwrap();
+        let err = SnmpSettings::update_at(&path, |s| s.enabled = true).unwrap_err();
+        assert!(err.to_string().contains("community"));
     }
 
     #[test]

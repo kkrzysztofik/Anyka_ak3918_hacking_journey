@@ -11,18 +11,18 @@ const SYS_SERVICES: i32 = 72;
 pub const SYS_DESCR: &str = "Anyka AK3918 IP camera (snmp-agent)";
 /// Private enterprise placeholder under .1.3.6.1.4.1.0 until a real PEN is registered.
 pub fn sys_object_id() -> Oid {
-    Oid::from_slice(&[1, 3, 6, 1, 4, 1, 0, 1]).expect("sysObjectID")
+    Oid(vec![1, 3, 6, 1, 4, 1, 0, 1])
 }
 
 fn system_scalars() -> [Oid; 7] {
     [
-        Oid::from_slice(&[1, 3, 6, 1, 2, 1, 1, 1, 0]).unwrap(),
-        Oid::from_slice(&[1, 3, 6, 1, 2, 1, 1, 2, 0]).unwrap(),
-        Oid::from_slice(&[1, 3, 6, 1, 2, 1, 1, 3, 0]).unwrap(),
-        Oid::from_slice(&[1, 3, 6, 1, 2, 1, 1, 4, 0]).unwrap(),
-        Oid::from_slice(&[1, 3, 6, 1, 2, 1, 1, 5, 0]).unwrap(),
-        Oid::from_slice(&[1, 3, 6, 1, 2, 1, 1, 6, 0]).unwrap(),
-        Oid::from_slice(&[1, 3, 6, 1, 2, 1, 1, 7, 0]).unwrap(),
+        Oid(vec![1, 3, 6, 1, 2, 1, 1, 1, 0]),
+        Oid(vec![1, 3, 6, 1, 2, 1, 1, 2, 0]),
+        Oid(vec![1, 3, 6, 1, 2, 1, 1, 3, 0]),
+        Oid(vec![1, 3, 6, 1, 2, 1, 1, 4, 0]),
+        Oid(vec![1, 3, 6, 1, 2, 1, 1, 5, 0]),
+        Oid(vec![1, 3, 6, 1, 2, 1, 1, 6, 0]),
+        Oid(vec![1, 3, 6, 1, 2, 1, 1, 7, 0]),
     ]
 }
 

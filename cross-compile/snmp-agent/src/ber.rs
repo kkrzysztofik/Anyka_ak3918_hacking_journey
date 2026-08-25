@@ -30,14 +30,12 @@ impl Oid {
             return Err(BerError::InvalidOid);
         }
         let mut out = Vec::new();
+        // First two arcs share one base-128 subidentifier: 40*X+Y.
         let first = self.0[0]
             .checked_mul(40)
             .and_then(|v| v.checked_add(self.0[1]))
             .ok_or(BerError::InvalidOid)?;
-        if first > u8::MAX as u32 {
-            return Err(BerError::InvalidOid);
-        }
-        out.push(first as u8);
+        encode_base128(first, &mut out);
         for &arc in &self.0[2..] {
             encode_base128(arc, &mut out);
         }
@@ -49,9 +47,16 @@ impl Oid {
         if bytes.is_empty() {
             return Err(BerError::InvalidOid);
         }
-        let first = bytes[0] as u32;
-        let mut arcs = vec![first / 40, first % 40];
-        let mut i = 1;
+        let (first, mut i) = decode_base128(bytes, 0)?;
+        // X.Y pack: <40 → 0.Y, <80 → 1.(Y-40), else → 2.(Y-80).
+        let (a0, a1) = if first < 40 {
+            (0, first)
+        } else if first < 80 {
+            (1, first - 40)
+        } else {
+            (2, first - 80)
+        };
+        let mut arcs = vec![a0, a1];
         while i < bytes.len() {
             let (arc, next) = decode_base128(bytes, i)?;
             arcs.push(arc);
@@ -236,9 +241,12 @@ mod tests {
     }
 
     #[test]
-    fn test_oid_encode_rejects_empty_and_overflow_first_byte() {
+    fn test_oid_encode_rejects_empty_and_allows_large_first_subid() {
         assert_eq!(Oid(vec![]).encode(), Err(BerError::InvalidOid));
-        assert_eq!(Oid(vec![2, 200]).encode(), Err(BerError::InvalidOid));
+        assert_eq!(Oid(vec![1]).encode(), Err(BerError::InvalidOid));
+        // 2.176 → first subid 256, now encoded as multi-byte base-128 (was a hard reject).
+        let oid = Oid::from_slice(&[2, 176]).unwrap();
+        assert_eq!(oid.encode().unwrap(), vec![0x82, 0x00]);
     }
 
     #[test]
@@ -317,5 +325,20 @@ mod tests {
         // Six continuation bytes: more than 32 bits of payload.
         let bytes = [0x2b, 0x8f, 0xff, 0xff, 0xff, 0xff, 0x7f];
         assert_eq!(Oid::decode(&bytes), Err(BerError::InvalidOid));
+    }
+
+    #[test]
+    fn test_oid_joint_iso_ccitt_second_arc_ge_40() {
+        // 2.40 packs as subidentifier 120; `/40` `%40` would wrongly yield 3.0.
+        let oid = Oid::from_slice(&[2, 40, 1]).unwrap();
+        let enc = oid.encode().unwrap();
+        assert_eq!(enc[0], 120);
+        assert_eq!(Oid::decode(&enc).unwrap(), oid);
+
+        // 2.176 needs a multi-byte first subidentifier (80+176=256).
+        let oid = Oid::from_slice(&[2, 176, 1]).unwrap();
+        let enc = oid.encode().unwrap();
+        assert!(enc.len() >= 2);
+        assert_eq!(Oid::decode(&enc).unwrap(), oid);
     }
 }

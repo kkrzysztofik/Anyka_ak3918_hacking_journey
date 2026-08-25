@@ -62,6 +62,7 @@ async fn test_full_walk_is_ordered_and_terminates() {
 
     let mut cursor = Oid::from_slice(&[1, 3]).unwrap();
     let mut seen: Vec<(Oid, SnmpValue)> = Vec::new();
+    let mut terminated = false;
     for _ in 0..500 {
         let resp = ask(
             &client,
@@ -76,6 +77,7 @@ async fn test_full_walk_is_ordered_and_terminates() {
         );
         let vb = resp.pdu.variable_bindings.into_iter().next().unwrap();
         if vb.value == SnmpValue::EndOfMibView {
+            terminated = true;
             break;
         }
         assert!(
@@ -88,6 +90,7 @@ async fn test_full_walk_is_ordered_and_terminates() {
         seen.push((vb.name, vb.value));
     }
 
+    assert!(terminated, "walk must end with EndOfMibView");
     assert!(
         seen.len() >= 7,
         "at least the system group should be present"
@@ -174,6 +177,53 @@ async fn test_unknown_oid_set_and_response_handling() {
     assert!(
         ask(&client, port, &wrong).await.is_none(),
         "must not answer a bad community"
+    );
+
+    handle.abort();
+}
+
+#[tokio::test]
+async fn test_getbulk_walks_iftable() {
+    let (port, handle, _dir) = spawn_agent().await;
+    let client = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+
+    let req = SnmpMessage {
+        version: SNMP_V2C_VERSION,
+        community: "public".into(),
+        pdu: Pdu {
+            pdu_type: PduType::GetBulkRequest,
+            request_id: 7,
+            error_status: 0, // non-repeaters
+            error_index: 5,  // max-repetitions
+            variable_bindings: vec![VarBind {
+                name: Oid::from_slice(&[1, 3, 6, 1, 2, 1, 2]).unwrap(),
+                value: SnmpValue::Null,
+            }],
+        },
+    }
+    .encode()
+    .unwrap();
+
+    let resp = ask(&client, port, &req)
+        .await
+        .expect("GETBULK must be answered");
+    assert_eq!(resp.pdu.pdu_type, PduType::GetResponse);
+    assert_eq!(resp.pdu.error_status, 0);
+    assert!(
+        resp.pdu.variable_bindings.len() >= 2,
+        "bulk should return multiple interfaces bindings"
+    );
+    assert_eq!(
+        resp.pdu.variable_bindings[0].name.0,
+        vec![1, 3, 6, 1, 2, 1, 2, 1, 0],
+        "first successor under interfaces is ifNumber"
+    );
+    assert!(
+        resp.pdu.variable_bindings[1]
+            .name
+            .0
+            .starts_with(&[1, 3, 6, 1, 2, 1, 2, 2, 1]),
+        "subsequent bindings walk ifTable"
     );
 
     handle.abort();

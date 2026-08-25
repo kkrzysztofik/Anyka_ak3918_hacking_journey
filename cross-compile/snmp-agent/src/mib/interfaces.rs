@@ -19,6 +19,11 @@ pub struct IfRow {
     pub out_octets: u32,
 }
 
+/// Truncate a `/proc/net/dev` counter to Counter32 (low 32 bits).
+fn parse_counter32(s: &str) -> u32 {
+    s.parse::<u64>().unwrap_or(0) as u32
+}
+
 /// Parse `/proc/net/dev` text into ifTable rows (positional ifIndex until sysfs overlays).
 pub fn parse_proc_net_dev(text: &str) -> Vec<IfRow> {
     let mut rows = Vec::new();
@@ -35,8 +40,9 @@ pub fn parse_proc_net_dev(text: &str) -> Vec<IfRow> {
         if fields.len() < 10 {
             continue;
         }
-        let in_octets = fields[0].parse().unwrap_or(0);
-        let out_octets = fields[8].parse().unwrap_or(0);
+        // Counter32 is 32-bit wrap; /proc values are often larger than u32.
+        let in_octets = parse_counter32(fields[0]);
+        let out_octets = parse_counter32(fields[8]);
         rows.push(IfRow {
             index: (rows.len() as u32) + 1,
             descr: name,
@@ -132,7 +138,7 @@ pub fn load_interfaces(proc_net_dev: &Path, sys_root: &Path) -> Vec<IfRow> {
 }
 
 fn if_number_oid() -> Oid {
-    Oid::from_slice(&[1, 3, 6, 1, 2, 1, 2, 1, 0]).unwrap()
+    Oid(vec![1, 3, 6, 1, 2, 1, 2, 1, 0])
 }
 
 /// Columnar OIDs: ifIndex(1), ifDescr(2), ifType(3), ifMtu(4), ifSpeed(5),
@@ -142,7 +148,7 @@ fn column_ids() -> [u32; 10] {
 }
 
 fn table_oid(column: u32, index: u32) -> Oid {
-    Oid::from_slice(&[1, 3, 6, 1, 2, 1, 2, 2, 1, column, index]).unwrap()
+    Oid(vec![1, 3, 6, 1, 2, 1, 2, 2, 1, column, index])
 }
 
 fn all_table_oids(rows: &[IfRow]) -> Vec<Oid> {
@@ -156,8 +162,8 @@ fn all_table_oids(rows: &[IfRow]) -> Vec<Oid> {
     out
 }
 
-fn cell_value(column: u32, row: &IfRow) -> SnmpValue {
-    match column {
+fn cell_value(column: u32, row: &IfRow) -> Option<SnmpValue> {
+    Some(match column {
         1 => SnmpValue::Integer(row.index as i32),
         2 => SnmpValue::OctetString(row.descr.as_bytes().to_vec()),
         3 => SnmpValue::Integer(row.if_type),
@@ -168,8 +174,8 @@ fn cell_value(column: u32, row: &IfRow) -> SnmpValue {
         8 => SnmpValue::Integer(row.oper_status),
         10 => SnmpValue::Counter32(row.in_octets),
         16 => SnmpValue::Counter32(row.out_octets),
-        _ => SnmpValue::Null,
-    }
+        _ => return None,
+    })
 }
 
 fn value_for(oid: &Oid, rows: &[IfRow]) -> Option<SnmpValue> {
@@ -179,9 +185,12 @@ fn value_for(oid: &Oid, rows: &[IfRow]) -> Option<SnmpValue> {
     // 1.3.6.1.2.1.2.2.1.<col>.<idx>
     if oid.0.len() == 11 && oid.0[..9] == [1, 3, 6, 1, 2, 1, 2, 2, 1] {
         let col = oid.0[9];
+        if !column_ids().contains(&col) {
+            return None;
+        }
         let idx = oid.0[10];
         let row = rows.iter().find(|r| r.index == idx)?;
-        return Some(cell_value(col, row));
+        return cell_value(col, row);
     }
     None
 }
@@ -330,6 +339,26 @@ mod tests {
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[0].descr, "lo");
         assert_eq!(rows[1].descr, "wlan0");
+    }
+
+    #[test]
+    fn test_parse_counter32_wraps_above_u32_max() {
+        let huge = (u64::from(u32::MAX) + 42).to_string();
+        let text =
+            format!("Inter-|   Receive\n face |bytes\neth0: {huge} 0 0 0 0 0 0 0 {huge} 0\n");
+        let rows = parse_proc_net_dev(&text);
+        assert_eq!(rows.len(), 1);
+        // u32::MAX + 42 ≡ 41 (mod 2^32)
+        assert_eq!(rows[0].in_octets, 41);
+        assert_eq!(rows[0].out_octets, 41);
+    }
+
+    #[test]
+    fn test_get_unimplemented_iftable_column_is_none() {
+        let rows = fixture_rows();
+        // ifLastChange is column 9 — we do not serve it.
+        let oid = table_oid(9, 1);
+        assert!(get_with_rows(&oid, &rows).is_none());
     }
 
     #[test]

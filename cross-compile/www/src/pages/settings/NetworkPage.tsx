@@ -89,7 +89,7 @@ const networkSchema = z
     rtspPort: z.number().int().min(1, 'Port must be 1-65535').max(65535, 'Port must be 1-65535'),
     snmpEnabled: z.boolean(),
     snmpPort: z.number().int().min(1, 'Port must be 1-65535').max(65535, 'Port must be 1-65535'),
-    snmpCommunity: z.string().min(1, 'Community must not be empty').max(64),
+    snmpCommunity: z.string().max(64),
   })
   .superRefine((data, ctx) => {
     if (!data.dhcp) {
@@ -107,6 +107,13 @@ const networkSchema = z
           message: 'Gateway is required when DHCP is disabled',
         });
       }
+    }
+    if (data.snmpEnabled && !data.snmpCommunity.trim()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['snmpCommunity'],
+        message: 'Community must not be empty',
+      });
     }
   });
 
@@ -184,7 +191,7 @@ export default function NetworkPage() {
     queryFn: getNetworkOverlay,
   });
 
-  const { data: snmp } = useQuery({
+  const { data: snmp, isSuccess: snmpLoaded } = useQuery({
     queryKey: ['snmpConfig'],
     queryFn: getSnmpConfig,
   });
@@ -204,9 +211,9 @@ export default function NetworkPage() {
       secondaryDNS: '',
       httpPort: 80,
       rtspPort: 554,
-      snmpEnabled: true,
+      snmpEnabled: false,
       snmpPort: 161,
-      snmpCommunity: 'public',
+      snmpCommunity: '',
     },
   });
 
@@ -236,9 +243,10 @@ export default function NetworkPage() {
         secondaryDNS: pending?.dns?.[1] ?? config.dns.dnsServers[1] ?? '',
         httpPort: config.protocols.http,
         rtspPort: config.protocols.rtsp,
-        snmpEnabled: snmp?.enabled ?? true,
+        // Never invent SNMP defaults: a failed GET must not overwrite a real community on save.
+        snmpEnabled: snmp?.enabled ?? false,
         snmpPort: snmp?.port ?? 161,
-        snmpCommunity: snmp?.community ?? 'public',
+        snmpCommunity: snmp?.community ?? '',
       });
     }
   }, [config, overlay, snmp, diagnostics?.wifi?.ssid, form]);
@@ -272,13 +280,15 @@ export default function NetworkPage() {
       await runNetworkStep('Port configuration failed', () =>
         setNetworkProtocols(values.httpPort, values.rtspPort),
       );
-      await runNetworkStep('SNMP configuration failed', () =>
-        putSnmpConfig({
-          enabled: values.snmpEnabled,
-          port: values.snmpPort,
-          community: values.snmpCommunity,
-        }),
-      );
+      if (snmpLoaded) {
+        await runNetworkStep('SNMP configuration failed', () =>
+          putSnmpConfig({
+            enabled: values.snmpEnabled,
+            port: values.snmpPort,
+            community: values.snmpCommunity,
+          }),
+        );
+      }
     },
     onSuccess: () => {
       toast.success('Network settings saved', {
@@ -327,9 +337,9 @@ export default function NetworkPage() {
         secondaryDNS: pending?.dns?.[1] ?? config.dns.dnsServers[1] ?? '',
         httpPort: config.protocols.http,
         rtspPort: config.protocols.rtsp,
-        snmpEnabled: snmp?.enabled ?? true,
+        snmpEnabled: snmp?.enabled ?? false,
         snmpPort: snmp?.port ?? 161,
-        snmpCommunity: snmp?.community ?? 'public',
+        snmpCommunity: snmp?.community ?? '',
       });
       toast.info('Form reset to current values');
     }
@@ -779,7 +789,7 @@ export default function NetworkPage() {
                       <div>
                         <FormLabel className="text-[#a1a1a6]">Enable SNMP</FormLabel>
                         <FormDescription className="text-[#636366]">
-                          Default community &quot;public&quot; is insecure on untrusted networks
+                          Choose a non-default community before enabling on untrusted networks
                         </FormDescription>
                       </div>
                       <FormControl>
@@ -825,7 +835,7 @@ export default function NetworkPage() {
                             data-testid="network-snmp-community-input"
                           />
                         </FormControl>
-                        <FormMessage />
+                        <FormMessage data-testid="network-snmp-community-error" />
                       </FormItem>
                     )}
                   />

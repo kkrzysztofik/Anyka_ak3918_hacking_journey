@@ -95,7 +95,10 @@ pub fn handle_datagram(bytes: &[u8], agent: &Agent) -> Option<Vec<u8>> {
     // spoofed source address make the agent respond to itself forever.
     if !matches!(
         msg.pdu.pdu_type,
-        PduType::GetRequest | PduType::GetNextRequest | PduType::SetRequest
+        PduType::GetRequest
+            | PduType::GetNextRequest
+            | PduType::GetBulkRequest
+            | PduType::SetRequest
     ) {
         return None;
     }
@@ -113,7 +116,16 @@ pub fn handle_datagram(bytes: &[u8], agent: &Agent) -> Option<Vec<u8>> {
         agent.snapshot()
     };
     let (error_status, error_index, variable_bindings) =
-        mib::handle_varbinds(msg.pdu.pdu_type, &msg.pdu.variable_bindings, &snapshot);
+        if msg.pdu.pdu_type == PduType::GetBulkRequest {
+            mib::handle_getbulk(
+                msg.pdu.error_status,
+                msg.pdu.error_index,
+                &msg.pdu.variable_bindings,
+                &snapshot,
+            )
+        } else {
+            mib::handle_varbinds(msg.pdu.pdu_type, &msg.pdu.variable_bindings, &snapshot)
+        };
 
     SnmpMessage {
         version: SNMP_V2C_VERSION,
@@ -144,6 +156,41 @@ fn remove_pidfile(path: &Path) {
 async fn bind_socket(port: u16) -> std::io::Result<UdpSocket> {
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
     UdpSocket::bind(addr).await
+}
+
+/// Apply a freshly loaded config. Bind succeeds before `agent.config` is
+/// replaced so a failed rebind cannot leave APIs advertising a dead port.
+async fn apply_reload(agent: &mut Agent, socket: &mut Option<UdpSocket>, new_cfg: SnmpConfig) {
+    let old_port = agent.config.port;
+    let old_enabled = agent.config.enabled;
+
+    if !new_cfg.enabled {
+        *socket = None;
+        agent.config = new_cfg;
+        tracing::info!("snmp-agent disabled after reload");
+        return;
+    }
+
+    let need_rebind = socket.is_none() || !old_enabled || old_port != new_cfg.port;
+    if need_rebind {
+        match bind_socket(new_cfg.port).await {
+            Ok(s) => {
+                tracing::info!(port = new_cfg.port, "snmp-agent rebound");
+                *socket = Some(s);
+                agent.config = new_cfg;
+            }
+            Err(e) => {
+                tracing::error!(
+                    error = %e,
+                    port = new_cfg.port,
+                    "rebind failed; keeping previous config and socket"
+                );
+            }
+        }
+    } else {
+        agent.config = new_cfg;
+        tracing::info!("snmp-agent config reloaded (same bind)");
+    }
 }
 
 /// Run the agent until cancelled. Reloads config when `reload` yields.
@@ -187,36 +234,7 @@ pub async fn run(
             _ = reload.recv() => {
                 match SnmpConfig::load(&config_path) {
                     Ok(new_cfg) => {
-                        let old_port = agent.config.port;
-                        let old_enabled = agent.config.enabled;
-                        agent.config = new_cfg.clone();
-
-                        if !new_cfg.enabled {
-                            socket = None;
-                            tracing::info!("snmp-agent disabled after reload");
-                            continue;
-                        }
-
-                        let need_rebind = socket.is_none()
-                            || !old_enabled
-                            || old_port != new_cfg.port;
-                        if need_rebind {
-                            match bind_socket(new_cfg.port).await {
-                                Ok(s) => {
-                                    tracing::info!(port = new_cfg.port, "snmp-agent rebound");
-                                    socket = Some(s);
-                                }
-                                Err(e) => {
-                                    tracing::error!(
-                                        error = %e,
-                                        port = new_cfg.port,
-                                        "rebind failed; keeping previous socket"
-                                    );
-                                }
-                            }
-                        } else {
-                            tracing::info!("snmp-agent config reloaded (same bind)");
-                        }
+                        apply_reload(&mut agent, &mut socket, new_cfg).await;
                     }
                     Err(e) => {
                         tracing::error!(error = %e, "config reload failed; keeping last-good");
@@ -602,6 +620,85 @@ mod tests {
             .expect("agent must answer after the retry")
             .unwrap();
         assert!(SnmpMessage::parse(&buf[..n]).is_ok());
+
+        handle.abort();
+        let _ = handle.await;
+    }
+
+    #[tokio::test]
+    async fn test_failed_rebind_keeps_old_port_until_retry_succeeds() {
+        let dir = tempfile::tempdir().unwrap();
+        let cfg_path = dir.path().join("snmp.toml");
+        let pidfile = dir.path().join("rebind.pid");
+
+        let probe = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let old_port = probe.local_addr().unwrap().port();
+        drop(probe);
+
+        std::fs::write(
+            &cfg_path,
+            format!(
+                "enabled = true\nport = {old_port}\ncommunity = \"public\"\nsys_name = \"old\"\n"
+            ),
+        )
+        .unwrap();
+
+        let (tx, rx) = tokio::sync::mpsc::channel(1);
+        let handle = tokio::spawn({
+            let cfg = cfg_path.clone();
+            let pid = pidfile.clone();
+            async move {
+                let _ = run(cfg, pid, rx).await;
+            }
+        });
+        wait_for_file(&pidfile, Duration::from_secs(2)).await;
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        let holder = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let new_port = holder.local_addr().unwrap().port();
+        std::fs::write(
+            &cfg_path,
+            format!(
+                "enabled = true\nport = {new_port}\ncommunity = \"public\"\nsys_name = \"new\"\n"
+            ),
+        )
+        .unwrap();
+        tx.send(()).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(80)).await;
+
+        // Still answering on the old port with the old sysName.
+        let client = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        client
+            .send_to(&get_sysname_bytes("public"), ("127.0.0.1", old_port))
+            .await
+            .unwrap();
+        let mut buf = [0u8; 2048];
+        let (n, _) = tokio::time::timeout(Duration::from_secs(2), client.recv_from(&mut buf))
+            .await
+            .expect("old port must still answer")
+            .unwrap();
+        assert_eq!(
+            SnmpMessage::parse(&buf[..n]).unwrap().pdu.variable_bindings[0].value,
+            SnmpValue::OctetString(b"old".to_vec())
+        );
+
+        drop(holder);
+        // Unchanged file: reload must retry the pending rebind now that the port is free.
+        tx.send(()).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(80)).await;
+
+        client
+            .send_to(&get_sysname_bytes("public"), ("127.0.0.1", new_port))
+            .await
+            .unwrap();
+        let (n, _) = tokio::time::timeout(Duration::from_secs(2), client.recv_from(&mut buf))
+            .await
+            .expect("new port must answer after successful rebind")
+            .unwrap();
+        assert_eq!(
+            SnmpMessage::parse(&buf[..n]).unwrap().pdu.variable_bindings[0].value,
+            SnmpValue::OctetString(b"new".to_vec())
+        );
 
         handle.abort();
         let _ = handle.await;

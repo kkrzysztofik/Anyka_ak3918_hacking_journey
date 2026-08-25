@@ -113,7 +113,12 @@ pub async fn handle_put_snmp(
     SnmpSettings::update_at(&state.config_path, |s| apply_patch(s, patch))
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-    let _ = snmp::sighup_agent(Path::new(&state.pidfile));
+    snmp::sighup_agent(Path::new(&state.pidfile)).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("snmp settings saved but agent reload failed: {e}"),
+        )
+    })?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -168,9 +173,9 @@ mod tests {
         let get = handle_get_snmp(Extension(Arc::clone(&state)))
             .await
             .expect("get defaults");
-        assert!(get.enabled);
+        assert!(!get.enabled);
         assert_eq!(get.port, 161);
-        assert_eq!(get.community, "public");
+        assert_eq!(get.community, "");
 
         let put = handle_put_snmp(
             Extension(Arc::clone(&state)),
