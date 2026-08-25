@@ -234,7 +234,7 @@ export default function NetworkPage() {
   const snmpUnavailable = snmpPending || snmpError;
 
   useEffect(() => {
-    if (!config) return;
+    if (!config || form.formState.isDirty) return;
     const iface = config.interfaces[0];
     const pending = overlay?.pending;
     const parsed = parseOverlayAddress(pending?.address);
@@ -936,7 +936,10 @@ export default function NetworkPage() {
               <AlertDialogTitle className="text-white" data-testid="network-confirm-dialog-title">
                 Save Network Settings?
               </AlertDialogTitle>
-              <AlertDialogDescription className="text-[#a1a1a6]">
+              <AlertDialogDescription
+                className="text-[#a1a1a6]"
+                data-testid="network-confirm-dialog-description"
+              >
                 {confirmDescription}
               </AlertDialogDescription>
             </AlertDialogHeader>

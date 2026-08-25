@@ -39,7 +39,9 @@ pub fn config_path() -> PathBuf {
 /// Test-only path override.
 #[cfg(test)]
 pub fn set_config_path_for_test(path: Option<PathBuf>) {
-    *path_override().lock().unwrap_or_else(std::sync::PoisonError::into_inner) = path;
+    *path_override()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = path;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -111,7 +113,9 @@ impl SnmpSettings {
     }
 
     pub fn update_at(path: &Path, edit: impl FnOnce(&mut Self)) -> Result<(), std::io::Error> {
-        let _guard = update_lock().lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let _guard = update_lock()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut cfg = Self::read(path)?;
         edit(&mut cfg);
         if cfg.enabled && cfg.community.is_empty() {

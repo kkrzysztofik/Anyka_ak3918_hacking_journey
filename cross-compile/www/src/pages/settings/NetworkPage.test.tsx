@@ -389,9 +389,9 @@ describe('NetworkPage', () => {
     await makeFormDirty(user, 'network-snmp-port-input', '2161');
     await user.click(screen.getByTestId('network-save-button'));
 
-    expect(
-      await screen.findByText('SNMP changes apply on reload without reboot.'),
-    ).toBeInTheDocument();
+    expect(await screen.findByTestId('network-confirm-dialog-description')).toHaveTextContent(
+      'SNMP changes apply on reload without reboot.',
+    );
   });
 
   it('test_snmp_load_error_disables_snmp_fields', async () => {
