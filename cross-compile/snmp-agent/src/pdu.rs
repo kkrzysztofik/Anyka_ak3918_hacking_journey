@@ -60,6 +60,12 @@ pub enum SnmpValue {
     Counter32(u32),
     /// Gauge32 (application tag 2).
     Gauge32(u32),
+    /// v2c exception: the object does not exist in this MIB view (context tag [0]).
+    NoSuchObject,
+    /// v2c exception: the object exists but this instance does not (context tag [1]).
+    NoSuchInstance,
+    /// v2c exception: no object follows this OID (context tag [2]).
+    EndOfMibView,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -175,6 +181,9 @@ fn parse_varbind_list(mut input: &[u8]) -> Result<Vec<VarBind>, PduError> {
 const TAG_COUNTER32: u8 = 0x41; // Application 1
 const TAG_GAUGE32: u8 = 0x42; // Application 2
 const TAG_TIMETICKS: u8 = 0x43; // Application 3
+const TAG_NO_SUCH_OBJECT: u8 = 0x80;
+const TAG_NO_SUCH_INSTANCE: u8 = 0x81;
+const TAG_END_OF_MIB_VIEW: u8 = 0x82;
 
 fn decode_u32_app(content: &[u8]) -> Result<u32, PduError> {
     // Up to 5 bytes: real agents pad values with the top bit set with a leading zero.
@@ -200,6 +209,9 @@ fn decode_value(tag: u8, content: &[u8]) -> Result<SnmpValue, PduError> {
         TAG_COUNTER32 => Ok(SnmpValue::Counter32(decode_u32_app(content)?)),
         TAG_GAUGE32 => Ok(SnmpValue::Gauge32(decode_u32_app(content)?)),
         TAG_TIMETICKS => Ok(SnmpValue::TimeTicks(decode_u32_app(content)?)),
+        TAG_NO_SUCH_OBJECT if content.is_empty() => Ok(SnmpValue::NoSuchObject),
+        TAG_NO_SUCH_INSTANCE if content.is_empty() => Ok(SnmpValue::NoSuchInstance),
+        TAG_END_OF_MIB_VIEW if content.is_empty() => Ok(SnmpValue::EndOfMibView),
         _ => Err(PduError::Malformed),
     }
 }
@@ -213,6 +225,9 @@ fn encode_value(value: &SnmpValue, out: &mut Vec<u8>) -> Result<(), PduError> {
         SnmpValue::Counter32(v) => ber::write_tlv(TAG_COUNTER32, &ber::encode_unsigned(*v), out),
         SnmpValue::Gauge32(v) => ber::write_tlv(TAG_GAUGE32, &ber::encode_unsigned(*v), out),
         SnmpValue::TimeTicks(t) => ber::write_tlv(TAG_TIMETICKS, &ber::encode_unsigned(*t), out),
+        SnmpValue::NoSuchObject => ber::write_tlv(TAG_NO_SUCH_OBJECT, &[], out),
+        SnmpValue::NoSuchInstance => ber::write_tlv(TAG_NO_SUCH_INSTANCE, &[], out),
+        SnmpValue::EndOfMibView => ber::write_tlv(TAG_END_OF_MIB_VIEW, &[], out),
     }
     Ok(())
 }
@@ -402,5 +417,19 @@ mod tests {
             again.pdu.variable_bindings[0].value,
             SnmpValue::Counter32(u32::MAX)
         );
+    }
+
+#[test]
+    fn test_exception_values_round_trip() {
+        for (value, tag) in [
+            (SnmpValue::NoSuchObject, 0x80u8),
+            (SnmpValue::NoSuchInstance, 0x81),
+            (SnmpValue::EndOfMibView, 0x82),
+        ] {
+            let mut out = Vec::new();
+            encode_value(&value, &mut out).unwrap();
+            assert_eq!(out, vec![tag, 0x00], "{value:?} must be a zero-length TLV");
+            assert_eq!(decode_value(tag, &[]).unwrap(), value);
+        }
     }
 }
