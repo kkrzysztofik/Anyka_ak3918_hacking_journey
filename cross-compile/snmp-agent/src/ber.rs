@@ -88,7 +88,7 @@ fn decode_base128(bytes: &[u8], mut i: usize) -> Result<(u32, usize), BerError> 
         let b = bytes[i];
         i += 1;
         value = value
-            .checked_shl(7)
+            .checked_mul(128)
             .and_then(|v| v.checked_add(u32::from(b & 0x7f)))
             .ok_or(BerError::InvalidOid)?;
         if b & 0x80 == 0 {
@@ -304,5 +304,12 @@ mod tests {
         // The bug: encode_integer(-1) would give [0xff] and read back as 255.
         assert_eq!(encode_unsigned(u32::MAX), vec![0x00, 0xff, 0xff, 0xff, 0xff]);
         assert_eq!(encode_unsigned(0xffff_ff00), vec![0x00, 0xff, 0xff, 0xff, 0x00]);
+    }
+
+#[test]
+    fn test_decode_rejects_oversized_base128_arc() {
+        // Six continuation bytes: more than 32 bits of payload.
+        let bytes = [0x2b, 0x8f, 0xff, 0xff, 0xff, 0xff, 0x7f];
+        assert_eq!(Oid::decode(&bytes), Err(BerError::InvalidOid));
     }
 }
