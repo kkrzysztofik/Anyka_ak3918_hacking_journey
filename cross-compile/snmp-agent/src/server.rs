@@ -25,6 +25,7 @@ const BIND_RETRY: std::time::Duration = std::time::Duration::from_millis(50);
 pub struct LiveSources {
     pub config: SnmpConfig,
     started: Instant,
+    ifaces: Vec<crate::mib::interfaces::IfRow>,
 }
 
 impl LiveSources {
@@ -32,6 +33,10 @@ impl LiveSources {
         Self {
             config,
             started: Instant::now(),
+            ifaces: crate::mib::interfaces::load_interfaces(
+                Path::new("/proc/net/dev"),
+                Path::new("/sys/class/net"),
+            ),
         }
     }
 }
@@ -45,6 +50,10 @@ impl MibSources for LiveSources {
 
     fn config(&self) -> &SnmpConfig {
         &self.config
+    }
+
+    fn interfaces(&self) -> &[crate::mib::interfaces::IfRow] {
+        &self.ifaces
     }
 }
 
@@ -239,6 +248,7 @@ mod tests {
     struct Fixed {
         cfg: SnmpConfig,
         ticks: u32,
+        ifaces: Vec<crate::mib::interfaces::IfRow>,
     }
 
     impl MibSources for Fixed {
@@ -247,6 +257,9 @@ mod tests {
         }
         fn config(&self) -> &SnmpConfig {
             &self.cfg
+        }
+        fn interfaces(&self) -> &[crate::mib::interfaces::IfRow] {
+            &self.ifaces
         }
     }
 
@@ -275,7 +288,11 @@ mod tests {
             sys_name: "cam-1".into(),
             ..Default::default()
         };
-        let sources = Fixed { cfg, ticks: 1 };
+        let sources = Fixed {
+            cfg,
+            ticks: 1,
+            ifaces: Vec::new(),
+        };
         let req = get_sysname_bytes("wrong");
         assert!(handle_datagram(&req, &sources).is_none());
     }
@@ -287,7 +304,11 @@ mod tests {
             sys_name: "cam-1".into(),
             ..Default::default()
         };
-        let sources = Fixed { cfg, ticks: 1 };
+        let sources = Fixed {
+            cfg,
+            ticks: 1,
+            ifaces: Vec::new(),
+        };
         let req = get_sysname_bytes("public");
         let resp = handle_datagram(&req, &sources).expect("response");
         let msg = SnmpMessage::parse(&resp).unwrap();
@@ -305,6 +326,7 @@ mod tests {
         let sources = Fixed {
             cfg: SnmpConfig::default(),
             ticks: 1,
+            ifaces: Vec::new(),
         };
         assert!(handle_datagram(&[0xff, 0x00], &sources).is_none());
     }
