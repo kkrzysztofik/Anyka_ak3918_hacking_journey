@@ -216,7 +216,11 @@ mod tests {
     #[test]
     fn test_sighup_agent_refuses_process_group_pids() {
         let dir = tempfile::tempdir().unwrap();
-        for (name, body) in [("zero.pid", "0\n"), ("all.pid", "-1\n"), ("neg.pid", "-4242\n")] {
+        for (name, body) in [
+            ("zero.pid", "0\n"),
+            ("all.pid", "-1\n"),
+            ("neg.pid", "-4242\n"),
+        ] {
             let path = dir.path().join(name);
             std::fs::write(&path, body).unwrap();
             // Must be a no-op, never a kill(2) broadcast.
@@ -237,7 +241,14 @@ mod tests {
             .collect();
         assert_eq!(
             keys,
-            ["enabled", "port", "community", "sys_contact", "sys_name", "sys_location"],
+            [
+                "enabled",
+                "port",
+                "community",
+                "sys_contact",
+                "sys_name",
+                "sys_location"
+            ],
             "keys changed: update snmp-agent/src/config.rs SnmpConfig to match"
         );
     }

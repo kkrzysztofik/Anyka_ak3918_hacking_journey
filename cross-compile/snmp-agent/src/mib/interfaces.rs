@@ -40,7 +40,7 @@ pub fn parse_proc_net_dev(text: &str) -> Vec<IfRow> {
         rows.push(IfRow {
             index: (rows.len() as u32) + 1,
             descr: name,
-            if_type: 1,      // other
+            if_type: 1, // other
             mtu: 1500,
             phys_address: Vec::new(),
             admin_status: 1, // ifAdminStatus has no "unknown"; up is the only sane default
@@ -53,7 +53,9 @@ pub fn parse_proc_net_dev(text: &str) -> Vec<IfRow> {
 }
 
 fn read_trim(path: &Path) -> Option<String> {
-    std::fs::read_to_string(path).ok().map(|s| s.trim().to_string())
+    std::fs::read_to_string(path)
+        .ok()
+        .map(|s| s.trim().to_string())
 }
 
 /// RFC 2863 ifOperStatus from the sysfs `operstate` string.
@@ -72,10 +74,10 @@ fn oper_status_code(s: &str) -> i32 {
 /// ifType from the sysfs ARPHRD value.
 fn if_type_code(arphrd: u32) -> i32 {
     match arphrd {
-        1 => 6,                // ARPHRD_ETHER -> ethernetCsmacd (wifi presents as this too)
-        772 => 24,             // ARPHRD_LOOPBACK -> softwareLoopback
+        1 => 6,          // ARPHRD_ETHER -> ethernetCsmacd (wifi presents as this too)
+        772 => 24,       // ARPHRD_LOOPBACK -> softwareLoopback
         801..=803 => 71, // ARPHRD_IEEE80211* -> ieee80211
-        _ => 1,                // other
+        _ => 1,          // other
     }
 }
 
@@ -333,11 +335,9 @@ mod tests {
     #[test]
     fn test_load_interfaces_missing_file_empty() {
         let dir = tempfile::tempdir().unwrap();
-        assert!(load_interfaces(
-            &dir.path().join("missing"),
-            &dir.path().join("no-sysfs")
-        )
-        .is_empty());
+        assert!(
+            load_interfaces(&dir.path().join("missing"), &dir.path().join("no-sysfs")).is_empty()
+        );
     }
 
     #[test]
@@ -379,7 +379,10 @@ mod tests {
         assert_eq!(rows[1].oper_status, 2);
         assert_eq!(rows[1].admin_status, 2); // 0x1002 carries no IFF_UP
         assert_eq!(rows[1].if_type, 6);
-        assert_eq!(rows[1].phys_address, vec![0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff]);
+        assert_eq!(
+            rows[1].phys_address,
+            vec![0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff]
+        );
         // wlan0 is up
         assert_eq!(rows[2].oper_status, 1);
         assert_eq!(rows[2].admin_status, 1);
@@ -413,5 +416,4 @@ mod tests {
         assert_eq!(rows[0].oper_status, 4); // unknown, never a fabricated "up"
         assert_eq!(rows[0].mtu, 1500);
     }
-
 }

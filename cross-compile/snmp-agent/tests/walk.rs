@@ -63,10 +63,17 @@ async fn test_full_walk_is_ordered_and_terminates() {
     let mut cursor = Oid::from_slice(&[1, 3]).unwrap();
     let mut seen: Vec<(Oid, SnmpValue)> = Vec::new();
     for _ in 0..500 {
-        let resp = ask(&client, port, &request(PduType::GetNextRequest, cursor.clone()))
-            .await
-            .expect("GETNEXT must be answered");
-        assert_eq!(resp.pdu.error_status, 0, "v2c reports misses in the varbind");
+        let resp = ask(
+            &client,
+            port,
+            &request(PduType::GetNextRequest, cursor.clone()),
+        )
+        .await
+        .expect("GETNEXT must be answered");
+        assert_eq!(
+            resp.pdu.error_status, 0,
+            "v2c reports misses in the varbind"
+        );
         let vb = resp.pdu.variable_bindings.into_iter().next().unwrap();
         if vb.value == SnmpValue::EndOfMibView {
             break;
@@ -81,9 +88,12 @@ async fn test_full_walk_is_ordered_and_terminates() {
         seen.push((vb.name, vb.value));
     }
 
-    assert!(seen.len() >= 7, "at least the system group should be present");
+    assert!(
+        seen.len() >= 7,
+        "at least the system group should be present"
+    );
     assert_eq!(
-        seen[0].0 .0,
+        seen[0].0.0,
         vec![1, 3, 6, 1, 2, 1, 1, 1, 0],
         "walk starts at sysDescr.0"
     );

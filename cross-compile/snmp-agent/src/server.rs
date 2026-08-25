@@ -538,7 +538,9 @@ mod tests {
         let port = holder.local_addr().unwrap().port();
         std::fs::write(
             &cfg_path,
-            format!("enabled = true\nport = {port}\ncommunity = \"public\"\nsys_name = \"retry\"\n"),
+            format!(
+                "enabled = true\nport = {port}\ncommunity = \"public\"\nsys_name = \"retry\"\n"
+            ),
         )
         .unwrap();
 

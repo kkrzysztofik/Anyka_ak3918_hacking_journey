@@ -296,17 +296,23 @@ mod tests {
         );
     }
 
-#[test]
+    #[test]
     fn test_encode_unsigned_never_strips_ff() {
         assert_eq!(encode_unsigned(0), vec![0x00]);
         assert_eq!(encode_unsigned(200), vec![0x00, 0xc8]);
         assert_eq!(encode_unsigned(0x7fff_ffff), vec![0x7f, 0xff, 0xff, 0xff]);
         // The bug: encode_integer(-1) would give [0xff] and read back as 255.
-        assert_eq!(encode_unsigned(u32::MAX), vec![0x00, 0xff, 0xff, 0xff, 0xff]);
-        assert_eq!(encode_unsigned(0xffff_ff00), vec![0x00, 0xff, 0xff, 0xff, 0x00]);
+        assert_eq!(
+            encode_unsigned(u32::MAX),
+            vec![0x00, 0xff, 0xff, 0xff, 0xff]
+        );
+        assert_eq!(
+            encode_unsigned(0xffff_ff00),
+            vec![0x00, 0xff, 0xff, 0xff, 0x00]
+        );
     }
 
-#[test]
+    #[test]
     fn test_decode_rejects_oversized_base128_arc() {
         // Six continuation bytes: more than 32 bits of payload.
         let bytes = [0x2b, 0x8f, 0xff, 0xff, 0xff, 0xff, 0x7f];

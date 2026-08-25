@@ -395,7 +395,7 @@ mod tests {
         ));
     }
 
-#[test]
+    #[test]
     fn test_counter32_max_round_trips() {
         let oid = Oid::from_slice(&[1, 3, 6, 1, 2, 1, 2, 2, 1, 10, 1]).unwrap();
         let msg = SnmpMessage {
@@ -419,7 +419,7 @@ mod tests {
         );
     }
 
-#[test]
+    #[test]
     fn test_exception_values_round_trip() {
         for (value, tag) in [
             (SnmpValue::NoSuchObject, 0x80u8),

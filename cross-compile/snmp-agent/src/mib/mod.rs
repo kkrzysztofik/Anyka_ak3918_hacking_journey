@@ -70,8 +70,7 @@ pub fn handle_varbinds(
         // RFC 3416: a missing object is an exception *in the varbind*, so one
         // bad OID does not cost the caller the other nine.
         let (name, value) = if pdu_type == PduType::GetRequest {
-            resolve_get(&vb.name, sources)
-                .unwrap_or_else(|| (vb.name.clone(), miss_kind(&vb.name)))
+            resolve_get(&vb.name, sources).unwrap_or_else(|| (vb.name.clone(), miss_kind(&vb.name)))
         } else {
             resolve_get_next(&vb.name, sources)
                 .unwrap_or_else(|| (vb.name.clone(), SnmpValue::EndOfMibView))
@@ -238,7 +237,10 @@ mod tests {
             },
         ];
         let (status, index, out) = handle_varbinds(PduType::GetRequest, &binds, &sources());
-        assert_eq!(status, ERR_NO_ERROR, "one bad OID must not fail the whole PDU");
+        assert_eq!(
+            status, ERR_NO_ERROR,
+            "one bad OID must not fail the whole PDU"
+        );
         assert_eq!(index, 0);
         assert!(
             matches!(out[0].value, SnmpValue::OctetString(_)),
