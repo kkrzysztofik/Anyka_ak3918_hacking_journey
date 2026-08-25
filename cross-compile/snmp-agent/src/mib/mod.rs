@@ -140,4 +140,57 @@ mod tests {
         assert_eq!(status, ERR_NOT_WRITABLE);
         assert_eq!(index, 1);
     }
+
+    #[test]
+    fn test_get_all_system_scalars_and_hostname_fallback() {
+        let src = sources();
+        for arc in 1..=7 {
+            let oid = Oid::from_slice(&[1, 3, 6, 1, 2, 1, 1, arc, 0]).unwrap();
+            assert!(system::get(&oid, &src).is_some(), "scalar {arc}");
+        }
+        assert!(
+            system::get(
+                &Oid::from_slice(&[1, 3, 6, 1, 2, 1, 1, 9, 0]).unwrap(),
+                &src
+            )
+            .is_none()
+        );
+
+        let empty_name = FixedSources {
+            cfg: SnmpConfig {
+                sys_name: String::new(),
+                ..Default::default()
+            },
+            ticks: 1,
+        };
+        let oid = Oid::from_slice(&[1, 3, 6, 1, 2, 1, 1, 5, 0]).unwrap();
+        let (_, val) = system::get(&oid, &empty_name).unwrap();
+        match val {
+            SnmpValue::OctetString(b) => assert!(!b.is_empty()),
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_getnext_and_nosuchname_paths() {
+        let binds = vec![VarBind {
+            name: Oid::from_slice(&[1, 3, 6, 1, 2, 1, 1]).unwrap(),
+            value: SnmpValue::Null,
+        }];
+        let (status, _, out) = handle_varbinds(PduType::GetNextRequest, &binds, &sources());
+        assert_eq!(status, ERR_NO_ERROR);
+        assert_eq!(out[0].name.0[7], 1);
+
+        let (status, index, _) = handle_varbinds(PduType::GetResponse, &binds, &sources());
+        assert_eq!(status, ERR_NO_SUCH_NAME);
+        assert_eq!(index, 1);
+
+        let missing = vec![VarBind {
+            name: Oid::from_slice(&[1, 3, 6, 1, 2, 1, 1, 99, 0]).unwrap(),
+            value: SnmpValue::Null,
+        }];
+        let (status, index, _) = handle_varbinds(PduType::GetRequest, &missing, &sources());
+        assert_eq!(status, ERR_NO_SUCH_NAME);
+        assert_eq!(index, 1);
+    }
 }

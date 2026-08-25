@@ -185,4 +185,62 @@ mod tests {
         let (next, _) = get_next_with_rows(&oid, &rows).unwrap();
         assert_eq!(next, if_number_oid());
     }
+
+    #[test]
+    fn test_parse_skips_blank_and_malformed_lines() {
+        let text = "Inter-|   Receive\n face |bytes\n\nlo: 1 0 0 0 0 0 0 0 2 0\nbadline\neth0: 1\nwlan0: 10 0 0 0 0 0 0 0 20 0 0\n";
+        let rows = parse_proc_net_dev(text);
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].descr, "lo");
+        assert_eq!(rows[1].descr, "wlan0");
+    }
+
+    #[test]
+    fn test_load_interfaces_missing_file_empty() {
+        assert!(load_interfaces("/no/such/proc_net_dev").is_empty());
+    }
+
+    #[test]
+    fn test_get_table_columns_and_unknown_oid() {
+        let rows = fixture_rows();
+        let (_, v) = get_with_rows(&table_oid(1, 1), &rows).unwrap();
+        assert_eq!(v, SnmpValue::Integer(1));
+        let (_, v) = get_with_rows(&table_oid(3, 1), &rows).unwrap();
+        assert_eq!(v, SnmpValue::Integer(6));
+        let (_, v) = get_with_rows(&table_oid(5, 1), &rows).unwrap();
+        assert_eq!(v, SnmpValue::Gauge32(0));
+        let (_, v) = get_with_rows(&table_oid(6, 1), &rows).unwrap();
+        assert_eq!(v, SnmpValue::OctetString(vec![]));
+        let (_, v) = get_with_rows(&table_oid(7, 1), &rows).unwrap();
+        assert_eq!(v, SnmpValue::Integer(1));
+        let (_, v) = get_with_rows(&table_oid(8, 1), &rows).unwrap();
+        assert_eq!(v, SnmpValue::Integer(1));
+        let (_, v) = get_with_rows(&table_oid(16, 2), &rows).unwrap();
+        assert_eq!(v, SnmpValue::Counter32(20000));
+        assert!(get_with_rows(&Oid::from_slice(&[1, 2, 3]).unwrap(), &rows).is_none());
+        assert!(get_with_rows(&table_oid(2, 99), &rows).is_none());
+        assert!(get_next_with_rows(&table_oid(16, 3), &rows).is_none());
+    }
+
+    #[test]
+    fn test_live_proc_get_if_number_smoke() {
+        // Exercise /proc/net_dev loaders on the CI host.
+        let oid = if_number_oid();
+        struct Dummy;
+        impl MibSources for Dummy {
+            fn uptime_ticks(&self) -> u32 {
+                0
+            }
+            fn config(&self) -> &crate::config::SnmpConfig {
+                use std::sync::LazyLock;
+                static CFG: LazyLock<crate::config::SnmpConfig> =
+                    LazyLock::new(crate::config::SnmpConfig::default);
+                &CFG
+            }
+        }
+        let got = get(&oid, &Dummy);
+        assert!(got.is_some());
+        let prefix = Oid::from_slice(&[1, 3, 6, 1, 2, 1, 2]).unwrap();
+        assert!(get_next(&prefix, &Dummy).is_some());
+    }
 }

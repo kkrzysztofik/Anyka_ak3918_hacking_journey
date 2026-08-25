@@ -352,4 +352,204 @@ sys_name = "udp-cam"
             SnmpValue::OctetString(b"udp-cam".to_vec())
         );
     }
+
+    #[test]
+    fn test_live_sources_uptime_and_config() {
+        let cfg = SnmpConfig {
+            sys_name: "live".into(),
+            ..Default::default()
+        };
+        let sources = LiveSources::new(cfg);
+        assert_eq!(sources.config().sys_name, "live");
+        std::thread::sleep(Duration::from_millis(15));
+        assert!(sources.uptime_ticks() >= 1);
+    }
+
+    #[test]
+    fn test_write_and_remove_pidfile() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("nested").join("agent.pid");
+        write_pidfile(&path).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(text.trim(), std::process::id().to_string());
+        remove_pidfile(&path);
+        assert!(!path.exists());
+    }
+
+    async fn wait_for_file(path: &Path, timeout: Duration) {
+        let start = std::time::Instant::now();
+        while start.elapsed() < timeout {
+            if path.exists() {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        panic!("timed out waiting for {}", path.display());
+    }
+
+    /// Serialize `run()` tests: they install a process-wide SIGHUP handler.
+    async fn run_test_lock() -> tokio::sync::MutexGuard<'static, ()> {
+        static LOCK: std::sync::OnceLock<tokio::sync::Mutex<()>> = std::sync::OnceLock::new();
+        LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
+            .lock()
+            .await
+    }
+
+    fn sighup_self_from_pidfile(pidfile: &Path) {
+        let pid: u32 = std::fs::read_to_string(pidfile)
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap();
+        let status = std::process::Command::new("kill")
+            .args(["-HUP", &pid.to_string()])
+            .status()
+            .unwrap();
+        assert!(status.success());
+    }
+
+    #[tokio::test]
+    async fn test_run_serves_udp_get_reload_and_disable() {
+        let _guard = run_test_lock().await;
+        let dir = tempfile::tempdir().unwrap();
+        let cfg_path = dir.path().join("snmp.toml");
+        let pidfile = dir.path().join("snmp-agent.pid");
+
+        let probe = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let port = probe.local_addr().unwrap().port();
+        drop(probe);
+
+        std::fs::write(
+            &cfg_path,
+            format!(
+                "enabled = true\nport = {port}\ncommunity = \"public\"\nsys_name = \"run-cam\"\n"
+            ),
+        )
+        .unwrap();
+
+        let run_cfg = cfg_path.clone();
+        let run_pid = pidfile.clone();
+        let handle = tokio::spawn(async move {
+            let _ = run(run_cfg, run_pid).await;
+        });
+
+        wait_for_file(&pidfile, Duration::from_secs(2)).await;
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        let client = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let req = get_sysname_bytes("public");
+        client.send_to(&req, ("127.0.0.1", port)).await.unwrap();
+        let mut buf = [0u8; 2048];
+        let (n, _) = tokio::time::timeout(Duration::from_secs(2), client.recv_from(&mut buf))
+            .await
+            .expect("agent response timeout")
+            .unwrap();
+        let msg = SnmpMessage::parse(&buf[..n]).unwrap();
+        assert_eq!(
+            msg.pdu.variable_bindings[0].value,
+            SnmpValue::OctetString(b"run-cam".to_vec())
+        );
+
+        // Same-bind reload (enabled + port unchanged).
+        std::fs::write(
+            &cfg_path,
+            format!(
+                "enabled = true\nport = {port}\ncommunity = \"public\"\nsys_name = \"run-cam2\"\n"
+            ),
+        )
+        .unwrap();
+        sighup_self_from_pidfile(&pidfile);
+        tokio::time::sleep(Duration::from_millis(80)).await;
+        client.send_to(&req, ("127.0.0.1", port)).await.unwrap();
+        let (n, _) = tokio::time::timeout(Duration::from_secs(2), client.recv_from(&mut buf))
+            .await
+            .expect("same-bind response timeout")
+            .unwrap();
+        assert_eq!(
+            SnmpMessage::parse(&buf[..n]).unwrap().pdu.variable_bindings[0].value,
+            SnmpValue::OctetString(b"run-cam2".to_vec())
+        );
+
+        // Bad config on reload keeps last-good.
+        std::fs::write(&cfg_path, "port = \"nope\"\n").unwrap();
+        sighup_self_from_pidfile(&pidfile);
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        // Disable on SIGHUP.
+        std::fs::write(
+            &cfg_path,
+            format!(
+                "enabled = false\nport = {port}\ncommunity = \"public\"\nsys_name = \"run-cam2\"\n"
+            ),
+        )
+        .unwrap();
+        sighup_self_from_pidfile(&pidfile);
+        tokio::time::sleep(Duration::from_millis(80)).await;
+
+        // Re-enable (rebind after socket cleared).
+        std::fs::write(
+            &cfg_path,
+            format!(
+                "enabled = true\nport = {port}\ncommunity = \"public\"\nsys_name = \"run-cam3\"\n"
+            ),
+        )
+        .unwrap();
+        sighup_self_from_pidfile(&pidfile);
+        tokio::time::sleep(Duration::from_millis(80)).await;
+        client.send_to(&req, ("127.0.0.1", port)).await.unwrap();
+        let (n, _) = tokio::time::timeout(Duration::from_secs(2), client.recv_from(&mut buf))
+            .await
+            .expect("rebind response timeout")
+            .unwrap();
+        assert_eq!(
+            SnmpMessage::parse(&buf[..n]).unwrap().pdu.variable_bindings[0].value,
+            SnmpValue::OctetString(b"run-cam3".to_vec())
+        );
+
+        handle.abort();
+        let _ = handle.await;
+    }
+
+    #[tokio::test]
+    async fn test_run_starts_disabled_and_bind_failure_is_non_fatal() {
+        let _guard = run_test_lock().await;
+        let dir = tempfile::tempdir().unwrap();
+        let cfg_path = dir.path().join("snmp.toml");
+        let pidfile = dir.path().join("disabled.pid");
+
+        std::fs::write(
+            &cfg_path,
+            "enabled = false\nport = 161\ncommunity = \"public\"\n",
+        )
+        .unwrap();
+        let run_cfg = cfg_path.clone();
+        let run_pid = pidfile.clone();
+        let handle = tokio::spawn(async move {
+            let _ = run(run_cfg, run_pid).await;
+        });
+        wait_for_file(&pidfile, Duration::from_secs(2)).await;
+        handle.abort();
+        let _ = handle.await;
+
+        // Bind failure: hold the port, then start agent on it.
+        let holder = UdpSocket::bind("0.0.0.0:0").await.unwrap();
+        let port = holder.local_addr().unwrap().port();
+        let cfg_path = dir.path().join("bindfail.toml");
+        let pidfile = dir.path().join("bindfail.pid");
+        std::fs::write(
+            &cfg_path,
+            format!("enabled = true\nport = {port}\ncommunity = \"public\"\n"),
+        )
+        .unwrap();
+        let run_cfg = cfg_path.clone();
+        let run_pid = pidfile.clone();
+        let handle = tokio::spawn(async move {
+            let _ = run(run_cfg, run_pid).await;
+        });
+        wait_for_file(&pidfile, Duration::from_secs(2)).await;
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        handle.abort();
+        let _ = handle.await;
+        drop(holder);
+    }
 }

@@ -157,4 +157,52 @@ mod tests {
         let path = dir.path().join("missing.toml");
         assert_eq!(SnmpSettings::read(&path).unwrap(), SnmpSettings::default());
     }
+
+    #[test]
+    fn test_read_write_reject_port_zero_and_update_at() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("snmp.toml");
+        let bad = SnmpSettings {
+            port: 0,
+            ..Default::default()
+        };
+        assert!(bad.write(&path).is_err());
+        std::fs::write(&path, "port = 0\n").unwrap();
+        assert!(SnmpSettings::read(&path).is_err());
+
+        SnmpSettings::default().write(&path).unwrap();
+        SnmpSettings::update_at(&path, |s| {
+            s.enabled = false;
+            s.community = "monitor".into();
+            s.sys_contact = "ops".into();
+            s.sys_location = "lab".into();
+        })
+        .unwrap();
+        let got = SnmpSettings::read(&path).unwrap();
+        assert!(!got.enabled);
+        assert_eq!(got.community, "monitor");
+        assert_eq!(got.sys_contact, "ops");
+        assert_eq!(got.sys_location, "lab");
+    }
+
+    #[test]
+    fn test_config_path_override_and_sighup_agent() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("ovr.toml");
+        set_config_path_for_test(Some(path.clone()));
+        assert_eq!(config_path(), path);
+        set_config_path_for_test(None);
+        assert_eq!(config_path(), PathBuf::from(DEFAULT_CONFIG_PATH));
+
+        let missing = dir.path().join("no.pid");
+        assert!(sighup_agent(&missing).is_ok());
+
+        let bad = dir.path().join("bad.pid");
+        std::fs::write(&bad, "not-a-pid\n").unwrap();
+        assert!(sighup_agent(&bad).is_err());
+
+        let stale = dir.path().join("stale.pid");
+        std::fs::write(&stale, "2147483646\n").unwrap(); // unlikely live pid → ESRCH
+        assert!(sighup_agent(&stale).is_ok());
+    }
 }

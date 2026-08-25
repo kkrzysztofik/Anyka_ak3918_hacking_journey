@@ -210,4 +210,72 @@ mod tests {
         let decoded = Oid::decode(&encoded).expect("decode");
         assert_eq!(decoded, oid);
     }
+
+    #[test]
+    fn test_oid_from_slice_rejects_short_and_invalid_first_arc() {
+        assert_eq!(Oid::from_slice(&[1]), Err(BerError::InvalidOid));
+        assert_eq!(Oid::from_slice(&[3, 1]), Err(BerError::InvalidOid));
+        assert_eq!(Oid::from_slice(&[1, 40]), Err(BerError::InvalidOid));
+    }
+
+    #[test]
+    fn test_oid_encode_rejects_empty_and_overflow_first_byte() {
+        assert_eq!(Oid(vec![]).encode(), Err(BerError::InvalidOid));
+        assert_eq!(Oid(vec![2, 200]).encode(), Err(BerError::InvalidOid));
+    }
+
+    #[test]
+    fn test_oid_decode_empty_and_truncated_base128() {
+        assert_eq!(Oid::decode(&[]), Err(BerError::InvalidOid));
+        assert_eq!(Oid::decode(&[0x2b, 0x81]), Err(BerError::Truncated));
+    }
+
+    #[test]
+    fn test_oid_round_trip_with_large_arc() {
+        let oid = Oid::from_slice(&[1, 3, 6, 1, 4, 1, 99999]).unwrap();
+        let encoded = oid.encode().unwrap();
+        assert!(encoded.len() > 5);
+        assert_eq!(Oid::decode(&encoded).unwrap(), oid);
+    }
+
+    #[test]
+    fn test_read_tlv_truncated_and_long_length() {
+        assert_eq!(read_tlv(&[0x04]), Err(BerError::Truncated));
+        assert_eq!(read_tlv(&[0x04, 0x02, 0x00]), Err(BerError::Truncated));
+        // Long-form length: 0x81 0x01 means length=1
+        let (tag, content, rest) = read_tlv(&[0x04, 0x81, 0x01, b'x', 0xff]).unwrap();
+        assert_eq!(tag, TAG_OCTET_STRING);
+        assert_eq!(content, b"x");
+        assert_eq!(rest, &[0xff]);
+        assert_eq!(read_length(&[]), Err(BerError::Truncated));
+        assert_eq!(read_length(&[0x80]), Err(BerError::Unsupported));
+        assert_eq!(read_length(&[0x85, 0, 0, 0, 0]), Err(BerError::Unsupported));
+    }
+
+    #[test]
+    fn test_write_tlv_long_length_form() {
+        let content = vec![0u8; 200];
+        let mut out = Vec::new();
+        write_tlv(TAG_OCTET_STRING, &content, &mut out);
+        assert_eq!(out[0], TAG_OCTET_STRING);
+        assert_eq!(out[1], 0x81);
+        assert_eq!(out[2], 200);
+        assert_eq!(&out[3..], content.as_slice());
+    }
+
+    #[test]
+    fn test_decode_encode_integer_edge_cases() {
+        assert_eq!(decode_integer(&[]), Err(BerError::Unsupported));
+        assert_eq!(decode_integer(&[0, 0, 0, 0, 1]), Err(BerError::Unsupported));
+        assert_eq!(decode_integer(&[0xff]).unwrap(), -1);
+        assert_eq!(encode_integer(-1), vec![0xff]);
+        assert_eq!(encode_integer(128), vec![0x00, 0x80]);
+        let (content, rest) = expect_tag(&[0x02, 0x01, 0x07, 0xaa], TAG_INTEGER).unwrap();
+        assert_eq!(decode_integer(content).unwrap(), 7);
+        assert_eq!(rest, &[0xaa]);
+        assert_eq!(
+            expect_tag(&[0x04, 0x00], TAG_INTEGER),
+            Err(BerError::UnexpectedTag)
+        );
+    }
 }

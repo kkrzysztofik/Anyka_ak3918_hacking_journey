@@ -296,4 +296,78 @@ mod tests {
         let again = SnmpMessage::parse(&encoded).expect("re-parse");
         assert_eq!(again, msg);
     }
+
+    #[test]
+    fn test_encode_round_trips_all_value_types() {
+        let oid = Oid::from_slice(&[1, 3, 6, 1, 2, 1, 1, 2, 0]).unwrap();
+        let msg = SnmpMessage {
+            version: SNMP_V2C_VERSION,
+            community: "public".into(),
+            pdu: Pdu {
+                pdu_type: PduType::GetResponse,
+                request_id: 9,
+                error_status: 0,
+                error_index: 0,
+                variable_bindings: vec![
+                    VarBind {
+                        name: oid.clone(),
+                        value: SnmpValue::ObjectId(oid.clone()),
+                    },
+                    VarBind {
+                        name: oid.clone(),
+                        value: SnmpValue::Integer(-5),
+                    },
+                    VarBind {
+                        name: oid.clone(),
+                        value: SnmpValue::OctetString(b"x".to_vec()),
+                    },
+                    VarBind {
+                        name: oid.clone(),
+                        value: SnmpValue::Counter32(42),
+                    },
+                    VarBind {
+                        name: oid.clone(),
+                        value: SnmpValue::Gauge32(7),
+                    },
+                    VarBind {
+                        name: oid.clone(),
+                        value: SnmpValue::TimeTicks(100),
+                    },
+                ],
+            },
+        };
+        let encoded = msg.encode().unwrap();
+        let again = SnmpMessage::parse(&encoded).unwrap();
+        assert_eq!(again, msg);
+    }
+
+    #[test]
+    fn test_pdu_type_tags_cover_getnext_and_set() {
+        assert_eq!(PduType::GetNextRequest.tag(), 0xa1);
+        assert_eq!(PduType::SetRequest.tag(), 0xa3);
+        assert_eq!(PduType::from_tag(0xa1), Some(PduType::GetNextRequest));
+        assert_eq!(PduType::from_tag(0xa3), Some(PduType::SetRequest));
+        assert_eq!(PduType::from_tag(0x99), None);
+    }
+
+    #[test]
+    fn test_parse_rejects_trailing_bytes_and_bad_community_utf8() {
+        let mut bytes = hand_built_get_sysdescr();
+        bytes.push(0x00);
+        assert!(matches!(
+            SnmpMessage::parse(&bytes),
+            Err(PduError::Malformed)
+        ));
+
+        let mut bad = hand_built_get_sysdescr();
+        // community bytes start at index 7 for "public"
+        bad[7] = 0xff;
+        assert!(matches!(SnmpMessage::parse(&bad), Err(PduError::Malformed)));
+    }
+
+    #[test]
+    fn test_decode_value_rejects_unknown_tag_and_negative_counter() {
+        assert!(matches!(decode_value(0x99, &[]), Err(PduError::Malformed)));
+        assert!(matches!(decode_u32_app(&[0xff]), Err(PduError::Malformed)));
+    }
 }
