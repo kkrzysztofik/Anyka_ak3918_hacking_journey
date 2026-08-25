@@ -119,6 +119,13 @@ pub fn sighup_agent(pidfile: &Path) -> Result<(), std::io::Error> {
         .trim()
         .parse()
         .map_err(|e| std::io::Error::other(format!("invalid snmp pidfile: {e}")))?;
+    // kill(2) overloads its first argument: 0 means "my whole process group" and
+    // negative values mean a process group or, for -1, every process we may
+    // signal. onvif-rust is root on the camera, so a truncated pidfile must be
+    // inert rather than a broadcast.
+    if pid <= 1 {
+        return Ok(());
+    }
     // SAFETY: libc kill with a pid from our pidfile; ESRCH is treated as Ok.
     let rc = unsafe { libc::kill(pid, libc::SIGHUP) };
     if rc == 0 {
@@ -204,5 +211,16 @@ mod tests {
         let stale = dir.path().join("stale.pid");
         std::fs::write(&stale, "2147483646\n").unwrap(); // unlikely live pid → ESRCH
         assert!(sighup_agent(&stale).is_ok());
+    }
+
+    #[test]
+    fn test_sighup_agent_refuses_process_group_pids() {
+        let dir = tempfile::tempdir().unwrap();
+        for (name, body) in [("zero.pid", "0\n"), ("all.pid", "-1\n"), ("neg.pid", "-4242\n")] {
+            let path = dir.path().join(name);
+            std::fs::write(&path, body).unwrap();
+            // Must be a no-op, never a kill(2) broadcast.
+            assert!(sighup_agent(&path).is_ok(), "{name} must be ignored");
+        }
     }
 }
