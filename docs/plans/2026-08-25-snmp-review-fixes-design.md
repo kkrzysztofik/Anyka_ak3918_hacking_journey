@@ -1,7 +1,7 @@
 # SNMP Review Fixes — Design
 
 Date: 2026-08-25
-Status: approved (design)
+Status: implemented
 Branch / worktree: `feat/snmp` @ `.worktrees/snmp`
 Follows: `docs/plans/2026-08-25-snmp-integration-design.md`, `docs/plans/2026-08-25-snmp-integration.md`
 
@@ -227,3 +227,16 @@ case a unit test rather than something only a live walk catches.
 3. `snmpwalk` of `1.3.6.1.2.1.2` reports a down interface as `down(2)`.
 4. A `GetResponse` sent to the agent draws no reply.
 5. WebUI lint, type-check, and tests green with real SNMP coverage.
+
+## Verification (2026-08-25)
+
+Host gates: fmt/clippy/tests green for `snmp-agent` / `onvif-rust` / `anyka-init`;
+ten cold `onvif-rust` runs `EXIT=0 sighup=0`; WebUI lint/type-check/1018 tests/
+prettier green; ARM `snmp-agent` is EABI5 uClibc-stripped.
+
+Host `snmpwalk` (127.0.0.1:16161): system group + `ifOperStatus` matched kernel
+`operstate`; `snmpset` returned `notWritable` and left `sysName` unchanged.
+
+Device (192.168.2.198): deployed release `snmp-agent.bin` over nc and restarted.
+`ifOperStatus` matched sysfs (`lo=unknown(4)`, `wlan0=up(1)`, `p2p0=down(2)`).
+`sysUpTime` stayed ~6h across an agent kill/respawn (reads `/proc/uptime`).
