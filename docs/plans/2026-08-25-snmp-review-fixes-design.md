@@ -77,10 +77,23 @@ impl MibSources for Snapshot { /* three getters, no IO */ }
 
 `handle_datagram` takes `&Agent` and captures one `Snapshot` per datagram.
 
-Two consequences beyond testability. A 30-varbind walk now observes one instant
-instead of thirty, so counters cannot move mid-walk. And `LiveSources` /
-`Arc<RwLock<…>>` disappear: the loop is single-tasked and nothing was ever
-shared.
+Two consequences beyond testability. A multi-varbind request now observes one
+instant instead of one per varbind, so counters cannot move mid-request. And
+`LiveSources` / `Arc<RwLock<…>>` disappear: the loop is single-tasked and nothing
+was ever shared.
+
+**This costs IO rather than saving it, and that is the intended trade.** An
+earlier draft of this design claimed one sweep per datagram "instead of one per
+varbind", implying a reduction. That is wrong for the dominant workload:
+`snmpwalk` sends exactly one varbind per datagram, so per-datagram cost rises
+from a single `/proc/net/dev` read to `2 + 6×N` reads — about 20 on the camera's
+three interfaces, 50 on an 8-interface host. Measured, a full 89-OID walk still
+completes in 113 ms, and polling happens every 30–300 s, so the cost is bought
+cheaply. What it buys is the consistent instant and, more importantly, a seam
+that makes `ifOperStatus` expressible as a failing test.
+
+A SET is exempt: it is refused before any varbind is resolved, so
+`handle_datagram` hands it a config-only `bare_snapshot()` and touches no files.
 
 ### `IfRow`
 
