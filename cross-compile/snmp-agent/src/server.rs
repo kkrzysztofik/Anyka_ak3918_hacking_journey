@@ -66,6 +66,16 @@ impl Agent {
             ),
         }
     }
+
+    /// Config-only view, for requests that are answered without consulting the
+    /// device — today only SET, which is refused before any value is resolved.
+    fn bare_snapshot(&self) -> Snapshot {
+        Snapshot {
+            config: self.config.clone(),
+            uptime_ticks: 0,
+            ifaces: Vec::new(),
+        }
+    }
 }
 
 fn proc_uptime_ticks(path: &Path) -> Option<u32> {
@@ -95,7 +105,13 @@ pub fn handle_datagram(bytes: &[u8], agent: &Agent) -> Option<Vec<u8>> {
         return None;
     }
 
-    let snapshot = agent.snapshot();
+    // A SET is refused before any varbind is resolved, so reading /proc and
+    // sweeping sysfs for it is pure waste on every such packet.
+    let snapshot = if msg.pdu.pdu_type == PduType::SetRequest {
+        agent.bare_snapshot()
+    } else {
+        agent.snapshot()
+    };
     let (error_status, error_index, variable_bindings) =
         mib::handle_varbinds(msg.pdu.pdu_type, &msg.pdu.variable_bindings, &snapshot);
 
@@ -334,6 +350,28 @@ mod tests {
             handle_datagram(&req, &agent).is_none(),
             "answering a response lets a spoofed source loop us against ourselves"
         );
+    }
+
+    #[test]
+    fn test_set_is_refused_without_reading_the_device() {
+        // Unreadable roots: a SET must still answer notWritable, because it is
+        // refused before any varbind is resolved and never consults a snapshot.
+        let agent = Agent::with_roots(
+            SnmpConfig {
+                community: "public".into(),
+                ..Default::default()
+            },
+            PathBuf::from("/nonexistent/proc"),
+            PathBuf::from("/nonexistent/sys"),
+        );
+        let mut req = get_sysname_bytes("public");
+        let i = req.iter().position(|&b| b == 0xa0).expect("pdu tag");
+        req[i] = 0xa3; // SetRequest
+
+        let resp = handle_datagram(&req, &agent).expect("SET must be answered");
+        let msg = SnmpMessage::parse(&resp).expect("valid BER");
+        assert_eq!(msg.pdu.error_status, crate::mib::ERR_NOT_WRITABLE);
+        assert_eq!(msg.pdu.error_index, 1);
     }
 
     #[test]
