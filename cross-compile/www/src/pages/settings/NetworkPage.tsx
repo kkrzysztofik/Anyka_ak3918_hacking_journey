@@ -307,9 +307,7 @@ export default function NetworkPage() {
         }
         if (snmpError) {
           throw new Error(
-            snmpLoadError == null
-              ? 'SNMP configuration failed to load'
-              : String(snmpLoadError),
+            snmpLoadError == null ? 'SNMP configuration failed to load' : String(snmpLoadError),
           );
         }
         await runNetworkStep('SNMP configuration failed', () =>
@@ -341,9 +339,7 @@ export default function NetworkPage() {
 
   const onSubmit = (values: NetworkFormData) => {
     const dirtyKeys = Object.keys(form.formState.dirtyFields);
-    setSnmpOnlySave(
-      dirtyKeys.length > 0 && dirtyKeys.every((key) => key.startsWith('snmp')),
-    );
+    setSnmpOnlySave(dirtyKeys.length > 0 && dirtyKeys.every((key) => key.startsWith('snmp')));
     setPendingValues(values);
     setConfirmOpen(true);
   };
@@ -820,10 +816,7 @@ export default function NetworkPage() {
               </SettingsCardHeader>
               <SettingsCardContent className="space-y-[24px]">
                 {snmpError && (
-                  <p
-                    className="text-accent-red text-[13px]"
-                    data-testid="network-snmp-load-error"
-                  >
+                  <p className="text-accent-red text-[13px]" data-testid="network-snmp-load-error">
                     {snmpLoadError instanceof Error
                       ? snmpLoadError.message
                       : 'Failed to load SNMP settings'}
