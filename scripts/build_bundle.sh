@@ -42,7 +42,6 @@ cp -r "${SRC}/onvif/www"          "${STAGE}/onvif/"
 cp "${SRC}/onvif/config.toml"     "${STAGE}/onvif/config.template.toml"
 mkdir -p "${STAGE}/snmp"
 cp "${SRC}/snmp/snmp-agent.bin"   "${STAGE}/snmp/"
-cp "${SRC}/snmp.toml"             "${STAGE}/snmp.toml"
 
 cat > "${STAGE}/manifest.meta" <<EOF
 version=${VERSION}
