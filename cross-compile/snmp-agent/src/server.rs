@@ -1,14 +1,12 @@
 //! UDP SNMPv2c agent loop.
 
 use crate::config::{DEFAULT_CONFIG_PATH, SnmpConfig};
-use crate::mib::{self, MibSources};
+use crate::mib::{self, Snapshot, interfaces};
 use crate::pdu::{Pdu, PduType, SNMP_V2C_VERSION, SnmpMessage};
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::time::Instant;
 use tokio::net::UdpSocket;
-use tokio::sync::RwLock;
 
 /// Default pidfile path for SIGHUP from onvif-rust.
 pub const DEFAULT_PIDFILE: &str = "/tmp/snmp-agent.pid";
@@ -21,58 +19,87 @@ const BIND_RETRY: std::time::Duration = std::time::Duration::from_secs(30);
 #[cfg(test)]
 const BIND_RETRY: std::time::Duration = std::time::Duration::from_millis(50);
 
-/// Live MIB sources backed by config + process start time.
-pub struct LiveSources {
+/// Owns the config and the filesystem roots the MIB is built from.
+pub struct Agent {
     pub config: SnmpConfig,
+    proc_root: PathBuf,
+    sys_class_net: PathBuf,
     started: Instant,
-    ifaces: Vec<crate::mib::interfaces::IfRow>,
 }
 
-impl LiveSources {
+impl Agent {
     pub fn new(config: SnmpConfig) -> Self {
+        Self::with_roots(
+            config,
+            PathBuf::from("/proc"),
+            PathBuf::from("/sys/class/net"),
+        )
+    }
+
+    pub fn with_roots(config: SnmpConfig, proc_root: PathBuf, sys_class_net: PathBuf) -> Self {
         Self {
             config,
+            proc_root,
+            sys_class_net,
             started: Instant::now(),
-            ifaces: crate::mib::interfaces::load_interfaces(
-                Path::new("/proc/net/dev"),
-                Path::new("/sys/class/net"),
+        }
+    }
+
+    /// System uptime in hundredths of a second.
+    ///
+    /// `/proc/uptime`, not process uptime: anyka-init restarts this binary on
+    /// crash, and an NMS reads a sysUpTime reset as a device reboot.
+    fn uptime_ticks(&self) -> u32 {
+        proc_uptime_ticks(&self.proc_root.join("uptime")).unwrap_or_else(|| {
+            let e = self.started.elapsed();
+            (e.as_secs() * 100 + u64::from(e.subsec_millis()) / 10).min(u64::from(u32::MAX)) as u32
+        })
+    }
+
+    pub fn snapshot(&self) -> Snapshot {
+        Snapshot {
+            config: self.config.clone(),
+            uptime_ticks: self.uptime_ticks(),
+            ifaces: interfaces::load_interfaces(
+                &self.proc_root.join("net/dev"),
+                &self.sys_class_net,
             ),
         }
     }
 }
 
-impl MibSources for LiveSources {
-    fn uptime_ticks(&self) -> u32 {
-        let elapsed = self.started.elapsed();
-        let ticks = elapsed.as_secs() * 100 + u64::from(elapsed.subsec_millis()) / 10;
-        ticks.min(u64::from(u32::MAX)) as u32
+fn proc_uptime_ticks(path: &Path) -> Option<u32> {
+    let text = std::fs::read_to_string(path).ok()?;
+    let secs: f64 = text.split_whitespace().next()?.parse().ok()?;
+    if !secs.is_finite() || secs < 0.0 {
+        return None;
     }
-
-    fn config(&self) -> &SnmpConfig {
-        &self.config
-    }
-
-    fn interfaces(&self) -> &[crate::mib::interfaces::IfRow] {
-        &self.ifaces
-    }
+    Some((secs * 100.0).min(f64::from(u32::MAX)) as u32)
 }
 
 /// Process one inbound datagram. Returns response bytes, or `None` to silent-drop.
-pub fn handle_datagram(bytes: &[u8], sources: &dyn MibSources) -> Option<Vec<u8>> {
-    let msg = match SnmpMessage::parse(bytes) {
-        Ok(m) => m,
-        Err(_) => return None,
-    };
+pub fn handle_datagram(bytes: &[u8], agent: &Agent) -> Option<Vec<u8>> {
+    let msg = SnmpMessage::parse(bytes).ok()?;
 
-    if msg.community != sources.config().community {
-        // Wrong community: silent drop (no scanner oracle).
+    // Only ever answer requests. Answering a GetResponse lets one packet with a
+    // spoofed source address make the agent respond to itself forever.
+    if !matches!(
+        msg.pdu.pdu_type,
+        PduType::GetRequest | PduType::GetNextRequest | PduType::SetRequest
+    ) {
         return None;
     }
 
-    let (error_status, error_index, variable_bindings) =
-        mib::handle_varbinds(msg.pdu.pdu_type, &msg.pdu.variable_bindings, sources);
+    if msg.community != agent.config.community {
+        // Wrong community: silent drop (no scanner oracle), and no /proc read.
+        return None;
+    }
 
-    let response = SnmpMessage {
+    let snapshot = agent.snapshot();
+    let (error_status, error_index, variable_bindings) =
+        mib::handle_varbinds(msg.pdu.pdu_type, &msg.pdu.variable_bindings, &snapshot);
+
+    SnmpMessage {
         version: SNMP_V2C_VERSION,
         community: msg.community,
         pdu: Pdu {
@@ -82,8 +109,9 @@ pub fn handle_datagram(bytes: &[u8], sources: &dyn MibSources) -> Option<Vec<u8>
             error_index,
             variable_bindings,
         },
-    };
-    response.encode().ok()
+    }
+    .encode()
+    .ok()
 }
 
 fn write_pidfile(path: &Path) -> std::io::Result<()> {
@@ -108,8 +136,7 @@ pub async fn run(
     pidfile: PathBuf,
     mut reload: tokio::sync::mpsc::Receiver<()>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let initial = SnmpConfig::load(&config_path)?;
-    let state = Arc::new(RwLock::new(LiveSources::new(initial)));
+    let mut agent = Agent::new(SnmpConfig::load(&config_path)?);
 
     write_pidfile(&pidfile)?;
     struct PidGuard(PathBuf);
@@ -122,38 +149,31 @@ pub async fn run(
 
     let mut socket: Option<UdpSocket> = None;
 
-    {
-        let cfg = state.read().await.config.clone();
-        if cfg.enabled {
-            match bind_socket(cfg.port).await {
-                Ok(s) => {
-                    tracing::info!(port = cfg.port, "snmp-agent listening");
-                    socket = Some(s);
-                }
-                Err(e) => {
-                    tracing::error!(error = %e, port = cfg.port, "bind failed; retrying on SIGHUP");
-                }
+    if agent.config.enabled {
+        match bind_socket(agent.config.port).await {
+            Ok(s) => {
+                tracing::info!(port = agent.config.port, "snmp-agent listening");
+                socket = Some(s);
             }
-        } else {
-            tracing::info!("snmp-agent disabled (unbound); waiting for SIGHUP");
+            Err(e) => {
+                tracing::error!(error = %e, port = agent.config.port, "bind failed; will retry");
+            }
         }
+    } else {
+        tracing::info!("snmp-agent disabled (unbound); waiting for reload");
     }
 
     let mut buf = [0u8; 2048];
     loop {
-        let (enabled, port) = {
-            let g = state.read().await;
-            (g.config.enabled, g.config.port)
-        };
+        let enabled = agent.config.enabled;
+        let port = agent.config.port;
         tokio::select! {
             _ = reload.recv() => {
                 match SnmpConfig::load(&config_path) {
                     Ok(new_cfg) => {
-                        let mut guard = state.write().await;
-                        let old_port = guard.config.port;
-                        let old_enabled = guard.config.enabled;
-                        guard.config = new_cfg.clone();
-                        drop(guard);
+                        let old_port = agent.config.port;
+                        let old_enabled = agent.config.enabled;
+                        agent.config = new_cfg.clone();
 
                         if !new_cfg.enabled {
                             socket = None;
@@ -206,8 +226,7 @@ pub async fn run(
             } => {
                 match result {
                     Ok((n, peer)) => {
-                        let sources = state.read().await;
-                        if let Some(resp) = handle_datagram(&buf[..n], &*sources)
+                        if let Some(resp) = handle_datagram(&buf[..n], &agent)
                             && let Some(sock) = socket.as_ref()
                             && let Err(e) = sock.send_to(&resp, peer).await
                         {
@@ -242,25 +261,20 @@ pub fn parse_args(args: impl IntoIterator<Item = String>) -> PathBuf {
 mod tests {
     use super::*;
     use crate::ber::Oid;
+    use crate::mib::MibSources;
     use crate::pdu::{SnmpValue, VarBind};
     use std::time::Duration;
 
-    struct Fixed {
-        cfg: SnmpConfig,
-        ticks: u32,
-        ifaces: Vec<crate::mib::interfaces::IfRow>,
-    }
-
-    impl MibSources for Fixed {
-        fn uptime_ticks(&self) -> u32 {
-            self.ticks
-        }
-        fn config(&self) -> &SnmpConfig {
-            &self.cfg
-        }
-        fn interfaces(&self) -> &[crate::mib::interfaces::IfRow] {
-            &self.ifaces
-        }
+    fn test_agent() -> Agent {
+        Agent::with_roots(
+            SnmpConfig {
+                community: "public".into(),
+                sys_name: "cam-1".into(),
+                ..Default::default()
+            },
+            PathBuf::from("/proc"),
+            PathBuf::from("/sys/class/net"),
+        )
     }
 
     fn get_sysname_bytes(community: &str) -> Vec<u8> {
@@ -283,34 +297,16 @@ mod tests {
 
     #[test]
     fn test_handle_datagram_wrong_community_silent_drop() {
-        let cfg = SnmpConfig {
-            community: "public".into(),
-            sys_name: "cam-1".into(),
-            ..Default::default()
-        };
-        let sources = Fixed {
-            cfg,
-            ticks: 1,
-            ifaces: Vec::new(),
-        };
+        let agent = test_agent();
         let req = get_sysname_bytes("wrong");
-        assert!(handle_datagram(&req, &sources).is_none());
+        assert!(handle_datagram(&req, &agent).is_none());
     }
 
     #[test]
     fn test_handle_datagram_returns_sysname() {
-        let cfg = SnmpConfig {
-            community: "public".into(),
-            sys_name: "cam-1".into(),
-            ..Default::default()
-        };
-        let sources = Fixed {
-            cfg,
-            ticks: 1,
-            ifaces: Vec::new(),
-        };
+        let agent = test_agent();
         let req = get_sysname_bytes("public");
-        let resp = handle_datagram(&req, &sources).expect("response");
+        let resp = handle_datagram(&req, &agent).expect("response");
         let msg = SnmpMessage::parse(&resp).unwrap();
         assert_eq!(msg.pdu.pdu_type, PduType::GetResponse);
         assert_eq!(msg.pdu.request_id, 7);
@@ -323,12 +319,33 @@ mod tests {
 
     #[test]
     fn test_handle_datagram_bad_pdu_drop() {
-        let sources = Fixed {
-            cfg: SnmpConfig::default(),
-            ticks: 1,
-            ifaces: Vec::new(),
-        };
-        assert!(handle_datagram(&[0xff, 0x00], &sources).is_none());
+        let agent = test_agent();
+        assert!(handle_datagram(&[0xff, 0x00], &agent).is_none());
+    }
+
+    #[test]
+    fn test_get_response_is_never_answered() {
+        let agent = test_agent();
+        let mut req = get_sysname_bytes("public");
+        // Flip the PDU tag from GetRequest [0] to GetResponse [2].
+        let i = req.iter().position(|&b| b == 0xa0).expect("pdu tag");
+        req[i] = 0xa2;
+        assert!(
+            handle_datagram(&req, &agent).is_none(),
+            "answering a response lets a spoofed source loop us against ourselves"
+        );
+    }
+
+    #[test]
+    fn test_uptime_comes_from_proc_uptime() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("uptime"), "12345.67 98765.43\n").unwrap();
+        let agent = Agent::with_roots(
+            SnmpConfig::default(),
+            dir.path().into(),
+            dir.path().join("sys"),
+        );
+        assert_eq!(agent.snapshot().uptime_ticks(), 1_234_567);
     }
 
     #[test]
@@ -339,72 +356,6 @@ mod tests {
             "/tmp/x.toml".into(),
         ]);
         assert_eq!(path, PathBuf::from("/tmp/x.toml"));
-    }
-
-    #[tokio::test]
-    async fn test_udp_get_sysname_ephemeral() {
-        let dir = tempfile::tempdir().unwrap();
-        let cfg_path = dir.path().join("snmp.toml");
-        std::fs::write(
-            &cfg_path,
-            r#"
-enabled = true
-port = 0
-community = "public"
-sys_name = "udp-cam"
-"#,
-        )
-        .unwrap();
-        // port 0 is rejected by SnmpConfig::load — use a free high port via bind(0) helper path.
-        // Instead: bind ourselves, put that port in config.
-        let probe = UdpSocket::bind("127.0.0.1:0").await.unwrap();
-        let port = probe.local_addr().unwrap().port();
-        drop(probe);
-        std::fs::write(
-            &cfg_path,
-            format!(
-                "enabled = true\nport = {port}\ncommunity = \"public\"\nsys_name = \"udp-cam\"\n"
-            ),
-        )
-        .unwrap();
-
-        let cfg = SnmpConfig::load(&cfg_path).unwrap();
-        let sources = LiveSources::new(cfg.clone());
-        let server = UdpSocket::bind(("127.0.0.1", port)).await.unwrap();
-
-        let client = UdpSocket::bind("127.0.0.1:0").await.unwrap();
-        let req = get_sysname_bytes("public");
-        client.send_to(&req, ("127.0.0.1", port)).await.unwrap();
-
-        let mut buf = [0u8; 2048];
-        let (n, peer) = tokio::time::timeout(Duration::from_secs(2), server.recv_from(&mut buf))
-            .await
-            .expect("recv timeout")
-            .unwrap();
-        let resp = handle_datagram(&buf[..n], &sources).expect("handled");
-        server.send_to(&resp, peer).await.unwrap();
-
-        let (n, _) = tokio::time::timeout(Duration::from_secs(2), client.recv_from(&mut buf))
-            .await
-            .expect("client timeout")
-            .unwrap();
-        let msg = SnmpMessage::parse(&buf[..n]).unwrap();
-        assert_eq!(
-            msg.pdu.variable_bindings[0].value,
-            SnmpValue::OctetString(b"udp-cam".to_vec())
-        );
-    }
-
-    #[test]
-    fn test_live_sources_uptime_and_config() {
-        let cfg = SnmpConfig {
-            sys_name: "live".into(),
-            ..Default::default()
-        };
-        let sources = LiveSources::new(cfg);
-        assert_eq!(sources.config().sys_name, "live");
-        std::thread::sleep(Duration::from_millis(15));
-        assert!(sources.uptime_ticks() >= 1);
     }
 
     #[test]
@@ -428,8 +379,6 @@ sys_name = "udp-cam"
         }
         panic!("timed out waiting for {}", path.display());
     }
-
-    
 
     #[tokio::test]
     async fn test_run_serves_udp_get_reload_and_disable() {

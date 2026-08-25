@@ -74,7 +74,7 @@ fn if_type_code(arphrd: u32) -> i32 {
     match arphrd {
         1 => 6,                // ARPHRD_ETHER -> ethernetCsmacd (wifi presents as this too)
         772 => 24,             // ARPHRD_LOOPBACK -> softwareLoopback
-        801 | 802 | 803 => 71, // ARPHRD_IEEE80211* -> ieee80211
+        801..=803 => 71, // ARPHRD_IEEE80211* -> ieee80211
         _ => 1,                // other
     }
 }
