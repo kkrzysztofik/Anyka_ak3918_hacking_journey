@@ -307,9 +307,9 @@ export default function NetworkPage() {
         }
         if (snmpError) {
           throw new Error(
-            snmpLoadError instanceof Error
-              ? snmpLoadError.message
-              : 'SNMP configuration failed to load',
+            snmpLoadError == null
+              ? 'SNMP configuration failed to load'
+              : String(snmpLoadError),
           );
         }
         await runNetworkStep('SNMP configuration failed', () =>
