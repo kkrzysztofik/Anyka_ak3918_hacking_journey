@@ -204,15 +204,12 @@ pub fn get_next_with_rows(oid: &Oid, rows: &[IfRow]) -> Option<(Oid, SnmpValue)>
     None
 }
 
-/// GET using live `/proc` + `/sys` (replaced by snapshot in Task 9).
-pub fn get(oid: &Oid, _sources: &dyn MibSources) -> Option<(Oid, SnmpValue)> {
-    let rows = load_interfaces(Path::new("/proc/net/dev"), Path::new("/sys/class/net"));
-    get_with_rows(oid, &rows)
+pub fn get(oid: &Oid, sources: &dyn MibSources) -> Option<(Oid, SnmpValue)> {
+    get_with_rows(oid, sources.interfaces())
 }
 
-pub fn get_next(oid: &Oid, _sources: &dyn MibSources) -> Option<(Oid, SnmpValue)> {
-    let rows = load_interfaces(Path::new("/proc/net/dev"), Path::new("/sys/class/net"));
-    get_next_with_rows(oid, &rows)
+pub fn get_next(oid: &Oid, sources: &dyn MibSources) -> Option<(Oid, SnmpValue)> {
+    get_next_with_rows(oid, sources.interfaces())
 }
 
 #[cfg(test)]
@@ -417,24 +414,4 @@ mod tests {
         assert_eq!(rows[0].mtu, 1500);
     }
 
-    #[test]
-    fn test_live_proc_get_if_number_smoke() {
-        let oid = if_number_oid();
-        struct Dummy;
-        impl MibSources for Dummy {
-            fn uptime_ticks(&self) -> u32 {
-                0
-            }
-            fn config(&self) -> &crate::config::SnmpConfig {
-                use std::sync::LazyLock;
-                static CFG: LazyLock<crate::config::SnmpConfig> =
-                    LazyLock::new(crate::config::SnmpConfig::default);
-                &CFG
-            }
-        }
-        let got = get(&oid, &Dummy);
-        assert!(got.is_some());
-        let prefix = Oid::from_slice(&[1, 3, 6, 1, 2, 1, 2]).unwrap();
-        assert!(get_next(&prefix, &Dummy).is_some());
-    }
 }

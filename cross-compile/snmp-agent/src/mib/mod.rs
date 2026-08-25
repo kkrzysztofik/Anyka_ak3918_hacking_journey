@@ -4,19 +4,41 @@ pub mod interfaces;
 pub mod system;
 
 use crate::config::SnmpConfig;
-use crate::pdu::{PduType, VarBind};
+use crate::mib::interfaces::IfRow;
+use crate::pdu::{PduType, SnmpValue, VarBind};
 
 /// SNMP error-status: noError.
 pub const ERR_NO_ERROR: i32 = 0;
-/// SNMP error-status: noSuchName.
-pub const ERR_NO_SUCH_NAME: i32 = 2;
 /// SNMP error-status: notWritable for SETs.
 pub const ERR_NOT_WRITABLE: i32 = 17;
 
 /// Runtime sources for MIB values.
 pub trait MibSources {
-    fn uptime_ticks(&self) -> u32;
     fn config(&self) -> &SnmpConfig;
+    fn uptime_ticks(&self) -> u32;
+    fn interfaces(&self) -> &[IfRow];
+}
+
+/// One consistent view of the device, captured per datagram.
+///
+/// Capturing once means a multi-varbind walk observes a single instant instead
+/// of re-reading `/proc` for every varbind.
+pub struct Snapshot {
+    pub config: SnmpConfig,
+    pub uptime_ticks: u32,
+    pub ifaces: Vec<IfRow>,
+}
+
+impl MibSources for Snapshot {
+    fn config(&self) -> &SnmpConfig {
+        &self.config
+    }
+    fn uptime_ticks(&self) -> u32 {
+        self.uptime_ticks
+    }
+    fn interfaces(&self) -> &[IfRow] {
+        &self.ifaces
+    }
 }
 
 fn resolve_get(
@@ -42,25 +64,31 @@ pub fn handle_varbinds(
     if pdu_type == PduType::SetRequest {
         return (ERR_NOT_WRITABLE, 1, binds.to_vec());
     }
-    if pdu_type == PduType::GetResponse {
-        return (ERR_NO_SUCH_NAME, 1, binds.to_vec());
-    }
 
     let mut out = Vec::with_capacity(binds.len());
-    for (i, vb) in binds.iter().enumerate() {
-        let resolved = match pdu_type {
-            PduType::GetRequest => resolve_get(&vb.name, sources),
-            PduType::GetNextRequest => resolve_get_next(&vb.name, sources),
-            PduType::GetResponse | PduType::SetRequest => unreachable!(),
+    for vb in binds {
+        // RFC 3416: a missing object is an exception *in the varbind*, so one
+        // bad OID does not cost the caller the other nine.
+        let (name, value) = if pdu_type == PduType::GetRequest {
+            resolve_get(&vb.name, sources)
+                .unwrap_or_else(|| (vb.name.clone(), miss_kind(&vb.name)))
+        } else {
+            resolve_get_next(&vb.name, sources)
+                .unwrap_or_else(|| (vb.name.clone(), SnmpValue::EndOfMibView))
         };
-        match resolved {
-            Some((oid, value)) => out.push(VarBind { name: oid, value }),
-            None => {
-                return (ERR_NO_SUCH_NAME, (i + 1) as i32, binds.to_vec());
-            }
-        }
+        out.push(VarBind { name, value });
     }
     (ERR_NO_ERROR, 0, out)
+}
+
+/// `noSuchInstance` when we serve the group but not that instance, else `noSuchObject`.
+fn miss_kind(oid: &crate::ber::Oid) -> SnmpValue {
+    const SERVED: [[u32; 7]; 2] = [[1, 3, 6, 1, 2, 1, 1], [1, 3, 6, 1, 2, 1, 2]];
+    if oid.0.len() > 7 && SERVED.iter().any(|g| oid.0[..7] == *g) {
+        SnmpValue::NoSuchInstance
+    } else {
+        SnmpValue::NoSuchObject
+    }
 }
 
 #[cfg(test)]
@@ -68,11 +96,13 @@ mod tests {
     use super::*;
     use crate::ber::Oid;
     use crate::config::SnmpConfig;
+    use crate::mib::interfaces::IfRow;
     use crate::pdu::SnmpValue;
 
     struct FixedSources {
         cfg: SnmpConfig,
         ticks: u32,
+        ifaces: Vec<IfRow>,
     }
 
     impl MibSources for FixedSources {
@@ -81,6 +111,9 @@ mod tests {
         }
         fn config(&self) -> &SnmpConfig {
             &self.cfg
+        }
+        fn interfaces(&self) -> &[IfRow] {
+            &self.ifaces
         }
     }
 
@@ -91,7 +124,12 @@ mod tests {
             sys_location: "lab".into(),
             ..Default::default()
         };
-        FixedSources { cfg, ticks: 42 }
+        let text = include_str!("../../tests/fixtures/proc_net_dev.txt");
+        FixedSources {
+            cfg,
+            ticks: 42,
+            ifaces: interfaces::parse_proc_net_dev(text),
+        }
     }
 
     #[test]
@@ -162,6 +200,7 @@ mod tests {
                 ..Default::default()
             },
             ticks: 1,
+            ifaces: Vec::new(),
         };
         let oid = Oid::from_slice(&[1, 3, 6, 1, 2, 1, 1, 5, 0]).unwrap();
         let (_, val) = system::get(&oid, &empty_name).unwrap();
@@ -172,7 +211,7 @@ mod tests {
     }
 
     #[test]
-    fn test_getnext_and_nosuchname_paths() {
+    fn test_getnext_walk_and_end_of_mib() {
         let binds = vec![VarBind {
             name: Oid::from_slice(&[1, 3, 6, 1, 2, 1, 1]).unwrap(),
             value: SnmpValue::Null,
@@ -180,17 +219,43 @@ mod tests {
         let (status, _, out) = handle_varbinds(PduType::GetNextRequest, &binds, &sources());
         assert_eq!(status, ERR_NO_ERROR);
         assert_eq!(out[0].name.0[7], 1);
+    }
 
-        let (status, index, _) = handle_varbinds(PduType::GetResponse, &binds, &sources());
-        assert_eq!(status, ERR_NO_SUCH_NAME);
-        assert_eq!(index, 1);
+    #[test]
+    fn test_get_unknown_oid_returns_exception_not_pdu_error() {
+        let binds = vec![
+            VarBind {
+                name: Oid::from_slice(&[1, 3, 6, 1, 2, 1, 1, 1, 0]).unwrap(),
+                value: SnmpValue::Null,
+            },
+            VarBind {
+                name: Oid::from_slice(&[1, 3, 6, 1, 2, 1, 99, 1, 0]).unwrap(),
+                value: SnmpValue::Null,
+            },
+            VarBind {
+                name: Oid::from_slice(&[1, 3, 6, 1, 2, 1, 1, 99, 0]).unwrap(),
+                value: SnmpValue::Null,
+            },
+        ];
+        let (status, index, out) = handle_varbinds(PduType::GetRequest, &binds, &sources());
+        assert_eq!(status, ERR_NO_ERROR, "one bad OID must not fail the whole PDU");
+        assert_eq!(index, 0);
+        assert!(
+            matches!(out[0].value, SnmpValue::OctetString(_)),
+            "good varbind still answered"
+        );
+        assert_eq!(out[1].value, SnmpValue::NoSuchObject); // unknown group
+        assert_eq!(out[2].value, SnmpValue::NoSuchInstance); // known group, bad instance
+    }
 
-        let missing = vec![VarBind {
-            name: Oid::from_slice(&[1, 3, 6, 1, 2, 1, 1, 99, 0]).unwrap(),
+    #[test]
+    fn test_getnext_past_the_end_returns_end_of_mib_view() {
+        let binds = vec![VarBind {
+            name: Oid::from_slice(&[1, 3, 6, 1, 2, 1, 2, 2, 1, 16, 99]).unwrap(),
             value: SnmpValue::Null,
         }];
-        let (status, index, _) = handle_varbinds(PduType::GetRequest, &missing, &sources());
-        assert_eq!(status, ERR_NO_SUCH_NAME);
-        assert_eq!(index, 1);
+        let (status, _, out) = handle_varbinds(PduType::GetNextRequest, &binds, &sources());
+        assert_eq!(status, ERR_NO_ERROR);
+        assert_eq!(out[0].value, SnmpValue::EndOfMibView);
     }
 }
