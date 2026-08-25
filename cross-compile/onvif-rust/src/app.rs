@@ -1396,6 +1396,49 @@ impl Application {
         }
     }
 
+    /// Register the bridge as the owned frame callback with the platform.
+    ///
+    /// Wires the IDR requester first (so SPS/PPS can be recovered if the
+    /// startup parameter sets were missed), then registers the callback.
+    /// Returns whether the callback registered: audio must only start when
+    /// frames can actually reach the bridge.
+    fn register_frame_callback(
+        bridge: &Arc<crate::streaming::bridge::StreamingBridge>,
+        app_state: &AppState,
+    ) -> bool {
+        let Some(platform) = app_state.platform() else {
+            return false;
+        };
+        // Give the bridge a way to ask for an IDR before handing it over: the
+        // callback registration below is what starts caching SPS/PPS, and it
+        // may already have missed the only parameter sets the encoder emits on
+        // its own.
+        if let Some(request_idr) = platform.idr_requester() {
+            *bridge.idr_requester.write() = Some(request_idr);
+        } else {
+            tracing::warn!(
+                "platform exposes no IDR request; a stream that misses SPS/PPS \
+                 cannot be recovered without a restart"
+            );
+        }
+        match platform.register_owned_frame_callback(
+            Arc::clone(bridge) as Arc<dyn crate::platform::frame::OwnedFrameCallback>
+        ) {
+            Ok(()) => {
+                tracing::info!("Owned frame callback registered with platform (zero-copy)");
+                true
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "Failed to register owned frame callback (streaming will work but \
+                     won't receive live frames from encoder): {}",
+                    e
+                );
+                false
+            }
+        }
+    }
+
     /// Start the streaming service (RTSP + HTTP-FLV) if enabled in config.
     ///
     /// This is non-fatal: if streaming fails to start, the application continues
@@ -1428,37 +1471,40 @@ impl Application {
             }
         }
 
+        // streaming_config.audio_sample_rate is the value normalized in
+        // StreamingConfig::from_config (validated against the AAC table, default
+        // 8000); capture it before the config is moved into the service so the
+        // same value flows to capture, ASC generation, and SDP.
+        let audio_sample_rate = streaming_config.audio_sample_rate;
         let mut service = crate::streaming::service::StreamingService::new(streaming_config);
         match service.start().await {
             Ok(bridge) => {
                 // Register the bridge as an owned frame callback with the platform (zero-copy path).
-                if let Some(platform) = app_state.platform() {
-                    // Give the bridge a way to ask for an IDR before handing it
-                    // over: the callback registration below is what starts
-                    // caching SPS/PPS, and it may already have missed the only
-                    // parameter sets the encoder emits on its own.
-                    if let Some(request_idr) = platform.idr_requester() {
-                        *bridge.idr_requester.write() = Some(request_idr);
-                    } else {
-                        tracing::warn!(
-                            "platform exposes no IDR request; a stream that misses SPS/PPS \
-                             cannot be recovered without a restart"
-                        );
-                    }
-                    match platform.register_owned_frame_callback(bridge) {
-                        Ok(()) => {
-                            tracing::info!(
-                                "Owned frame callback registered with platform (zero-copy)"
-                            );
-                        }
-                        Err(e) => {
-                            tracing::warn!(
-                                "Failed to register owned frame callback (streaming will work but \
-                                 won't receive live frames from encoder): {}",
-                                e
-                            );
-                        }
-                    }
+                let callback_registered = Self::register_frame_callback(&bridge, app_state);
+
+                // Audio is strictly additive: a failed mic must never take video
+                // down, and the track is only advertised once the daemon has
+                // accepted the push request (start() publishes the ASC only on
+                // success).  Only start audio when frames can actually reach the
+                // bridge: without the owned frame callback there is no path from
+                // the encoder to the StreamingBridge, so an audio track would be
+                // negotiated but never receive RTP frames.
+                let audio_enabled = {
+                    let c = config_runtime.read();
+                    c.stream_profile_1.audio_enabled
+                };
+                if callback_registered
+                    && audio_enabled
+                    && let Some(platform) = app_state.platform()
+                    && let Err(e) = platform
+                        .audio_encoder()
+                        .start(&bridge, audio_sample_rate, 1)
+                        .await
+                {
+                    tracing::error!(
+                        error = %e,
+                        "Audio capture failed to start; continuing video-only"
+                    );
                 }
                 Some(service)
             }
@@ -2111,6 +2157,53 @@ mod tests {
         let config = make_streaming_runtime_config(rtsp_port, httpflv_port, false);
         let app_state =
             make_app_state_for_stream_auth(config.clone(), Arc::new(UserStorage::new()));
+        let mut progress = StartupProgress::new();
+
+        let mut streaming = Application::start_streaming(&config, &app_state, &mut progress)
+            .await
+            .expect("streaming service should start");
+        assert!(!progress.has_degraded_services());
+
+        streaming.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn test_start_streaming_starts_audio_when_enabled() {
+        // stream_profile_1 defaults to audio_enabled=true; with a platform
+        // whose encoder accepts push, the audio track must be requested.
+        let rtsp_port = reserve_test_port();
+        let httpflv_port = reserve_test_port();
+        let config = make_streaming_runtime_config(rtsp_port, httpflv_port, false);
+
+        let mut audio_encoder = crate::platform::common::MockAudioEncoder::new();
+        audio_encoder
+            .expect_start()
+            .withf(|_, sample_rate, channels| *sample_rate == 8000 && *channels == 1)
+            .times(1)
+            .returning(|_, _, _| Ok(()));
+        let mut platform = crate::platform::common::MockPlatform::new();
+        platform.expect_idr_requester().returning(|| None);
+        // start_streaming registers the bridge as a frame callback before it
+        // reaches the audio start; without this the mock panics there first.
+        platform
+            .expect_register_owned_frame_callback()
+            .returning(|_| Ok(()));
+        platform
+            .expect_audio_encoder()
+            .times(1)
+            .return_once(move || Arc::new(audio_encoder));
+
+        let app_state = AppState::builder()
+            .user_storage(Arc::new(UserStorage::new()))
+            .password_manager(Arc::new(PasswordManager::new()))
+            .ptz_state(Arc::new(PTZStateManager::new()))
+            .config(config.clone())
+            .memory_monitor(Arc::new(MemoryMonitor::new()))
+            .rate_limiter(Arc::new(crate::security::RateLimiter::new(60)))
+            .profile_storage(Arc::new(ProfileStorage::new("/tmp/test_profiles.toml")))
+            .platform(Arc::new(platform))
+            .build()
+            .expect("app state should build");
         let mut progress = StartupProgress::new();
 
         let mut streaming = Application::start_streaming(&config, &app_state, &mut progress)

@@ -964,7 +964,7 @@ impl Default for StreamProfileConfig {
             min_qp: 20,
             profile: String::new(),
             audio_enabled: true,
-            audio_encoding: "G711".to_string(),
+            audio_encoding: "AAC".to_string(),
             audio_bitrate: 64,
             audio_sample_rate: 8000,
         }
@@ -987,7 +987,7 @@ impl StreamProfileConfig {
             min_qp: 20,
             profile: String::new(),
             audio_enabled: false,
-            audio_encoding: "G711".to_string(),
+            audio_encoding: "AAC".to_string(),
             audio_bitrate: 64,
             audio_sample_rate: 8000,
         }

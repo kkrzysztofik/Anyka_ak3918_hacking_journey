@@ -681,11 +681,17 @@ async fn process_audio_frame(
     }
 
     let mut channel = ctx.audio_channel.lock().await;
+    let clock_rate = channel.clock_rate();
+    // The bridge carries audio timestamps in milliseconds (the ring's
+    // timestamp_ms), but AAC-hbr RTP runs on the sample clock (RFC 3640):
+    // 1024 samples per frame at the negotiated rate. Scale before the
+    // normalizer, which for audio assumes sample units and scales no further.
+    let sample_ts = scale_rtp_timestamp(timestamp, clock_rate);
     let normalized = ctx
         .timestamp_normalizers
         .entry(TrackType::Audio)
         .or_default()
-        .normalize(timestamp, channel.clock_rate(), TrackType::Audio);
+        .normalize(sample_ts, clock_rate, TrackType::Audio);
 
     if crate::stream_frame_debug_logging_enabled() {
         debug!(

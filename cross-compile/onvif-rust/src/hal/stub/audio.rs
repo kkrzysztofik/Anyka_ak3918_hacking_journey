@@ -4,6 +4,7 @@ use std::ffi::c_void;
 
 use crate::hal::common::audio::AudioHalTrait;
 use crate::hal::common::{AK_SUCCESS_I32, aenc_attr, audio_param, pcm_param};
+use crate::platform::PlatformResult;
 
 /// Stub implementation that returns success for all audio operations.
 #[allow(dead_code)] // Used on host targets only
@@ -36,6 +37,14 @@ impl AudioHalTrait for StubAudioHal {
 
     fn aenc_set_attr(&self, _enc_handle: *mut c_void, _attr: *const aenc_attr) -> i32 {
         AK_SUCCESS_I32
+    }
+
+    fn start_audio_push(&self, _sample_rate: u32, _channels: u32) -> PlatformResult<()> {
+        Ok(())
+    }
+
+    fn stop_audio_push(&self) -> PlatformResult<()> {
+        Ok(())
     }
 }
 

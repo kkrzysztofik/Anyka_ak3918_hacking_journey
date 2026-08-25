@@ -51,6 +51,11 @@ const IDR_RETRY_COOLDOWN_MS: u64 = 1_000;
 pub struct LiveStreamHandler {
     /// Whether this handler serves the main stream (vs sub).
     is_main: bool,
+    /// Whether this stream advertises an audio track.
+    ///
+    /// The sub stream may have audio disabled per-profile; its SDP and FLV must
+    /// then omit the audio track even though the shared bridge carries audio.
+    audio_enabled: bool,
     /// Reference to the bridge for reading per-stream state.
     bridge: Arc<StreamingBridge>,
     /// Video frame rate for SDP `a=framerate` attribute.
@@ -71,9 +76,15 @@ pub struct LiveStreamHandler {
 
 impl LiveStreamHandler {
     /// Create a handler for a specific stream.
-    pub fn new(is_main: bool, bridge: Arc<StreamingBridge>, video_framerate: u32) -> Self {
+    pub fn new(
+        is_main: bool,
+        audio_enabled: bool,
+        bridge: Arc<StreamingBridge>,
+        video_framerate: u32,
+    ) -> Self {
         Self {
             is_main,
+            audio_enabled,
             bridge,
             video_framerate,
             idr_requested_at: portable_atomic::AtomicU64::new(0),
@@ -88,6 +99,16 @@ impl LiveStreamHandler {
         } else {
             &self.bridge.sub_stream
         }
+    }
+
+    /// Audio config this stream may advertise, gated by its per-profile setting.
+    ///
+    /// The sub stream may have audio disabled even though the shared bridge
+    /// carries one audio config.
+    fn audio_config_for_stream(&self) -> Option<Vec<u8>> {
+        self.audio_enabled
+            .then(|| self.bridge.audio_config.read().deref().clone())
+            .flatten()
     }
 
     /// Send the cached codec parameter sets (and bootstrap IDR) to a new subscriber.
@@ -106,13 +127,8 @@ impl LiveStreamHandler {
         audio_config: Option<Vec<u8>>,
     ) -> Result<(), StreamHubError> {
         if matches!(sub_type, SubscribeType::HttpFlvPull) {
-            let mut remuxer = ValidationHttpFlvRemuxer::new(
-                sps,
-                pps,
-                audio_config,
-                self.bridge.audio_sample_rate,
-                self.video_framerate,
-            );
+            let mut remuxer =
+                ValidationHttpFlvRemuxer::new(sps, pps, audio_config, self.video_framerate);
             send_httpflv_prior_frames(frame_sender, &mut remuxer, timestamp, bootstrap_idr)?;
         } else {
             // Combine SPS+PPS(+IDR) into a single Annex-B access unit.
@@ -197,83 +213,85 @@ impl TStreamHandler for LiveStreamHandler {
             "Subscriber requesting prior data"
         );
 
-        if let DataSender::Frame {
+        let DataSender::Frame {
             sender: frame_sender,
         } = sender
-        {
-            let stream = self.stream();
-            let timestamp = stream.last_timestamp_ms.load(Ordering::Relaxed);
-            let audio_config = self.bridge.audio_config.read().deref().clone();
-            let audio_clock_rate = if audio_config.is_some() {
-                self.bridge.audio_sample_rate
-            } else {
-                0
-            };
+        else {
+            return Ok(());
+        };
 
-            let sps = stream.sps.read().deref().clone();
-            let pps = stream.pps.read().deref().clone();
-            let has_sps = sps.is_some();
-            let has_pps = pps.is_some();
+        let stream = self.stream();
+        let timestamp = stream.last_timestamp_ms.load(Ordering::Relaxed);
+        let audio_config = self.audio_config_for_stream();
+        let audio_clock_rate = if audio_config.is_some() {
+            self.bridge.audio_sample_rate
+        } else {
+            0
+        };
 
-            // HTTP-FLV remux needs SPS/PPS for the sequence header. Client may
-            // already have HTTP 200; refuse prior-data so the body stays empty/EOF
-            // instead of a half-open FLV session. Kick IDR once for a retry.
-            if matches!(sub_type, SubscribeType::HttpFlvPull) && (!has_sps || !has_pps) {
-                tracing::error!(
-                    stream = stream_name,
-                    has_sps,
-                    has_pps,
-                    "HTTP-FLV prior-data refused: SPS/PPS missing (body empty/EOF)"
-                );
-                self.request_idr_once();
-                return Err(stream_hub_error("http-flv: SPS/PPS not ready"));
-            }
+        let sps = stream.sps.read().deref().clone();
+        let pps = stream.pps.read().deref().clone();
+        let has_sps = sps.is_some();
+        let has_pps = pps.is_some();
 
-            let media_info = MediaInfo {
-                audio_clock_rate,
-                video_clock_rate: 90000,
-                vcodec: VideoCodecType::H264,
-            };
-            send_frame(&frame_sender, FrameData::MediaInfo { media_info })?;
+        // HTTP-FLV remux needs SPS/PPS for the sequence header. Client may
+        // already have HTTP 200; refuse prior-data so the body stays empty/EOF
+        // instead of a half-open FLV session. Kick IDR once for a retry.
+        if matches!(sub_type, SubscribeType::HttpFlvPull) && (!has_sps || !has_pps) {
+            tracing::error!(
+                stream = stream_name,
+                has_sps,
+                has_pps,
+                "HTTP-FLV prior-data refused: SPS/PPS missing (body empty/EOF)"
+            );
+            self.request_idr_once();
+            return Err(stream_hub_error("http-flv: SPS/PPS not ready"));
+        }
 
-            let bootstrap_idr = stream.bootstrap_idr.read().deref().clone();
-            let has_idr = bootstrap_idr.is_some();
+        let media_info = MediaInfo {
+            audio_clock_rate,
+            video_clock_rate: 90000,
+            vcodec: VideoCodecType::H264,
+        };
+        send_frame(&frame_sender, FrameData::MediaInfo { media_info })?;
 
-            if !has_sps || !has_pps {
-                // RTSP path: still Ok + MediaInfo; client may retry DESCRIBE.
-                // error!: the subscriber gets a black screen, and at the shipped
-                // "error" log level a warn! here is invisible.
-                tracing::error!(
-                    stream = stream_name,
-                    has_sps,
-                    has_pps,
-                    "SPS/PPS missing when subscriber connects (client will see black screen)"
-                );
-            }
+        let bootstrap_idr = stream.bootstrap_idr.read().deref().clone();
+        let has_idr = bootstrap_idr.is_some();
 
-            if let (Some(sps), Some(pps)) = (sps, pps) {
-                // Parameter sets present: allow a future IDR kick if they vanish.
-                self.idr_requested_at.store(0, Ordering::Relaxed);
-                tracing::debug!(
-                    stream = stream_name,
-                    sps_size = sps.len(),
-                    pps_size = pps.len(),
-                    has_bootstrap_idr = has_idr,
-                    idr_size = bootstrap_idr.as_ref().map(|i| i.len()).unwrap_or(0),
-                    timestamp,
-                    "Sending prior data to subscriber"
-                );
+        if !has_sps || !has_pps {
+            // RTSP path: still Ok + MediaInfo; client may retry DESCRIBE.
+            // error!: the subscriber gets a black screen, and at the shipped
+            // "error" log level a warn! here is invisible.
+            tracing::error!(
+                stream = stream_name,
+                has_sps,
+                has_pps,
+                "SPS/PPS missing when subscriber connects (client will see black screen)"
+            );
+        }
 
-                self.send_parameter_sets(
-                    &frame_sender,
-                    sub_type,
-                    timestamp,
-                    sps,
-                    pps,
-                    bootstrap_idr.as_deref(),
-                    audio_config,
-                )?;
-            }
+        if let (Some(sps), Some(pps)) = (sps, pps) {
+            // Parameter sets present: allow a future IDR kick if they vanish.
+            self.idr_requested_at.store(0, Ordering::Relaxed);
+            tracing::debug!(
+                stream = stream_name,
+                sps_size = sps.len(),
+                pps_size = pps.len(),
+                has_bootstrap_idr = has_idr,
+                idr_size = bootstrap_idr.as_ref().map(|i| i.len()).unwrap_or(0),
+                timestamp,
+                "Sending prior data to subscriber"
+            );
+
+            self.send_parameter_sets(
+                &frame_sender,
+                sub_type,
+                timestamp,
+                sps,
+                pps,
+                bootstrap_idr.as_deref(),
+                audio_config,
+            )?;
         }
 
         Ok(())
@@ -292,7 +310,7 @@ impl TStreamHandler for LiveStreamHandler {
         let pps = stream.pps.read().deref().clone();
         let has_sps = sps.is_some();
         let has_pps = pps.is_some();
-        let audio_config = self.bridge.audio_config.read().deref().clone();
+        let audio_config = self.audio_config_for_stream();
 
         if let (Some(sps), Some(pps)) = (sps, pps) {
             // Parameter sets are cached again: allow a future IDR request if
@@ -345,6 +363,8 @@ struct FanoutTask {
     bridge: Arc<StreamingBridge>,
     bridge_queue: Arc<LowLatencyFrameQueue>,
     is_main: bool,
+    /// Whether this stream's FLV advertises an audio track (profile-level gate).
+    audio_enabled: bool,
     stream_name: String,
     rtsp_tx: tokio::sync::mpsc::Sender<FrameData>,
     httpflv_tx: tokio::sync::mpsc::Sender<FrameData>,
@@ -354,14 +374,17 @@ struct FanoutTask {
     httpflv_remuxer: Option<ValidationHttpFlvRemuxer>,
     cached_sps: Option<Vec<u8>>,
     cached_pps: Option<Vec<u8>>,
+    cached_audio_config: Option<Vec<u8>>,
     telemetry: StreamTelemetry,
 }
 
 impl FanoutTask {
+    #[allow(clippy::too_many_arguments)]
     fn new(
         bridge: Arc<StreamingBridge>,
         bridge_queue: Arc<LowLatencyFrameQueue>,
         is_main: bool,
+        audio_enabled: bool,
         stream_name: String,
         rtsp_tx: tokio::sync::mpsc::Sender<FrameData>,
         httpflv_tx: tokio::sync::mpsc::Sender<FrameData>,
@@ -372,6 +395,7 @@ impl FanoutTask {
             bridge,
             bridge_queue,
             is_main,
+            audio_enabled,
             stream_name,
             rtsp_tx,
             httpflv_tx,
@@ -379,6 +403,7 @@ impl FanoutTask {
             httpflv_remuxer: None,
             cached_sps: None,
             cached_pps: None,
+            cached_audio_config: None,
             telemetry,
         }
     }
@@ -452,9 +477,17 @@ impl FanoutTask {
         let current_sps = stream.sps.read().deref().clone();
         let current_pps = stream.pps.read().deref().clone();
 
+        let bridge_audio_config = self.bridge.audio_config.read().deref().clone();
+        let audio_config = if self.audio_enabled {
+            bridge_audio_config
+        } else {
+            None
+        };
+
         let needs_refresh = self.httpflv_remuxer.is_none()
             || current_sps != self.cached_sps
-            || current_pps != self.cached_pps;
+            || current_pps != self.cached_pps
+            || audio_config != self.cached_audio_config;
 
         if needs_refresh && let (Some(sps), Some(pps)) = (current_sps.clone(), current_pps.clone())
         {
@@ -466,19 +499,18 @@ impl FanoutTask {
             } else {
                 tracing::debug!(
                     stream = %self.stream_name,
-                    "SPS/PPS changed, refreshing HTTP-FLV remuxer"
+                    "SPS/PPS or audio config changed, refreshing HTTP-FLV remuxer"
                 );
             }
-            let audio_config = self.bridge.audio_config.read().deref().clone();
             self.httpflv_remuxer = Some(ValidationHttpFlvRemuxer::new(
                 sps.clone(),
                 pps.clone(),
-                audio_config,
-                self.bridge.audio_sample_rate,
+                audio_config.clone(),
                 self.video_framerate,
             ));
             self.cached_sps = Some(sps);
             self.cached_pps = Some(pps);
+            self.cached_audio_config = audio_config;
         }
     }
 }
@@ -548,6 +580,7 @@ impl StreamingService {
             LowLatencyFrameQueue::default_main(),
             LowLatencyFrameQueue::default_sub(),
             0,
+            config.sub_audio_enabled,
         ));
 
         Self {
@@ -591,6 +624,7 @@ impl StreamingService {
             Arc::clone(&main_bridge_queue),
             Arc::clone(&sub_bridge_queue),
             self.config.audio_sample_rate,
+            self.config.sub_audio_enabled,
             main_cached,
             sub_cached,
         ));
@@ -728,8 +762,10 @@ impl StreamingService {
         // The handler references the bridge's actual stream state so it reads
         // the latest SPS/PPS/IDR that the bridge caches from live frames.
         let is_main = stream_name == self.config.main_stream_name;
+        let audio_enabled = is_main || self.config.sub_audio_enabled;
         let handler = Arc::new(LiveStreamHandler::new(
             is_main,
+            audio_enabled,
             Arc::clone(&self.bridge),
             self.config.video_framerate,
         ));
@@ -770,6 +806,7 @@ impl StreamingService {
             Arc::clone(&self.bridge),
             bridge_queue,
             is_main,
+            audio_enabled,
             stream_name.to_string(),
             rtsp_tx,
             httpflv_tx,
@@ -792,6 +829,7 @@ mod tests {
             LowLatencyFrameQueue::new("test-main", 8),
             LowLatencyFrameQueue::new("test-sub", 8),
             48_000,
+            true,
         ));
         // Tests must not inherit process-wide SPS/PPS cache from other cases.
         *bridge.main_stream.sps.write() = None;
@@ -800,7 +838,7 @@ mod tests {
         *bridge.sub_stream.sps.write() = None;
         *bridge.sub_stream.pps.write() = None;
         *bridge.sub_stream.bootstrap_idr.write() = None;
-        let handler = LiveStreamHandler::new(true, Arc::clone(&bridge), 15);
+        let handler = LiveStreamHandler::new(true, true, Arc::clone(&bridge), 15);
         (bridge, handler)
     }
 
@@ -831,10 +869,11 @@ mod tests {
             LowLatencyFrameQueue::new("test-main", 8),
             LowLatencyFrameQueue::new("test-sub", 8),
             48_000,
+            false,
         ));
         *bridge.sub_stream.sps.write() = None;
         *bridge.sub_stream.pps.write() = None;
-        let handler = LiveStreamHandler::new(false, Arc::clone(&bridge), 15);
+        let handler = LiveStreamHandler::new(false, false, Arc::clone(&bridge), 15);
         expect_idr_requests(&bridge, false, 1);
         let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
 
@@ -895,6 +934,31 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn test_send_information_omits_audio_for_disabled_sub_stream() {
+        // stream_profile_2.audio_enabled=false: the sub stream's SDP must not
+        // advertise an audio track even when the shared bridge carries audio.
+        let bridge = Arc::new(StreamingBridge::new(
+            LowLatencyFrameQueue::new("test-main", 8),
+            LowLatencyFrameQueue::new("test-sub", 8),
+            48_000,
+            false,
+        ));
+        *bridge.sub_stream.sps.write() = Some(vec![0x67, 0x42, 0x00, 0x1e]);
+        *bridge.sub_stream.pps.write() = Some(vec![0x68, 0xce, 0x06, 0xe2]);
+        *bridge.audio_config.write() = Some(vec![0x15, 0x88]);
+        let handler = LiveStreamHandler::new(false, false, Arc::clone(&bridge), 15);
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+
+        handler.send_information(tx).await;
+
+        let Information::Sdp { data } = rx.try_recv().unwrap();
+        assert!(
+            !data.contains("m=audio"),
+            "sub stream with audio disabled must not advertise audio, got: {data}"
+        );
+    }
+
     #[test]
     fn test_streaming_service_creates_with_config() {
         let config = StreamingConfig::default();
@@ -902,6 +966,57 @@ mod tests {
         assert!(service.rtsp_task.is_none());
         assert!(service.httpflv_task.is_none());
         assert!(service.streamhub_task.is_none());
+    }
+
+    #[test]
+    fn test_fanout_remuxer_refreshes_when_audio_config_publishes() {
+        // A remuxer built before audio startup published the AAC config must be
+        // rebuilt once the config arrives; otherwise HTTP-FLV never emits the
+        // audio sequence header for the life of the process.
+        let bridge = Arc::new(StreamingBridge::new(
+            LowLatencyFrameQueue::new("test-main", 8),
+            LowLatencyFrameQueue::new("test-sub", 8),
+            48_000,
+            true,
+        ));
+        *bridge.main_stream.sps.write() = Some(vec![0x67, 0x42, 0x00, 0x1e]);
+        *bridge.main_stream.pps.write() = Some(vec![0x68, 0xce, 0x06, 0xe2]);
+        let (rtsp_tx, _rtsp_rx) = streaming_lib::frame_data_channel();
+        let (httpflv_tx, _httpflv_rx) = streaming_lib::frame_data_channel();
+
+        let mut task = FanoutTask::new(
+            Arc::clone(&bridge),
+            LowLatencyFrameQueue::new("main", 8),
+            true,
+            true,
+            "main".to_string(),
+            rtsp_tx,
+            httpflv_tx,
+            15,
+        );
+
+        // First build: no audio config yet.
+        task.update_remuxer();
+        assert!(task.httpflv_remuxer.is_some());
+        assert!(
+            task.httpflv_remuxer
+                .as_ref()
+                .unwrap()
+                .audio_sequence_header(0)
+                .is_none()
+        );
+
+        // Audio config arrives after video initialization.
+        bridge.set_audio_config(vec![0x15, 0x88]);
+        task.update_remuxer();
+        assert!(
+            task.httpflv_remuxer
+                .as_ref()
+                .unwrap()
+                .audio_sequence_header(0)
+                .is_some(),
+            "remuxer must be rebuilt with the newly published AAC config"
+        );
     }
 
     #[tokio::test]

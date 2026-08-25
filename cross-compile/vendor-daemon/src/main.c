@@ -560,6 +560,7 @@ shutdown:
     int wedged = 0;
     wedged |= (stop_push_slot(0) != 0);
     wedged |= (stop_push_slot(1) != 0);
+    wedged |= (push_stop_audio() != 0);
     log_info("event=push_thread_lifecycle state=shutdown_stop_done wedged=%d diag_monotonic_ms=%llu",
              wedged,
              (unsigned long long)diag_monotonic_ms());
