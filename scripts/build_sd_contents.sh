@@ -171,15 +171,25 @@ log_success "anyka-init installed to ${ANYKA_HACK}/anyka-init.bin"
 
 # ── snmp-agent ───────────────────────────────────────────────────────────────
 log_step "Building snmp-agent (${BUILD_MODE})"
-SNMP_TARGET="armv5te-unknown-linux-uclibceabi"
-(
-  cd "${REPO_ROOT}/cross-compile"
-  if [[ "${BUILD_MODE}" = "debug" ]]; then
-    "${CARGO}" build -p snmp-agent --target "${SNMP_TARGET}"
-    SNMP_BIN="${REPO_ROOT}/cross-compile/target/${SNMP_TARGET}/debug/snmp-agent"
+# Build from onvif-rust so the (generated) .cargo/config.toml supplies the
+# ARMv5TE linker — same pattern as other workspace members built for device.
+ONVIF_DIR="${REPO_ROOT}/cross-compile/onvif-rust"
+if [[ ! -f "${ONVIF_DIR}/.cargo/config.toml" ]]; then
+  if [[ -x "${ONVIF_DIR}/scripts/setup-cargo-config.sh" ]]; then
+    "${ONVIF_DIR}/scripts/setup-cargo-config.sh"
   else
-    "${CARGO}" build --release -p snmp-agent --target "${SNMP_TARGET}"
-    SNMP_BIN="${REPO_ROOT}/cross-compile/target/${SNMP_TARGET}/release/snmp-agent"
+    log_error "Missing ${ONVIF_DIR}/.cargo/config.toml — run onvif-rust setup-cargo-config.sh"
+    exit 1
+  fi
+fi
+(
+  cd "${ONVIF_DIR}"
+  if [[ "${BUILD_MODE}" = "debug" ]]; then
+    "${CARGO}" build -p snmp-agent
+    SNMP_BIN="${REPO_ROOT}/cross-compile/target/armv5te-unknown-linux-uclibceabi/debug/snmp-agent"
+  else
+    "${CARGO}" build --release -p snmp-agent
+    SNMP_BIN="${REPO_ROOT}/cross-compile/target/armv5te-unknown-linux-uclibceabi/release/snmp-agent"
   fi
   mkdir -p "${ANYKA_HACK}/snmp"
   install -m 0755 "${SNMP_BIN}" "${ANYKA_HACK}/snmp/snmp-agent.bin"
