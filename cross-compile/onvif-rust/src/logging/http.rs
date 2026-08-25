@@ -496,7 +496,7 @@ mod tests {
     }
 
     #[test]
-    fn test_sanitize_masks_community_containing_an_escaped_quote() {
+    fn test_sanitize_json_community_escaped_quote_masks_value() {
         // A plain `find('"')` closes on the escaped quote and spills `b"` into
         // the log along with the rest of the secret.
         let body = r#"{"community":"a\"b","port":161}"#;

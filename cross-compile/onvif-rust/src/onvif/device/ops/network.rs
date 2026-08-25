@@ -622,9 +622,13 @@ fn parse_http_rtsp_ports(request: &SetNetworkProtocols) -> OnvifResult<(Option<i
                         "disabling HTTP/RTSP listeners is not supported",
                     ));
                 }
-                let port = *proto.port.first().ok_or_else(|| {
-                    OnvifError::invalid_arg_val("NoConfig", "protocol entry carries no port")
-                })?;
+                if proto.port.len() != 1 {
+                    return Err(OnvifError::invalid_arg_val(
+                        "NoConfig",
+                        "protocol entry must carry exactly one port",
+                    ));
+                }
+                let port = proto.port[0];
                 if !(1..=65535).contains(&port) {
                     return Err(OnvifError::invalid_arg_val(
                         "NoConfig",
@@ -1152,6 +1156,23 @@ mod tests {
                 .is_err()
         );
         assert_eq!(config.read().server.port, before);
+    }
+
+    #[tokio::test]
+    async fn test_set_network_protocols_rejects_multiple_ports() {
+        let config = create_test_config();
+        let request = SetNetworkProtocols {
+            network_protocols: vec![NetworkProtocol {
+                name: NetworkProtocolType::HTTP,
+                enabled: true,
+                port: vec![8080, 8081],
+            }],
+        };
+        assert!(
+            handle_set_network_protocols(&config, request)
+                .await
+                .is_err()
+        );
     }
 
     #[tokio::test]

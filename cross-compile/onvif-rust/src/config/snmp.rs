@@ -31,7 +31,7 @@ fn update_lock() -> &'static Mutex<()> {
 pub fn config_path() -> PathBuf {
     path_override()
         .lock()
-        .unwrap_or_else(|e| e.into_inner())
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
         .clone()
         .unwrap_or_else(|| PathBuf::from(DEFAULT_CONFIG_PATH))
 }
@@ -39,7 +39,7 @@ pub fn config_path() -> PathBuf {
 /// Test-only path override.
 #[cfg(test)]
 pub fn set_config_path_for_test(path: Option<PathBuf>) {
-    *path_override().lock().unwrap_or_else(|e| e.into_inner()) = path;
+    *path_override().lock().unwrap_or_else(std::sync::PoisonError::into_inner) = path;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -59,19 +59,23 @@ pub struct SnmpSettings {
 }
 
 fn default_enabled() -> bool {
-    false
+    true
 }
 fn default_port() -> u16 {
     161
 }
 fn default_community() -> String {
-    String::new()
+    "public".to_string()
 }
+
+/// Returned by [`SnmpSettings::update_at`] when enable is requested without a community.
+pub const ERR_EMPTY_COMMUNITY_WHEN_ENABLED: &str =
+    "community must not be empty when SNMP is enabled";
 
 impl Default for SnmpSettings {
     fn default() -> Self {
         Self {
-            enabled: false,
+            enabled: true,
             port: 161,
             community: default_community(),
             sys_contact: String::new(),
@@ -107,13 +111,11 @@ impl SnmpSettings {
     }
 
     pub fn update_at(path: &Path, edit: impl FnOnce(&mut Self)) -> Result<(), std::io::Error> {
-        let _guard = update_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = update_lock().lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut cfg = Self::read(path)?;
         edit(&mut cfg);
         if cfg.enabled && cfg.community.is_empty() {
-            return Err(std::io::Error::other(
-                "community must not be empty when SNMP is enabled",
-            ));
+            return Err(std::io::Error::other(ERR_EMPTY_COMMUNITY_WHEN_ENABLED));
         }
         cfg.write(path)
     }
@@ -177,10 +179,16 @@ mod tests {
     }
 
     #[test]
-    fn test_update_at_rejects_enabled_without_community() {
+    fn test_update_at_enabled_without_community_returns_error() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("snmp.toml");
-        SnmpSettings::default().write(&path).unwrap();
+        SnmpSettings {
+            enabled: false,
+            community: String::new(),
+            ..SnmpSettings::default()
+        }
+        .write(&path)
+        .unwrap();
         let err = SnmpSettings::update_at(&path, |s| s.enabled = true).unwrap_err();
         assert!(err.to_string().contains("community"));
     }

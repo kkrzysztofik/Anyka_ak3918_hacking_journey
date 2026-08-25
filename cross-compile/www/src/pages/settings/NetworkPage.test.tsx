@@ -338,7 +338,7 @@ describe('NetworkPage', () => {
     });
   });
 
-  it('should render SNMP settings from the fetched config', async () => {
+  it('test_render_snmp_settings_fetched_config_displays_values', async () => {
     vi.mocked(getSnmpConfig).mockResolvedValue({
       enabled: true,
       port: 1161,
@@ -354,7 +354,7 @@ describe('NetworkPage', () => {
     expect(screen.getByTestId('network-snmp-community-input')).toHaveValue('monitor');
   });
 
-  it('should save SNMP settings on confirmation', async () => {
+  it('test_save_snmp_settings_on_confirmation_calls_putSnmpConfig', async () => {
     const user = userEvent.setup();
     await renderNetworkPage();
 
@@ -369,7 +369,7 @@ describe('NetworkPage', () => {
     });
   });
 
-  it('should block saving when the community is empty', async () => {
+  it('test_save_empty_community_blocks_submit_and_skips_putSnmpConfig', async () => {
     const user = userEvent.setup();
     await renderNetworkPage();
 
@@ -379,6 +379,45 @@ describe('NetworkPage', () => {
     expect(await screen.findByTestId('network-snmp-community-error')).toHaveTextContent(
       'Community must not be empty',
     );
+    expect(putSnmpConfig).not.toHaveBeenCalled();
+  });
+
+  it('test_confirm_dialog_snmp_only_save_shows_reload_message', async () => {
+    const user = userEvent.setup();
+    await renderNetworkPage();
+
+    await makeFormDirty(user, 'network-snmp-port-input', '2161');
+    await user.click(screen.getByTestId('network-save-button'));
+
+    expect(
+      await screen.findByText('SNMP changes apply on reload without reboot.'),
+    ).toBeInTheDocument();
+  });
+
+  it('test_snmp_load_error_disables_snmp_fields', async () => {
+    vi.mocked(getSnmpConfig).mockRejectedValue(new Error('SNMP unavailable'));
+    await renderNetworkPage();
+
+    expect(await screen.findByTestId('network-snmp-load-error')).toHaveTextContent(
+      'SNMP unavailable',
+    );
+    expect(screen.getByTestId('network-snmp-port-input')).toBeDisabled();
+    expect(screen.getByTestId('network-snmp-community-input')).toBeDisabled();
+  });
+
+  it('test_save_skips_snmp_put_when_config_unavailable', async () => {
+    vi.mocked(getSnmpConfig).mockRejectedValue(new Error('SNMP unavailable'));
+    const user = userEvent.setup();
+    await renderNetworkPage();
+    await screen.findByTestId('network-snmp-load-error');
+
+    await makeFormDirty(user, 'network-http-port-input', '8080');
+    await user.click(screen.getByTestId('network-save-button'));
+    await user.click(await screen.findByTestId('network-confirm-save-button'));
+
+    await waitFor(() => {
+      expect(setNetworkProtocols).toHaveBeenCalled();
+    });
     expect(putSnmpConfig).not.toHaveBeenCalled();
   });
 });

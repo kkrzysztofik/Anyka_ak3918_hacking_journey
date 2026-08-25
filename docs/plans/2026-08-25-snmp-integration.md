@@ -395,10 +395,10 @@ git commit -m "feat(snmp): ONVIF Get/SetNetworkProtocols SNMP extension"
 
 **Files:**
 - Modify: `cross-compile/www/src/services/networkService.ts` — extend `NetworkProtocols` with `snmp: { enabled, port }` (and community via small REST or fold into existing diagnostics-style overlay if cleaner)
-- Prefer: extend ONVIF get/set for port/enabled **plus** a tiny `GET/PATCH /api/snmp` for community/sys* (keeps community out of SOAP). If that splits surface too much, single REST resource for all of `snmp.toml` and keep ONVIF port/enabled in sync from the same store.
+- Prefer: extend ONVIF get/set for port/enabled **plus** a tiny `GET/PUT /api/snmp` for community/sys* (keeps community out of SOAP). If that splits surface too much, single REST resource for all of `snmp.toml` and keep ONVIF port/enabled in sync from the same store.
 
 **Practical v1 (recommended in this plan):**  
-- REST `GET/PATCH /api/snmp` in `onvif-rust` (like network overlay) owning full `snmp.toml`  
+- REST `GET/PUT /api/snmp` in `onvif-rust` (like network overlay) owning full `snmp.toml`  
 - ONVIF Get/SetNetworkProtocols reads/writes the same file for enabled/port only  
 - WebUI uses REST for the SNMP card (enable, port, community) — simpler than stuffing community into SOAP
 

@@ -8,7 +8,7 @@ use thiserror::Error;
 pub const DEFAULT_CONFIG_PATH: &str = "/mnt/anyka_hack/snmp.toml";
 
 fn default_enabled() -> bool {
-    false
+    true
 }
 
 fn default_port() -> u16 {
@@ -16,7 +16,7 @@ fn default_port() -> u16 {
 }
 
 fn default_community() -> String {
-    String::new()
+    "public".to_string()
 }
 
 /// SNMPv2c agent settings.
@@ -58,6 +58,8 @@ pub enum ConfigError {
     Parse(#[from] toml::de::Error),
     #[error("invalid port: must be non-zero")]
     InvalidPort,
+    #[error("community must not be empty when SNMP is enabled")]
+    EmptyCommunityWhenEnabled,
 }
 
 impl SnmpConfig {
@@ -75,6 +77,9 @@ impl SnmpConfig {
         if config.port == 0 {
             return Err(ConfigError::InvalidPort);
         }
+        if config.enabled && config.community.is_empty() {
+            return Err(ConfigError::EmptyCommunityWhenEnabled);
+        }
         Ok(config)
     }
 }
@@ -86,9 +91,9 @@ mod tests {
     #[test]
     fn test_default_config_values() {
         let c = SnmpConfig::default();
-        assert!(!c.enabled);
+        assert!(c.enabled);
         assert_eq!(c.port, 161);
-        assert_eq!(c.community, "");
+        assert_eq!(c.community, "public");
         assert_eq!(c.sys_contact, "");
         assert_eq!(c.sys_name, "");
         assert_eq!(c.sys_location, "");
@@ -129,5 +134,16 @@ sys_location = "lab"
         let path = dir.path().join("snmp.toml");
         std::fs::write(&path, "port = 0\n").unwrap();
         assert!(SnmpConfig::load(&path).is_err());
+    }
+
+    #[test]
+    fn test_load_rejects_enabled_without_community() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("snmp.toml");
+        std::fs::write(&path, "enabled = true\nport = 161\ncommunity = \"\"\n").unwrap();
+        assert!(matches!(
+            SnmpConfig::load(&path),
+            Err(ConfigError::EmptyCommunityWhenEnabled)
+        ));
     }
 }

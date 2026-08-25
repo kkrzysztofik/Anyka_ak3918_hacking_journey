@@ -178,6 +178,7 @@ export default function NetworkPage() {
   const queryClient = useQueryClient();
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [pendingValues, setPendingValues] = useState<NetworkFormData | null>(null);
+  const [snmpOnlySave, setSnmpOnlySave] = useState(false);
   const [failureDismissed, setFailureDismissed] = useState(false);
   const dismissFailure = useCallback(() => setFailureDismissed(true), []);
 
@@ -191,7 +192,13 @@ export default function NetworkPage() {
     queryFn: getNetworkOverlay,
   });
 
-  const { data: snmp, isSuccess: snmpLoaded } = useQuery({
+  const {
+    data: snmp,
+    isSuccess: snmpLoaded,
+    isError: snmpError,
+    isPending: snmpPending,
+    error: snmpLoadError,
+  } = useQuery({
     queryKey: ['snmpConfig'],
     queryFn: getSnmpConfig,
   });
@@ -211,9 +218,9 @@ export default function NetworkPage() {
       secondaryDNS: '',
       httpPort: 80,
       rtspPort: 554,
-      snmpEnabled: false,
+      snmpEnabled: true,
       snmpPort: 161,
-      snmpCommunity: '',
+      snmpCommunity: 'public',
     },
   });
 
@@ -224,32 +231,41 @@ export default function NetworkPage() {
     useDeviceStatus();
 
   const ipPending = useMemo(() => ipOverlayDiffersFromLive(config, overlay), [config, overlay]);
+  const snmpUnavailable = snmpPending || snmpError;
 
   useEffect(() => {
-    if (config) {
-      const iface = config.interfaces[0];
-      const pending = overlay?.pending;
-      const parsed = parseOverlayAddress(pending?.address);
-      form.reset({
-        ssid: pending?.ssid ?? diagnostics?.wifi?.ssid ?? '',
-        password: '',
-        security: (pending?.security as NetworkFormData['security']) ?? 'wpa',
-        dhcp: pending?.dhcp ?? iface?.dhcp ?? true,
-        address: parsed?.ip ?? iface?.address ?? '',
-        prefixLength: parsed?.prefix ?? iface?.prefixLength ?? 24,
-        gateway: pending?.gateway ?? iface?.gateway ?? '',
-        dnsFromDHCP: config.dns.fromDHCP,
-        primaryDNS: pending?.dns?.[0] ?? config.dns.dnsServers[0] ?? '',
-        secondaryDNS: pending?.dns?.[1] ?? config.dns.dnsServers[1] ?? '',
-        httpPort: config.protocols.http,
-        rtspPort: config.protocols.rtsp,
-        // Never invent SNMP defaults: a failed GET must not overwrite a real community on save.
-        snmpEnabled: snmp?.enabled ?? false,
-        snmpPort: snmp?.port ?? 161,
-        snmpCommunity: snmp?.community ?? '',
-      });
-    }
-  }, [config, overlay, snmp, diagnostics?.wifi?.ssid, form]);
+    if (!config) return;
+    const iface = config.interfaces[0];
+    const pending = overlay?.pending;
+    const parsed = parseOverlayAddress(pending?.address);
+    const snmpFields = {
+      snmpEnabled: form.getValues('snmpEnabled'),
+      snmpPort: form.getValues('snmpPort'),
+      snmpCommunity: form.getValues('snmpCommunity'),
+    };
+    form.reset({
+      ssid: pending?.ssid ?? diagnostics?.wifi?.ssid ?? '',
+      password: '',
+      security: (pending?.security as NetworkFormData['security']) ?? 'wpa',
+      dhcp: pending?.dhcp ?? iface?.dhcp ?? true,
+      address: parsed?.ip ?? iface?.address ?? '',
+      prefixLength: parsed?.prefix ?? iface?.prefixLength ?? 24,
+      gateway: pending?.gateway ?? iface?.gateway ?? '',
+      dnsFromDHCP: config.dns.fromDHCP,
+      primaryDNS: pending?.dns?.[0] ?? config.dns.dnsServers[0] ?? '',
+      secondaryDNS: pending?.dns?.[1] ?? config.dns.dnsServers[1] ?? '',
+      httpPort: config.protocols.http,
+      rtspPort: config.protocols.rtsp,
+      ...snmpFields,
+    });
+  }, [config, overlay, diagnostics?.wifi?.ssid, form]);
+
+  useEffect(() => {
+    if (!snmpLoaded || !snmp || form.formState.isDirty) return;
+    form.setValue('snmpEnabled', snmp.enabled);
+    form.setValue('snmpPort', snmp.port);
+    form.setValue('snmpCommunity', snmp.community);
+  }, [snmp, snmpLoaded, form, form.formState.isDirty]);
 
   const mutation = useMutation({
     mutationFn: async (values: NetworkFormData) => {
@@ -280,7 +296,22 @@ export default function NetworkPage() {
       await runNetworkStep('Port configuration failed', () =>
         setNetworkProtocols(values.httpPort, values.rtspPort),
       );
-      if (snmpLoaded) {
+      const snmpChanged =
+        snmp !== undefined &&
+        (values.snmpEnabled !== snmp.enabled ||
+          values.snmpPort !== snmp.port ||
+          values.snmpCommunity !== snmp.community);
+      if (snmpChanged) {
+        if (!snmpLoaded) {
+          throw new Error('SNMP configuration is still loading');
+        }
+        if (snmpError) {
+          throw new Error(
+            snmpLoadError instanceof Error
+              ? snmpLoadError.message
+              : 'SNMP configuration failed to load',
+          );
+        }
         await runNetworkStep('SNMP configuration failed', () =>
           putSnmpConfig({
             enabled: values.snmpEnabled,
@@ -309,6 +340,10 @@ export default function NetworkPage() {
   });
 
   const onSubmit = (values: NetworkFormData) => {
+    const dirtyKeys = Object.keys(form.formState.dirtyFields);
+    setSnmpOnlySave(
+      dirtyKeys.length > 0 && dirtyKeys.every((key) => key.startsWith('snmp')),
+    );
     setPendingValues(values);
     setConfirmOpen(true);
   };
@@ -346,13 +381,16 @@ export default function NetworkPage() {
   };
 
   const confirmDescription = useMemo(() => {
+    if (snmpOnlySave) {
+      return 'SNMP changes apply on reload without reboot.';
+    }
     const base =
       'Applying these changes might disconnect the device from the network. Settings take effect after reboot.';
     if (pendingValues && pendingValues.httpPort !== config?.protocols.http) {
       return `${base} After reboot, open the WebUI at http://${globalThis.location.hostname}:${pendingValues.httpPort}/`;
     }
     return base;
-  }, [pendingValues, config?.protocols.http]);
+  }, [snmpOnlySave, pendingValues, config?.protocols.http]);
 
   if (isLoading)
     return (
@@ -781,6 +819,16 @@ export default function NetworkPage() {
                 </div>
               </SettingsCardHeader>
               <SettingsCardContent className="space-y-[24px]">
+                {snmpError && (
+                  <p
+                    className="text-accent-red text-[13px]"
+                    data-testid="network-snmp-load-error"
+                  >
+                    {snmpLoadError instanceof Error
+                      ? snmpLoadError.message
+                      : 'Failed to load SNMP settings'}
+                  </p>
+                )}
                 <FormField
                   control={form.control}
                   name="snmpEnabled"
@@ -789,13 +837,14 @@ export default function NetworkPage() {
                       <div>
                         <FormLabel className="text-[#a1a1a6]">Enable SNMP</FormLabel>
                         <FormDescription className="text-[#636366]">
-                          Choose a non-default community before enabling on untrusted networks
+                          Default community &quot;public&quot; is insecure on untrusted networks
                         </FormDescription>
                       </div>
                       <FormControl>
                         <Switch
                           checked={field.value}
                           onCheckedChange={field.onChange}
+                          disabled={snmpUnavailable}
                           data-testid="network-snmp-enabled-switch"
                         />
                       </FormControl>
@@ -813,6 +862,7 @@ export default function NetworkPage() {
                           <Input
                             type="number"
                             {...field}
+                            disabled={snmpUnavailable}
                             onChange={(e) => field.onChange(Number.parseInt(e.target.value))}
                             className="border-[#3a3a3c] bg-transparent text-white"
                             data-testid="network-snmp-port-input"
@@ -831,6 +881,7 @@ export default function NetworkPage() {
                         <FormControl>
                           <Input
                             {...field}
+                            disabled={snmpUnavailable}
                             className="border-[#3a3a3c] bg-transparent text-white"
                             data-testid="network-snmp-community-input"
                           />

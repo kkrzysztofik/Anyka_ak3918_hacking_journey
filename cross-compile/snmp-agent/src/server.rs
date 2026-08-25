@@ -183,8 +183,13 @@ async fn apply_reload(agent: &mut Agent, socket: &mut Option<UdpSocket>, new_cfg
                 tracing::error!(
                     error = %e,
                     port = new_cfg.port,
-                    "rebind failed; keeping previous config and socket"
+                    "rebind failed; keeping previous socket when bound"
                 );
+                // No live socket: commit the requested config so BIND_RETRY
+                // keeps trying the new port instead of stale last-good values.
+                if socket.is_none() {
+                    agent.config = new_cfg;
+                }
             }
         }
     } else {

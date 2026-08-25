@@ -110,8 +110,13 @@ pub async fn handle_put_snmp(
 ) -> Result<StatusCode, (StatusCode, String)> {
     validate_patch(&patch).map_err(|reason| (StatusCode::BAD_REQUEST, reason))?;
 
-    SnmpSettings::update_at(&state.config_path, |s| apply_patch(s, patch))
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    SnmpSettings::update_at(&state.config_path, |s| apply_patch(s, patch)).map_err(|e| {
+        if e.to_string() == snmp::ERR_EMPTY_COMMUNITY_WHEN_ENABLED {
+            (StatusCode::BAD_REQUEST, e.to_string())
+        } else {
+            (StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
+        }
+    })?;
 
     snmp::sighup_agent(Path::new(&state.pidfile)).map_err(|e| {
         (
@@ -173,9 +178,9 @@ mod tests {
         let get = handle_get_snmp(Extension(Arc::clone(&state)))
             .await
             .expect("get defaults");
-        assert!(!get.enabled);
+        assert!(get.enabled);
         assert_eq!(get.port, 161);
-        assert_eq!(get.community, "");
+        assert_eq!(get.community, "public");
 
         let put = handle_put_snmp(
             Extension(Arc::clone(&state)),
@@ -216,5 +221,32 @@ mod tests {
         )
         .await;
         assert!(bad.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_put_snmp_enabled_without_community_returns_bad_request() {
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join("snmp.toml");
+        SnmpSettings {
+            enabled: false,
+            community: String::new(),
+            ..SnmpSettings::default()
+        }
+        .write(&config_path)
+        .unwrap();
+        let state = Arc::new(SnmpApiState {
+            config_path,
+            pidfile: dir.path().join("missing.pid"),
+        });
+        let err = handle_put_snmp(
+            Extension(state),
+            Json(SnmpPatch {
+                enabled: Some(true),
+                ..Default::default()
+            }),
+        )
+        .await
+        .expect_err("empty community when enabling");
+        assert_eq!(err.0, StatusCode::BAD_REQUEST);
     }
 }

@@ -37,15 +37,15 @@ Dropbear SSH is controlled by `[services.dropbear]` in `anyka.toml` (`enabled`,
 
 # SNMP
 
-Read-only SNMPv2c agent (`[services.snmp]`). **Disabled by default** — set a
-per-device RO community and enable it in the WebUI Network page (or edit
-`/mnt/anyka_hack/snmp.toml`). Binary: `anyka_hack/snmp/snmp-agent.bin`.
+Read-only SNMPv2c agent (`[services.snmp]`). Defaults: UDP port **161**,
+community **`public`**. Config file: `/mnt/anyka_hack/snmp.toml`. Binary:
+`anyka_hack/snmp/snmp-agent.bin`.
 
-Example from a laptop (after provisioning):
+Example from a laptop:
 
 ```bash
-snmpwalk -v2c -c <your-community> <camera-ip> 1.3.6.1.2.1.1
-snmpwalk -v2c -c <your-community> <camera-ip> 1.3.6.1.2.1.2
+snmpwalk -v2c -c public <camera-ip> 1.3.6.1.2.1.1
+snmpwalk -v2c -c public <camera-ip> 1.3.6.1.2.1.2
 ```
 
 # Third-Party Build Scripts
