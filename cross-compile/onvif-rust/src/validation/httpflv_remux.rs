@@ -17,7 +17,6 @@ pub struct ValidationHttpFlvRemuxer {
     sps: Option<Vec<u8>>,
     pps: Option<Vec<u8>>,
     audio_config: Option<Vec<u8>>,
-    audio_sample_rate: u32,
     video_framerate: u32,
 }
 
@@ -26,14 +25,12 @@ impl ValidationHttpFlvRemuxer {
         sps: Vec<u8>,
         pps: Vec<u8>,
         audio_config: Option<Vec<u8>>,
-        audio_sample_rate: u32,
         video_framerate: u32,
     ) -> Self {
         Self {
             sps: (!sps.is_empty()).then_some(sps),
             pps: (!pps.is_empty()).then_some(pps),
             audio_config,
-            audio_sample_rate,
             video_framerate,
         }
     }
@@ -60,7 +57,9 @@ impl ValidationHttpFlvRemuxer {
     ) -> Result<Option<FrameData>, ValidationHttpFlvRemuxError> {
         match frame {
             FrameData::Video { timestamp, data } => self.remux_video_frame(timestamp, data),
-            FrameData::Audio { timestamp, data } => Ok(self.remux_audio_frame(timestamp, data)),
+            FrameData::Audio { timestamp, data } => {
+                Ok(Some(self.remux_audio_frame(timestamp, data)))
+            }
             FrameData::MetaData { .. } => Ok(Some(frame)),
             FrameData::MediaInfo { .. } => Ok(None),
         }
@@ -180,25 +179,21 @@ impl ValidationHttpFlvRemuxer {
         }))
     }
 
-    pub fn remux_audio_frame(&self, timestamp_samples: u32, data: BytesMut) -> Option<FrameData> {
-        if self.audio_sample_rate == 0 {
-            return None;
-        }
-
-        let timestamp_ms = ((timestamp_samples as u64)
-            .saturating_mul(1000)
-            .saturating_div(self.audio_sample_rate as u64))
-        .min(u32::MAX as u64) as u32;
-
+    /// Wrap an AAC frame in an FLV audio tag.
+    ///
+    /// The timestamp passes through untouched: FLV tag timestamps are
+    /// milliseconds on every track, and the bridge already hands both audio and
+    /// video frames in milliseconds. Any per-track scaling here desyncs FLV.
+    pub fn remux_audio_frame(&self, timestamp_ms: u32, data: BytesMut) -> FrameData {
         let mut payload = BytesMut::with_capacity(2 + data.len());
         payload.put_u8(0xAF);
         payload.put_u8(aac_packet_type::AAC_RAW);
         payload.extend_from_slice(&data);
 
-        Some(FrameData::Audio {
+        FrameData::Audio {
             timestamp: timestamp_ms,
             data: payload,
-        })
+        }
     }
 }
 
@@ -322,7 +317,6 @@ mod tests {
             vec![0x67, 0x42, 0xE0, 0x1E, 0xAA],
             vec![0x68, 0xCE, 0x06, 0xE2],
             None,
-            0,
             15,
         );
         let frame = remuxer.video_sequence_header(123).expect("seq header");
@@ -339,7 +333,7 @@ mod tests {
 
     #[test]
     fn test_remux_annexb_video_to_avcc_nalu_payload() {
-        let mut remuxer = ValidationHttpFlvRemuxer::new(Vec::new(), Vec::new(), None, 0, 15);
+        let mut remuxer = ValidationHttpFlvRemuxer::new(Vec::new(), Vec::new(), None, 15);
         let mut frame = BytesMut::new();
         frame.extend_from_slice(&annexb_nal(&[0x67, 0x42, 0xE0, 0x1E]));
         frame.extend_from_slice(&annexb_nal(&[0x68, 0xCE, 0x06, 0xE2]));
@@ -363,7 +357,7 @@ mod tests {
 
     #[test]
     fn test_remux_single_raw_nal_without_annexb_start_code() {
-        let mut remuxer = ValidationHttpFlvRemuxer::new(Vec::new(), Vec::new(), None, 0, 15);
+        let mut remuxer = ValidationHttpFlvRemuxer::new(Vec::new(), Vec::new(), None, 15);
         let frame = BytesMut::from(&[0x65, 0x88, 0x84, 0x21, 0xA0][..]);
 
         let out = remuxer
@@ -384,20 +378,20 @@ mod tests {
     }
 
     #[test]
-    fn test_remux_audio_timestamp_scaling_success() {
+    fn test_remux_audio_frame_preserves_millisecond_timestamp() {
+        // FLV tag timestamps are milliseconds on every track. Scaling audio by
+        // the sample rate here (the old behaviour) emitted 16 ms per 128 ms AAC
+        // frame at 8 kHz.
         let remuxer = ValidationHttpFlvRemuxer::new(
             vec![0x67, 0x42, 0xE0, 0x1E],
             vec![0x68, 0xCE, 0x06, 0xE2],
             Some(vec![0x11, 0x90]),
-            48_000,
             15,
         );
-        let out = remuxer
-            .remux_audio_frame(48_000, BytesMut::from(&[0x01, 0x02, 0x03][..]))
-            .expect("audio frame");
+        let out = remuxer.remux_audio_frame(128, BytesMut::from(&[0x01, 0x02, 0x03][..]));
         match out {
             FrameData::Audio { timestamp, data } => {
-                assert_eq!(timestamp, 1000);
+                assert_eq!(timestamp, 128);
                 assert_eq!(data[0], 0xAF);
                 assert_eq!(data[1], aac_packet_type::AAC_RAW);
             }
@@ -406,8 +400,44 @@ mod tests {
     }
 
     #[test]
+    fn test_remux_frame_keeps_audio_and_video_on_one_timeline() {
+        // The regression that actually broke playback: a frame of each kind
+        // stamped at the same instant must leave the remuxer with the same
+        // timestamp. Any per-track scaling here desyncs HTTP-FLV, which (unlike
+        // RTSP) has no per-track timestamp normalizer downstream to hide it.
+        let mut remuxer = ValidationHttpFlvRemuxer::new(
+            vec![0x67, 0x42, 0xE0, 0x1E],
+            vec![0x68, 0xCE, 0x06, 0xE2],
+            Some(vec![0x11, 0x90]),
+            15,
+        );
+
+        let ts = |frame: Option<FrameData>| match frame {
+            Some(FrameData::Audio { timestamp, .. } | FrameData::Video { timestamp, .. }) => {
+                timestamp
+            }
+            other => panic!("expected a media frame, got {other:?}"),
+        };
+
+        let audio_ts = ts(remuxer
+            .remux_frame(FrameData::Audio {
+                timestamp: 5_000,
+                data: BytesMut::from(&[0x01, 0x02, 0x03][..]),
+            })
+            .expect("audio remux"));
+        let video_ts = ts(remuxer
+            .remux_frame(FrameData::Video {
+                timestamp: 5_000,
+                data: BytesMut::from(&annexb_nal(&[0x65, 0x88, 0x84, 0x21, 0xA0])[..]),
+            })
+            .expect("video remux"));
+
+        assert_eq!(audio_ts, video_ts);
+    }
+
+    #[test]
     fn test_remux_runtime_sps_pps_filtering_skips_headers_only_frame() {
-        let mut remuxer = ValidationHttpFlvRemuxer::new(Vec::new(), Vec::new(), None, 0, 15);
+        let mut remuxer = ValidationHttpFlvRemuxer::new(Vec::new(), Vec::new(), None, 15);
         let mut frame = BytesMut::new();
         frame.extend_from_slice(&annexb_nal(&[0x67, 0x42, 0xE0, 0x1E]));
         frame.extend_from_slice(&annexb_nal(&[0x68, 0xCE, 0x06, 0xE2]));
@@ -423,7 +453,6 @@ mod tests {
             vec![0x67, 0x42, 0xE0, 0x1E],
             vec![0x68, 0xCE, 0x06, 0xE2],
             None,
-            0,
             15,
         );
         let FrameData::MetaData { timestamp, data } = remuxer.on_metadata_tag(0) else {
@@ -457,7 +486,6 @@ mod tests {
             vec![0x67, 0x42, 0xE0, 0x1E],
             vec![0x68, 0xCE, 0x06, 0xE2],
             Some(vec![0x11, 0x90]),
-            48_000,
             15,
         );
         let FrameData::MetaData { data, .. } = remuxer.on_metadata_tag(0) else {

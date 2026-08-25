@@ -19,7 +19,6 @@ use crate::platform::common::{AudioEncoder, AudioEncoderConfig, PlatformError, P
 /// Provides audio encoding functionality for the Anyka platform using the
 /// vendor daemon IPC bridge for FFI calls.
 pub(super) struct AnykaAudioEncoder {
-    #[allow(dead_code)]
     ffi: Arc<dyn crate::hal::common::audio::AudioHalTrait>,
     configurations: RwLock<Vec<AudioEncoderConfig>>,
 }
@@ -96,11 +95,85 @@ impl AudioEncoder for AnykaAudioEncoder {
     async fn get_configurations(&self) -> PlatformResult<Vec<AudioEncoderConfig>> {
         Ok(self.configurations.read().clone())
     }
+
+    async fn start(
+        &self,
+        bridge: &Arc<crate::streaming::bridge::StreamingBridge>,
+        sample_rate: u32,
+        channels: u32,
+    ) -> PlatformResult<()> {
+        // Start microphone capture and advertise the audio track.
+        //
+        // Ordering matters: the ASC is published only after the daemon accepts
+        // the push request, so the SDP never promises a track the camera is
+        // not actually sending.
+        self.ffi.start_audio_push(sample_rate, channels)?;
+
+        bridge.set_audio_config(crate::streaming::helpers::aac_audio_specific_config(
+            sample_rate,
+            channels,
+        ));
+
+        tracing::info!(sample_rate, channels, "Audio capture started");
+        Ok(())
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use crate::hal::common::audio::MockAudioHalTrait;
+    use crate::streaming::bridge::{LowLatencyFrameQueue, StreamingBridge};
+    use mockall::predicate::eq;
+
+    fn make_test_bridge() -> Arc<StreamingBridge> {
+        Arc::new(StreamingBridge::new(
+            LowLatencyFrameQueue::new("test-main", 4),
+            LowLatencyFrameQueue::new("test-sub", 4),
+            8000,
+            true,
+        ))
+    }
+
+    #[tokio::test]
+    async fn test_start_publishes_audio_config_and_requests_push() {
+        // Audio must not be advertised until the daemon has accepted the push
+        // request: an SDP that promises a track the camera never sends leaves
+        // clients waiting on RTP that never arrives.
+        let mut mock = MockAudioHalTrait::new();
+        mock.expect_start_audio_push()
+            .with(eq(8000), eq(1))
+            .times(1)
+            .returning(|_, _| Ok(()));
+
+        let encoder = AnykaAudioEncoder::with_ffi(Arc::new(mock));
+        let bridge = make_test_bridge();
+
+        encoder.start(&bridge, 8000, 1).await.unwrap();
+
+        assert_eq!(
+            bridge.audio_config.read().as_deref(),
+            Some([0x15, 0x88].as_slice())
+        );
+    }
+
+    #[tokio::test]
+    async fn test_start_leaves_audio_config_none_when_daemon_rejects() {
+        // Audio is strictly additive; a failed mic must never take video down
+        // and must never advertise a track.
+        let mut mock = MockAudioHalTrait::new();
+        mock.expect_start_audio_push()
+            .times(1)
+            .returning(|_, _| Err(PlatformError::HardwareFailure("mic".into())));
+
+        let encoder = AnykaAudioEncoder::with_ffi(Arc::new(mock));
+        let bridge = make_test_bridge();
+
+        let result = encoder.start(&bridge, 8000, 1).await;
+        assert!(result.is_err());
+        assert!(bridge.audio_config.read().is_none());
+    }
 
     // The platform integration tests exercise this implementation through the
     // `Platform` trait; keep this module test as a lightweight compile check.

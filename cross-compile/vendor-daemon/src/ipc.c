@@ -89,7 +89,18 @@ int send_response(int fd, int32_t status, const void *data, uint32_t len)
  * Maps stream_id to the appropriate global mutex so callers can lock
  * before reading or modifying the corresponding client fd.
  *
- * @param stream_id  Stream identifier (VD_STREAM_MAIN or VD_STREAM_SUB).
+ * VD_STREAM_AUDIO deliberately shares the MAIN notification channel: there are
+ * only two notify sockets, and the consumer tags each frame from the ring slot
+ * header rather than from the socket it arrived on, so audio rides main without
+ * being mistaken for video.
+ *
+ * ponytail: audio therefore stops whenever no MAIN frame client is connected,
+ * even if a sub-only consumer is streaming. Upgrade path: give audio its own
+ * notify socket (and a third reader in onvif-rust) if sub-only streaming with
+ * audio ever has to work.
+ *
+ * @param stream_id  Stream identifier (VD_STREAM_MAIN, VD_STREAM_SUB or
+ *                   VD_STREAM_AUDIO).
  * @return           Pointer to the mutex for the given stream.
  */
 pthread_mutex_t *frame_client_lock_for_stream(uint32_t stream_id)
@@ -108,7 +119,11 @@ pthread_mutex_t *frame_client_lock_for_stream(uint32_t stream_id)
  * Callers must hold the corresponding lock from frame_client_lock_for_stream()
  * before dereferencing the returned pointer.
  *
- * @param stream_id  Stream identifier (VD_STREAM_MAIN or VD_STREAM_SUB).
+ * VD_STREAM_AUDIO shares the MAIN channel; see frame_client_lock_for_stream()
+ * for why, and for what that costs.
+ *
+ * @param stream_id  Stream identifier (VD_STREAM_MAIN, VD_STREAM_SUB or
+ *                   VD_STREAM_AUDIO).
  * @return           Pointer to the client fd integer for the given stream.
  */
 int *frame_client_fd_for_stream(uint32_t stream_id)

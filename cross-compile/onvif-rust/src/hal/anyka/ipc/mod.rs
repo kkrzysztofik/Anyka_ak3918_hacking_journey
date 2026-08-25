@@ -274,6 +274,8 @@ const CMD_AI_SET_ASLC_VOLUME: i32 = 53;
 const CMD_AENC_OPEN: i32 = 54;
 const CMD_AENC_CLOSE: i32 = 55;
 const CMD_AENC_SET_ATTR: i32 = 56;
+const CMD_AUDIO_START_PUSH: i32 = 57;
+const CMD_AUDIO_STOP_PUSH: i32 = 58;
 const CMD_ISP_SET_BRIGHTNESS: i32 = 100;
 const CMD_ISP_SET_CONTRAST: i32 = 101;
 const CMD_ISP_SET_SATURATION: i32 = 102;
@@ -553,6 +555,8 @@ impl AnykaIpc {
             CMD_AENC_OPEN => "AENC_OPEN",
             CMD_AENC_CLOSE => "AENC_CLOSE",
             CMD_AENC_SET_ATTR => "AENC_SET_ATTR",
+            CMD_AUDIO_START_PUSH => "AUDIO_START_PUSH",
+            CMD_AUDIO_STOP_PUSH => "AUDIO_STOP_PUSH",
             CMD_ISP_SET_BRIGHTNESS => "ISP_SET_BRIGHTNESS",
             CMD_ISP_SET_CONTRAST => "ISP_SET_CONTRAST",
             CMD_ISP_SET_SATURATION => "ISP_SET_SATURATION",
@@ -1575,6 +1579,78 @@ impl AnykaIpc {
             status,
             "daemon accepted push stop request"
         );
+        Ok(())
+    }
+
+    /// Start push-based audio delivery from the daemon.
+    ///
+    /// Carries no handles: the daemon owns the whole `ak_ai_open` →
+    /// `ak_aenc_request_stream` chain, because the bound stream handle must live
+    /// exactly as long as the push thread.
+    pub fn start_audio_push(&self, sample_rate: u32, channels: u32) -> PlatformResult<()> {
+        // AAC-LC emits one frame per 1024 samples, so the ADC frame interval is
+        // determined by the codec, not chosen: 128 ms at 8 kHz, 64 ms at 16 kHz.
+        let interval_ms = 1024 * 1000 / sample_rate.max(1);
+
+        tracing::info!(
+            event = "audio_push_start_request",
+            diag_monotonic_ms = monotonic_millis(),
+            sample_rate,
+            channels,
+            interval_ms,
+            "requesting daemon audio push start"
+        );
+
+        let mut req = [0u8; 12];
+        req[0..4].copy_from_slice(&sample_rate.to_le_bytes());
+        req[4..8].copy_from_slice(&channels.to_le_bytes());
+        req[8..12].copy_from_slice(&interval_ms.to_le_bytes());
+
+        let (status, _) = self.send_request(CMD_AUDIO_START_PUSH, &req)?;
+        if status == VD_STATUS_STALE_EPOCH {
+            return Err(Self::stale_epoch_error(CMD_AUDIO_START_PUSH));
+        }
+        if status != AK_SUCCESS_I32 {
+            warn!(
+                event = "audio_push_start_failed",
+                diag_monotonic_ms = monotonic_millis(),
+                status,
+                "daemon rejected audio push start"
+            );
+            return Err(PlatformError::HardwareFailure(
+                "start_audio_push failed".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    /// Stop push-based audio delivery.
+    ///
+    /// Deliberately has no caller. The obvious site is the unified reader's exit
+    /// path, next to the `stop_push` calls for main and sub — and putting it
+    /// there is wrong: the supervisor reattaches the platform by re-running
+    /// `start_frame_production`, which spawns a fresh reader and restarts video
+    /// push, but nothing restarts audio (`start_audio_push` is called once, from
+    /// `Application::start_streaming`). Stopping audio on reader exit would kill
+    /// it on the first unwind, permanently.
+    ///
+    /// Leaving audio running across a reattach is correct today: the daemon
+    /// re-reads the video anchor per frame, so audio re-syncs to the new
+    /// timeline on its own, and the daemon exits with onvif-rust anyway.
+    ///
+    /// Wiring this up properly means moving the audio lifecycle under the
+    /// supervisor alongside video, which needs the platform layer to reach the
+    /// streaming bridge — the coupling the audio design punted on.
+    pub fn stop_audio_push(&self) -> PlatformResult<()> {
+        let (status, _) = self.send_request(CMD_AUDIO_STOP_PUSH, &[])?;
+        if status == VD_STATUS_STALE_EPOCH {
+            return Err(Self::stale_epoch_error(CMD_AUDIO_STOP_PUSH));
+        }
+        if status != AK_SUCCESS_I32 {
+            return Err(PlatformError::HardwareFailure(
+                "stop_audio_push failed".into(),
+            ));
+        }
         Ok(())
     }
 
@@ -2845,6 +2921,99 @@ mod tests {
         let stream_id = u32::from_le_bytes(captured[0].1[8..12].try_into().unwrap());
         assert_eq!(handle, stream_handle as u64);
         assert_eq!(stream_id, 1);
+    }
+
+    #[test]
+    fn test_start_audio_push_encodes_rate_channels_and_interval() {
+        use std::sync::{Arc, Mutex};
+
+        let captured: CapturedCommands = Arc::new(Mutex::new(Vec::new()));
+        let captured_closure = Arc::clone(&captured);
+        let daemon = FakeDaemon::start(move |cmd_id, req| {
+            captured_closure
+                .lock()
+                .unwrap()
+                .push((cmd_id, req.to_vec()));
+            (AK_SUCCESS_I32, vec![])
+        });
+        let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+        ipc.set_epochs_for_test(1, 1);
+
+        ipc.start_audio_push(8000, 1).unwrap();
+
+        let captured = captured.lock().unwrap();
+        assert_eq!(captured.len(), 1);
+        assert_eq!(captured[0].0, CMD_AUDIO_START_PUSH);
+        let req = &captured[0].1;
+        assert_eq!(u32::from_le_bytes(req[0..4].try_into().unwrap()), 8000);
+        assert_eq!(u32::from_le_bytes(req[4..8].try_into().unwrap()), 1);
+        // AAC is 1024 samples/frame: 1024 * 1000 / 8000 = 128 ms
+        assert_eq!(u32::from_le_bytes(req[8..12].try_into().unwrap()), 128);
+    }
+
+    #[test]
+    fn test_start_audio_push_derives_64ms_interval_at_16khz() {
+        use std::sync::{Arc, Mutex};
+
+        let captured: CapturedCommands = Arc::new(Mutex::new(Vec::new()));
+        let captured_closure = Arc::clone(&captured);
+        let daemon = FakeDaemon::start(move |cmd_id, req| {
+            captured_closure
+                .lock()
+                .unwrap()
+                .push((cmd_id, req.to_vec()));
+            (AK_SUCCESS_I32, vec![])
+        });
+        let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+        ipc.set_epochs_for_test(1, 1);
+
+        ipc.start_audio_push(16000, 1).unwrap();
+
+        let captured = captured.lock().unwrap();
+        assert_eq!(
+            u32::from_le_bytes(captured[0].1[8..12].try_into().unwrap()),
+            64
+        );
+    }
+
+    #[test]
+    fn test_start_audio_push_stale_epoch_is_hardware_unavailable() {
+        let daemon = FakeDaemon::start(|_c, _r| (VD_STATUS_STALE_EPOCH, vec![]));
+        let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+        ipc.set_epochs_for_test(1, 1);
+
+        let err = ipc.start_audio_push(8000, 1).unwrap_err();
+        assert!(
+            matches!(err, PlatformError::HardwareUnavailable(_)),
+            "expected HardwareUnavailable, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn test_stop_audio_push_stale_epoch_is_hardware_unavailable() {
+        let daemon = FakeDaemon::start(|_c, _r| (VD_STATUS_STALE_EPOCH, vec![]));
+        let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+        ipc.set_epochs_for_test(1, 1);
+
+        let err = ipc.stop_audio_push().unwrap_err();
+        assert!(
+            matches!(err, PlatformError::HardwareUnavailable(_)),
+            "expected HardwareUnavailable, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn test_audio_hal_trait_push_methods_delegate_to_ipc() {
+        // The AudioHalTrait impl in ipc/audio.rs delegates to the inherent
+        // AnykaIpc methods; exercise the trait entry points so the delegation
+        // (and its fully-qualified call form) stays covered.
+        let daemon = FakeDaemon::start(|_c, _r| (AK_SUCCESS_I32, vec![]));
+        let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+        ipc.set_epochs_for_test(1, 1);
+
+        let hal: &dyn crate::hal::common::audio::AudioHalTrait = &ipc;
+        assert!(hal.start_audio_push(8000, 1).is_ok());
+        assert!(hal.stop_audio_push().is_ok());
     }
 
     #[test]

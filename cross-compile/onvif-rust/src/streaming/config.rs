@@ -11,6 +11,12 @@ pub struct StreamingConfig {
     pub httpflv_port: u16,
     /// Audio sample rate in Hz for stream metadata (default: 8000).
     pub audio_sample_rate: u32,
+    /// Whether the sub stream advertises and carries audio (default: false).
+    ///
+    /// The main stream carries audio whenever it starts; the sub stream is a
+    /// separate profile whose `audio_enabled` is independently configurable and
+    /// defaults to off.
+    pub sub_audio_enabled: bool,
     /// Video frame rate for SDP `a=framerate` attribute (default: 15).
     /// Helps clients like VLC pre-configure their jitter buffer.
     pub video_framerate: u32,
@@ -45,7 +51,10 @@ impl StreamingConfig {
             c.media.httpflv_port
         };
 
-        let audio_sample_rate = if (8000..=48000).contains(&c.stream_profile_1.audio_sample_rate) {
+        let audio_sample_rate = if (8000..=48000).contains(&c.stream_profile_1.audio_sample_rate)
+            && crate::streaming::helpers::is_supported_aac_sample_rate(
+                c.stream_profile_1.audio_sample_rate,
+            ) {
             c.stream_profile_1.audio_sample_rate
         } else {
             tracing::warn!(
@@ -66,6 +75,7 @@ impl StreamingConfig {
             rtsp_port,
             httpflv_port,
             audio_sample_rate,
+            sub_audio_enabled: c.stream_profile_2.audio_enabled,
             video_framerate,
             main_stream_name: "main".to_string(),
             sub_stream_name: "sub".to_string(),
@@ -83,6 +93,7 @@ impl Default for StreamingConfig {
             rtsp_port: 554,
             httpflv_port: 8080,
             audio_sample_rate: 8000,
+            sub_audio_enabled: false,
             video_framerate: 15,
             main_stream_name: "main".to_string(),
             sub_stream_name: "sub".to_string(),
@@ -171,5 +182,19 @@ mod tests {
         assert_eq!(config.rtsp_port, 554); // fallback
         assert_eq!(config.httpflv_port, 8080); // fallback
         assert_eq!(config.audio_sample_rate, 8000); // fallback
+    }
+
+    #[test]
+    fn test_config_from_runtime_unsupported_aac_rate_uses_default() {
+        // 42000 is inside 8000..=48000 but has no AAC sampling-frequency index
+        // (ISO/IEC 14496-3 Table 1.18); capture, SDP, and the ASC must agree on
+        // one rate, so it must fall back to 8000 rather than silently diverge.
+        let mut app_config = crate::config::AppConfig::default();
+        app_config.stream_profile_1.audio_sample_rate = 42000;
+
+        let runtime = ConfigRuntime::new(app_config);
+        let config = StreamingConfig::from_config(&runtime);
+
+        assert_eq!(config.audio_sample_rate, 8000);
     }
 }

@@ -1,7 +1,7 @@
 /**
  * LiveVideoPlayer Tests
  */
-import { waitFor } from '@testing-library/react';
+import { fireEvent, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { renderWithProviders } from '@/test/componentTestHelpers';
@@ -157,6 +157,120 @@ describe('LiveVideoPlayer', () => {
     expect(onStats).toHaveBeenCalledWith(
       expect.objectContaining({ videoCodec: 'H.264 Main@L4.0' }),
     );
+  });
+
+  it('forwards audio track details to onStats', async () => {
+    const onStats = vi.fn();
+    renderWithProviders(<LiveVideoPlayer streamType="main" onStats={onStats} />);
+    await waitFor(() => expect(mockPlayer.on).toHaveBeenCalled());
+
+    const mediaHandler = mockPlayer.on.mock.calls.find((c) => c[0] === 'media_info')?.[1];
+    mediaHandler({
+      width: 1280,
+      height: 720,
+      videoCodec: 'avc1.4de028',
+      audioCodec: 'mp4a.40.2',
+      audioSampleRate: 8000,
+      audioChannelCount: 1,
+    });
+
+    expect(onStats).toHaveBeenCalledWith(
+      expect.objectContaining({
+        audioCodec: 'AAC-LC',
+        audioSampleRate: 8000,
+        audioChannels: 1,
+      }),
+    );
+  });
+
+  it('clears retained audio metadata when the stream has no audio', async () => {
+    // A main→sub switch merges the sub stream's MEDIA_INFO over the previous
+    // stats; the absent audio fields must be reset, not left stale.
+    const onStats = vi.fn();
+    renderWithProviders(<LiveVideoPlayer streamType="main" onStats={onStats} />);
+    await waitFor(() => expect(mockPlayer.on).toHaveBeenCalled());
+
+    const mediaHandler = mockPlayer.on.mock.calls.find((c) => c[0] === 'media_info')?.[1];
+    mediaHandler({ width: 1280, height: 720, videoCodec: 'avc1.4de028', audioCodec: 'mp4a.40.2' });
+    mediaHandler({ width: 640, height: 480, videoCodec: 'avc1.4de028' });
+
+    expect(onStats).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        audioSampleRate: undefined,
+        audioChannels: undefined,
+      }),
+    );
+  });
+
+  it('starts muted so autoplay is allowed, and offers no toggle without audio', async () => {
+    // Autoplay policies block a non-muted element from starting on its own, so
+    // an unmuted default would leave the preview stuck rather than noisy.
+    const { getByTestId, queryByTestId } = renderWithProviders(
+      <LiveVideoPlayer streamType="main" />,
+    );
+    await waitFor(() => expect(mockPlayer.on).toHaveBeenCalled());
+
+    expect((getByTestId('liveview-video') as HTMLVideoElement).muted).toBe(true);
+    expect(queryByTestId('liveview-mute-toggle')).toBeNull();
+  });
+
+  it('unmutes the element when the toggle is clicked on a stream with audio', async () => {
+    const { findByTestId, getByTestId } = renderWithProviders(
+      <LiveVideoPlayer streamType="main" />,
+    );
+    await waitFor(() => expect(mockPlayer.on).toHaveBeenCalled());
+
+    const mediaHandler = mockPlayer.on.mock.calls.find((c) => c[0] === 'media_info')?.[1];
+    mediaHandler({ width: 1280, height: 720, videoCodec: 'avc1.4de028', audioCodec: 'mp4a.40.2' });
+
+    const toggle = await findByTestId('liveview-mute-toggle');
+    const video = getByTestId('liveview-video') as HTMLVideoElement;
+    expect(video.muted).toBe(true);
+
+    toggle.click();
+    await waitFor(() => expect(video.muted).toBe(false));
+
+    toggle.click();
+    await waitFor(() => expect(video.muted).toBe(true));
+  });
+
+  it('scales playback volume from the slider', async () => {
+    const { findByTestId, getByTestId } = renderWithProviders(
+      <LiveVideoPlayer streamType="main" />,
+    );
+    await waitFor(() => expect(mockPlayer.on).toHaveBeenCalled());
+
+    const mediaHandler = mockPlayer.on.mock.calls.find((c) => c[0] === 'media_info')?.[1];
+    mediaHandler({ width: 1280, height: 720, videoCodec: 'avc1.4de028', audioCodec: 'mp4a.40.2' });
+
+    const slider = await findByTestId('liveview-volume-slider');
+    const video = getByTestId('liveview-video') as HTMLVideoElement;
+
+    fireEvent.change(slider, { target: { value: '0.4' } });
+    await waitFor(() => expect(video.volume).toBeCloseTo(0.4));
+    // Any audible level implies not muted, whatever the toggle said before.
+    expect(video.muted).toBe(false);
+  });
+
+  it('mutes at slider zero and restores an audible level when unmuted', async () => {
+    // Unmuting into volume 0 is silence the user cannot diagnose from the UI.
+    const { findByTestId, getByTestId } = renderWithProviders(
+      <LiveVideoPlayer streamType="main" />,
+    );
+    await waitFor(() => expect(mockPlayer.on).toHaveBeenCalled());
+
+    const mediaHandler = mockPlayer.on.mock.calls.find((c) => c[0] === 'media_info')?.[1];
+    mediaHandler({ width: 1280, height: 720, videoCodec: 'avc1.4de028', audioCodec: 'mp4a.40.2' });
+
+    const slider = await findByTestId('liveview-volume-slider');
+    const video = getByTestId('liveview-video') as HTMLVideoElement;
+
+    fireEvent.change(slider, { target: { value: '0' } });
+    await waitFor(() => expect(video.muted).toBe(true));
+
+    getByTestId('liveview-mute-toggle').click();
+    await waitFor(() => expect(video.muted).toBe(false));
+    expect(video.volume).toBeGreaterThan(0);
   });
 
   it('does not trust the SPS-derived fps from MEDIA_INFO', async () => {

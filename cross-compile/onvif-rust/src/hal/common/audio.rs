@@ -47,6 +47,13 @@ pub(crate) trait AudioHalTrait: Send + Sync {
     fn aenc_open(&self, param: *const audio_param) -> *mut c_void;
     fn aenc_close(&self, handle: *mut c_void) -> i32;
     fn aenc_set_attr(&self, enc_handle: *mut c_void, attr: *const aenc_attr) -> i32;
+    /// Start push-based audio delivery from the daemon (AAC frames on the ring).
+    ///
+    /// Unlike the handle-returning ops above, this carries no handles: the
+    /// daemon owns the whole `ak_ai_open` → `ak_aenc_request_stream` chain.
+    fn start_audio_push(&self, sample_rate: u32, channels: u32) -> PlatformResult<()>;
+    /// Stop push-based audio delivery.
+    fn stop_audio_push(&self) -> PlatformResult<()>;
 }
 
 /// RAII handle for audio input device.

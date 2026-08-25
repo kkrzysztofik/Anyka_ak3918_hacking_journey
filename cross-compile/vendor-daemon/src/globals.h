@@ -51,7 +51,7 @@ struct push_stream_state {
     int             join_pending;
 };
 
-#define PUSH_STREAM_SLOT_COUNT  2
+#define PUSH_STREAM_SLOT_COUNT  3   /* main, sub, audio */
 #define PUSH_POLL_SLEEP_MS      5  /* Sleep on no-data (slightly less than ref's 10ms) */
 
 /*

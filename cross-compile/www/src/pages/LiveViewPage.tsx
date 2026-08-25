@@ -386,7 +386,9 @@ export default function LiveViewPage() {
                     <SettingsCardTitle data-testid="liveview-stream-info-title">
                       Stream Info
                     </SettingsCardTitle>
-                    <SettingsCardDescription>Video stream parameters</SettingsCardDescription>
+                    <SettingsCardDescription>
+                      Video and audio stream parameters
+                    </SettingsCardDescription>
                   </div>
                 </div>
               </SettingsCardHeader>
@@ -421,6 +423,27 @@ export default function LiveViewPage() {
                     data-testid="liveview-codec-value"
                   >
                     {stats.videoCodec ?? '—'}
+                  </span>
+                  <span className="text-muted-foreground">Audio Codec</span>
+                  <span
+                    className="text-foreground text-right font-mono"
+                    data-testid="liveview-audio-codec-value"
+                  >
+                    {stats.audioCodec ?? '—'}
+                  </span>
+                  <span className="text-muted-foreground">Sample Rate</span>
+                  <span
+                    className="text-foreground text-right font-mono"
+                    data-testid="liveview-audio-samplerate-value"
+                  >
+                    {stats.audioSampleRate ? `${stats.audioSampleRate / 1000} kHz` : '—'}
+                  </span>
+                  <span className="text-muted-foreground">Channels</span>
+                  <span
+                    className="text-foreground text-right font-mono"
+                    data-testid="liveview-audio-channels-value"
+                  >
+                    {stats.audioChannels === 1 ? 'Mono' : stat(stats.audioChannels)}
                   </span>
                 </div>
               </SettingsCardContent>

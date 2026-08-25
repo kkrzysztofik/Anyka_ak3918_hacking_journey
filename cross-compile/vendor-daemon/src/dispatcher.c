@@ -10,7 +10,6 @@
 #include "ak_error.h"
 #include "ak_vpss.h"
 #include "handlers_vi.h"
-#include "handlers_vpss.h"
 #include "handlers_osd.h"
 #include "handlers_venc.h"
 #include "handlers_audio.h"
@@ -56,6 +55,8 @@ static int is_lifecycle_cmd(int32_t cmd)
     case CMD_AENC_OPEN:
     case CMD_AENC_CLOSE:
     case CMD_AENC_SET_ATTR:
+    case CMD_AUDIO_START_PUSH:
+    case CMD_AUDIO_STOP_PUSH:
     case CMD_SHUTDOWN:
         return 1;
     default:
@@ -233,10 +234,9 @@ int process_request(int fd)
 
     /* --- VPSS --- */
     case CMD_VPSS_INIT:
-        ret = handle_vpss_init(fd, req_buf, req_len);
-        break;
     case CMD_VPSS_DESTROY:
-        ret = handle_vpss_destroy(fd, req_buf, req_len);
+        /* libre_anyka_app: no exported ak_vpss_{init,destroy}; VI owns VPSS. */
+        ret = send_response(fd, STATUS_OK, NULL, 0);
         break;
 
     /* --- OSD --- */
@@ -287,6 +287,14 @@ int process_request(int fd)
         break;
     case CMD_VENC_STOP_PUSH:
         ret = handle_venc_stop_push(fd, req_buf, req_len);
+        break;
+
+    /* --- Audio push-mode streaming --- */
+    case CMD_AUDIO_START_PUSH:
+        ret = handle_audio_start_push(fd, req_buf, req_len);
+        break;
+    case CMD_AUDIO_STOP_PUSH:
+        ret = handle_audio_stop_push(fd, req_buf, req_len);
         break;
 
     /* --- Audio Input --- */
