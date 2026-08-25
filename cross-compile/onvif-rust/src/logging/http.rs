@@ -310,9 +310,14 @@ fn sanitize_and_truncate_body(body: &Bytes, max_bytes: usize, sanitize: bool) ->
         body_str.to_string()
     };
 
-    // Truncate if needed
+    // Truncate if needed. Step back to a char boundary first: `max_bytes` is a
+    // byte count, and slicing through a multi-byte character panics.
     let truncated = if sanitized.len() > max_bytes {
-        format!("{}...[truncated]", &sanitized[..max_bytes])
+        let mut end = max_bytes;
+        while end > 0 && !sanitized.is_char_boundary(end) {
+            end -= 1;
+        }
+        format!("{}...[truncated]", &sanitized[..end])
     } else {
         sanitized
     };
@@ -382,11 +387,24 @@ fn sanitize_json_community(body: &str) -> String {
         }
         result.push_str("\"***\"");
         let after_open = &trimmed[1..];
-        if let Some(end) = after_open.find('"') {
-            remaining = &after_open[end + 1..];
-        } else {
-            remaining = "";
+        // Find the closing quote, honouring backslash escapes. A plain `find`
+        // stops at the `"` inside `\"` and spills the rest of the secret.
+        let mut end = None;
+        let mut escaped = false;
+        for (i, c) in after_open.char_indices() {
+            if escaped {
+                escaped = false;
+            } else if c == '\\' {
+                escaped = true;
+            } else if c == '"' {
+                end = Some(i);
+                break;
+            }
         }
+        remaining = match end {
+            Some(e) => &after_open[e + 1..],
+            None => "",
+        };
     }
     result.push_str(remaining);
     result
@@ -475,6 +493,23 @@ mod tests {
             out.contains("\"port\":161"),
             "unrelated fields survive: {out}"
         );
+    }
+
+    #[test]
+    fn test_sanitize_masks_community_containing_an_escaped_quote() {
+        // A plain `find('"')` closes on the escaped quote and spills `b"` into
+        // the log along with the rest of the secret.
+        let body = r#"{"community":"a\"b","port":161}"#;
+        let out = sanitize_json_community(body);
+        assert_eq!(out, r#"{"community":"***","port":161}"#);
+    }
+
+    #[test]
+    fn test_truncation_never_splits_a_utf8_character() {
+        // 'é' occupies bytes 9..11, so a 10-byte limit lands mid-character.
+        let body = Bytes::from(format!("{}é{}", "a".repeat(9), "b".repeat(20)));
+        let out = sanitize_and_truncate_body(&body, 10, false);
+        assert_eq!(out, "aaaaaaaaa...[truncated]");
     }
 
     #[test]
