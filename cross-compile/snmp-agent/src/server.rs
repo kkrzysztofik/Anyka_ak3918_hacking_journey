@@ -8,7 +8,6 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::net::UdpSocket;
-use tokio::signal::unix::{SignalKind, signal};
 use tokio::sync::RwLock;
 
 /// Default pidfile path for SIGHUP from onvif-rust.
@@ -86,10 +85,11 @@ async fn bind_socket(port: u16) -> std::io::Result<UdpSocket> {
     UdpSocket::bind(addr).await
 }
 
-/// Run the agent until cancelled. Reloads config on SIGHUP.
+/// Run the agent until cancelled. Reloads config when `reload` yields.
 pub async fn run(
     config_path: PathBuf,
     pidfile: PathBuf,
+    mut reload: tokio::sync::mpsc::Receiver<()>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let initial = SnmpConfig::load(&config_path)?;
     let state = Arc::new(RwLock::new(LiveSources::new(initial)));
@@ -103,7 +103,6 @@ pub async fn run(
     }
     let _pid_guard = PidGuard(pidfile);
 
-    let mut sighup = signal(SignalKind::hangup())?;
     let mut socket: Option<UdpSocket> = None;
 
     {
@@ -126,7 +125,7 @@ pub async fn run(
     let mut buf = [0u8; 2048];
     loop {
         tokio::select! {
-            _ = sighup.recv() => {
+            _ = reload.recv() => {
                 match SnmpConfig::load(&config_path) {
                     Ok(new_cfg) => {
                         let mut guard = state.write().await;
@@ -387,30 +386,10 @@ sys_name = "udp-cam"
         panic!("timed out waiting for {}", path.display());
     }
 
-    /// Serialize `run()` tests: they install a process-wide SIGHUP handler.
-    async fn run_test_lock() -> tokio::sync::MutexGuard<'static, ()> {
-        static LOCK: std::sync::OnceLock<tokio::sync::Mutex<()>> = std::sync::OnceLock::new();
-        LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
-            .lock()
-            .await
-    }
-
-    fn sighup_self_from_pidfile(pidfile: &Path) {
-        let pid: u32 = std::fs::read_to_string(pidfile)
-            .unwrap()
-            .trim()
-            .parse()
-            .unwrap();
-        let status = std::process::Command::new("kill")
-            .args(["-HUP", &pid.to_string()])
-            .status()
-            .unwrap();
-        assert!(status.success());
-    }
+    
 
     #[tokio::test]
     async fn test_run_serves_udp_get_reload_and_disable() {
-        let _guard = run_test_lock().await;
         let dir = tempfile::tempdir().unwrap();
         let cfg_path = dir.path().join("snmp.toml");
         let pidfile = dir.path().join("snmp-agent.pid");
@@ -429,8 +408,9 @@ sys_name = "udp-cam"
 
         let run_cfg = cfg_path.clone();
         let run_pid = pidfile.clone();
+        let (tx, rx) = tokio::sync::mpsc::channel(1);
         let handle = tokio::spawn(async move {
-            let _ = run(run_cfg, run_pid).await;
+            let _ = run(run_cfg, run_pid, rx).await;
         });
 
         wait_for_file(&pidfile, Duration::from_secs(2)).await;
@@ -458,7 +438,7 @@ sys_name = "udp-cam"
             ),
         )
         .unwrap();
-        sighup_self_from_pidfile(&pidfile);
+        tx.send(()).await.unwrap();
         tokio::time::sleep(Duration::from_millis(80)).await;
         client.send_to(&req, ("127.0.0.1", port)).await.unwrap();
         let (n, _) = tokio::time::timeout(Duration::from_secs(2), client.recv_from(&mut buf))
@@ -472,10 +452,10 @@ sys_name = "udp-cam"
 
         // Bad config on reload keeps last-good.
         std::fs::write(&cfg_path, "port = \"nope\"\n").unwrap();
-        sighup_self_from_pidfile(&pidfile);
+        tx.send(()).await.unwrap();
         tokio::time::sleep(Duration::from_millis(50)).await;
 
-        // Disable on SIGHUP.
+        // Disable on reload.
         std::fs::write(
             &cfg_path,
             format!(
@@ -483,7 +463,7 @@ sys_name = "udp-cam"
             ),
         )
         .unwrap();
-        sighup_self_from_pidfile(&pidfile);
+        tx.send(()).await.unwrap();
         tokio::time::sleep(Duration::from_millis(80)).await;
 
         // Re-enable (rebind after socket cleared).
@@ -494,7 +474,7 @@ sys_name = "udp-cam"
             ),
         )
         .unwrap();
-        sighup_self_from_pidfile(&pidfile);
+        tx.send(()).await.unwrap();
         tokio::time::sleep(Duration::from_millis(80)).await;
         client.send_to(&req, ("127.0.0.1", port)).await.unwrap();
         let (n, _) = tokio::time::timeout(Duration::from_secs(2), client.recv_from(&mut buf))
@@ -512,7 +492,6 @@ sys_name = "udp-cam"
 
     #[tokio::test]
     async fn test_run_starts_disabled_and_bind_failure_is_non_fatal() {
-        let _guard = run_test_lock().await;
         let dir = tempfile::tempdir().unwrap();
         let cfg_path = dir.path().join("snmp.toml");
         let pidfile = dir.path().join("disabled.pid");
@@ -524,8 +503,9 @@ sys_name = "udp-cam"
         .unwrap();
         let run_cfg = cfg_path.clone();
         let run_pid = pidfile.clone();
+        let (_tx, rx) = tokio::sync::mpsc::channel(1);
         let handle = tokio::spawn(async move {
-            let _ = run(run_cfg, run_pid).await;
+            let _ = run(run_cfg, run_pid, rx).await;
         });
         wait_for_file(&pidfile, Duration::from_secs(2)).await;
         handle.abort();
@@ -543,8 +523,9 @@ sys_name = "udp-cam"
         .unwrap();
         let run_cfg = cfg_path.clone();
         let run_pid = pidfile.clone();
+        let (_tx, rx) = tokio::sync::mpsc::channel(1);
         let handle = tokio::spawn(async move {
-            let _ = run(run_cfg, run_pid).await;
+            let _ = run(run_cfg, run_pid, rx).await;
         });
         wait_for_file(&pidfile, Duration::from_secs(2)).await;
         tokio::time::sleep(Duration::from_millis(50)).await;
