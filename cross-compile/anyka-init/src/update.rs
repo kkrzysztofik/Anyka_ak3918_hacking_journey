@@ -119,7 +119,7 @@ impl Slots {
 /// `ffmpeg/`, `gdb/` — lives outside the slots and is not versioned. Rewriting
 /// those would point them at a directory `scripts/build_bundle.sh` never
 /// populates; for dropbear that would silently break an emergency access path.
-const BUNDLED: [&str; 3] = ["anyka-init.bin", "vendor-daemon", "onvif"];
+const BUNDLED: [&str; 4] = ["anyka-init.bin", "vendor-daemon", "onvif", "snmp"];
 
 /// Rewrite a configured path into `slot`, if it names something a bundle ships.
 ///
@@ -1148,6 +1148,10 @@ mod tests {
             (
                 "/mnt/anyka_hack/anyka-init.bin",
                 "/mnt/anyka_hack/slots/b/anyka-init.bin",
+            ),
+            (
+                "/mnt/anyka_hack/snmp/snmp-agent.bin",
+                "/mnt/anyka_hack/slots/b/snmp/snmp-agent.bin",
             ),
         ] {
             assert_eq!(slot_path(root, Slot::B, Path::new(input)), Path::new(want));

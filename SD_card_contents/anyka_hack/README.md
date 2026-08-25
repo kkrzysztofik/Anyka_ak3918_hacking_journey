@@ -35,6 +35,19 @@ Swap or rewrite the SD card contents and reboot. The supervisor binary is
 Dropbear SSH is controlled by `[services.dropbear]` in `anyka.toml` (`enabled`,
 `args`). There are no separate `ssh_*` keys.
 
+# SNMP
+
+Read-only SNMPv2c agent (`[services.snmp]`). Defaults: UDP port **161**,
+community **`public`**. Config file: `/mnt/anyka_hack/snmp.toml`. Binary:
+`anyka_hack/snmp/snmp-agent.bin`.
+
+Example from a laptop:
+
+```bash
+snmpwalk -v2c -c public <camera-ip> 1.3.6.1.2.1.1
+snmpwalk -v2c -c public <camera-ip> 1.3.6.1.2.1.2
+```
+
 # Third-Party Build Scripts
 
 Host-side helper scripts are available to build and package ARM binaries into the SD overlay:

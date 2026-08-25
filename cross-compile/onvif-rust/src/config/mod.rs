@@ -38,6 +38,7 @@ pub mod netoverlay;
 mod persistence;
 pub mod profiles;
 mod runtime;
+pub mod snmp;
 mod storage;
 pub mod types;
 pub mod users;

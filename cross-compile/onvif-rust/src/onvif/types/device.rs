@@ -2029,7 +2029,9 @@ pub struct SetNetworkProtocols {
 #[serde(rename = "tds:SetNetworkProtocolsResponse")]
 pub struct SetNetworkProtocolsResponse {}
 
-/// Network protocol type.
+/// Network protocol type (ONVIF Core: HTTP / HTTPS / RTSP only).
+///
+/// SNMP is configured via `/api/snmp` and `snmp.toml`, not this enumeration.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub enum NetworkProtocolType {
     #[default]

@@ -1,0 +1,7 @@
+# SNMPv2c read-only agent defaults (machine may overwrite via WebUI).
+enabled = true
+port = 161
+community = "public"
+sys_contact = ""
+sys_name = ""
+sys_location = ""

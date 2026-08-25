@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Assemble SD card payload into SD_card_contents/ (does not copy to media/device).
 #
-# Builds vendor-daemon, onvif-rust, anyka-init, and the WebUI into:
+# Builds vendor-daemon, onvif-rust, anyka-init, snmp-agent, and the WebUI into:
 #   SD_card_contents/anyka_hack/
 # Factory scripts are already tracked under SD_card_contents/Factory/.
 #
@@ -169,6 +169,33 @@ fi
 )
 log_success "anyka-init installed to ${ANYKA_HACK}/anyka-init.bin"
 
+# ── snmp-agent ───────────────────────────────────────────────────────────────
+log_step "Building snmp-agent (${BUILD_MODE})"
+# Build from onvif-rust so the (generated) .cargo/config.toml supplies the
+# ARMv5TE linker — same pattern as other workspace members built for device.
+ONVIF_DIR="${REPO_ROOT}/cross-compile/onvif-rust"
+if [[ ! -f "${ONVIF_DIR}/.cargo/config.toml" ]]; then
+  if [[ -x "${ONVIF_DIR}/scripts/setup-cargo-config.sh" ]]; then
+    "${ONVIF_DIR}/scripts/setup-cargo-config.sh"
+  else
+    log_error "Missing ${ONVIF_DIR}/.cargo/config.toml — run onvif-rust setup-cargo-config.sh"
+    exit 1
+  fi
+fi
+(
+  cd "${ONVIF_DIR}"
+  if [[ "${BUILD_MODE}" = "debug" ]]; then
+    "${CARGO}" build -p snmp-agent
+    SNMP_BIN="${REPO_ROOT}/cross-compile/target/armv5te-unknown-linux-uclibceabi/debug/snmp-agent"
+  else
+    "${CARGO}" build --release -p snmp-agent
+    SNMP_BIN="${REPO_ROOT}/cross-compile/target/armv5te-unknown-linux-uclibceabi/release/snmp-agent"
+  fi
+  mkdir -p "${ANYKA_HACK}/snmp"
+  install -m 0755 "${SNMP_BIN}" "${ANYKA_HACK}/snmp/snmp-agent.bin"
+)
+log_success "snmp-agent installed to ${ANYKA_HACK}/snmp/snmp-agent.bin"
+
 # ── WebUI ────────────────────────────────────────────────────────────────────
 if [[ "${SKIP_WWW}" = true ]]; then
   log_warn "Skipping WebUI build (--skip-www)"
@@ -210,6 +237,7 @@ log_step "Verifying SD payload artifacts"
 require_arm_elf "${ANYKA_HACK}/onvif/onvif-rust.bin"
 require_arm_elf "${ANYKA_HACK}/vendor-daemon/vendor-daemon.bin"
 require_arm_elf "${ANYKA_HACK}/anyka-init.bin"
+require_arm_elf "${ANYKA_HACK}/snmp/snmp-agent.bin"
 
 if [[ ! -f "${ANYKA_HACK}/lib/ld-uClibc.so.1" || ! -x "${ANYKA_HACK}/lib/ld-uClibc.so.1" ]]; then
   log_error "Missing dynamic loader required by anyka-init.bin: ${ANYKA_HACK}/lib/ld-uClibc.so.1"

@@ -11,7 +11,9 @@ import {
   getNetworkInterfaces,
   getNetworkOverlay,
   getNetworkProtocols,
+  getSnmpConfig,
   putNetworkOverlay,
+  putSnmpConfig,
   setDNS,
   setNetworkDefaultGateway,
   setNetworkInterface,
@@ -234,6 +236,36 @@ describe('networkService', () => {
       );
 
       await expect(putNetworkOverlay({ ssid: '' })).rejects.toThrow(/bad request|400/i);
+    });
+  });
+
+  describe('snmp client', () => {
+    it('should return SNMP settings from GET /api/snmp', async () => {
+      vi.mocked(authorizedFetch).mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            enabled: true,
+            port: 161,
+            community: 'public',
+            sys_contact: '',
+            sys_name: 'cam',
+            sys_location: '',
+          }),
+          { status: 200 },
+        ),
+      );
+
+      const cfg = await getSnmpConfig();
+      expect(cfg.port).toBe(161);
+      expect(cfg.community).toBe('public');
+    });
+
+    it('should reject when PUT /api/snmp fails', async () => {
+      vi.mocked(authorizedFetch).mockResolvedValueOnce(
+        new Response('community must not be empty', { status: 400 }),
+      );
+
+      await expect(putSnmpConfig({ community: '' })).rejects.toThrow(/community|400/i);
     });
   });
 

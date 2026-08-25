@@ -10,7 +10,9 @@ import {
   getNetworkConfig,
   getNetworkInterfaces,
   getNetworkOverlay,
+  getSnmpConfig,
   putNetworkOverlay,
+  putSnmpConfig,
   setDNS,
   setNetworkDefaultGateway,
   setNetworkInterface,
@@ -31,7 +33,9 @@ vi.mock('@/services/networkService', () => ({
   getNetworkConfig: vi.fn(),
   getNetworkInterfaces: vi.fn(),
   getNetworkOverlay: vi.fn(),
+  getSnmpConfig: vi.fn(),
   putNetworkOverlay: vi.fn(),
+  putSnmpConfig: vi.fn(),
   setNetworkInterface: vi.fn(),
   setNetworkDefaultGateway: vi.fn(),
   setDNS: vi.fn(),
@@ -83,6 +87,14 @@ describe('NetworkPage', () => {
     vi.clearAllMocks();
     vi.mocked(getNetworkConfig).mockResolvedValue(MOCK_DATA.network);
     vi.mocked(getNetworkOverlay).mockResolvedValue(EMPTY_OVERLAY);
+    vi.mocked(getSnmpConfig).mockResolvedValue({
+      enabled: true,
+      port: 161,
+      community: 'public',
+      sys_contact: '',
+      sys_name: '',
+      sys_location: '',
+    });
     vi.mocked(getNetworkInterfaces).mockResolvedValue([
       {
         token: 'wlan0',
@@ -99,6 +111,7 @@ describe('NetworkPage', () => {
     ]);
     vi.mocked(getDiagnostics).mockResolvedValue(MOCK_DIAGNOSTICS);
     vi.mocked(putNetworkOverlay).mockResolvedValue(undefined);
+    vi.mocked(putSnmpConfig).mockResolvedValue(undefined);
     vi.mocked(setNetworkInterface).mockResolvedValue(undefined);
     vi.mocked(setNetworkDefaultGateway).mockResolvedValue(undefined);
     vi.mocked(setDNS).mockResolvedValue(undefined);
@@ -323,5 +336,88 @@ describe('NetworkPage', () => {
       expect(mockToast.info).toHaveBeenCalledWith('Form reset to current values');
       expect(ipInput).toHaveValue('192.168.1.100');
     });
+  });
+
+  it('test_render_snmp_settings_fetched_config_displays_values', async () => {
+    vi.mocked(getSnmpConfig).mockResolvedValue({
+      enabled: true,
+      port: 1161,
+      community: 'monitor',
+      sys_contact: '',
+      sys_name: '',
+      sys_location: '',
+    });
+
+    await renderNetworkPage();
+
+    expect(screen.getByTestId('network-snmp-port-input')).toHaveValue(1161);
+    expect(screen.getByTestId('network-snmp-community-input')).toHaveValue('monitor');
+  });
+
+  it('test_save_snmp_settings_on_confirmation_calls_putSnmpConfig', async () => {
+    const user = userEvent.setup();
+    await renderNetworkPage();
+
+    await makeFormDirty(user, 'network-snmp-port-input', '2161');
+    await user.click(screen.getByTestId('network-save-button'));
+    await user.click(await screen.findByTestId('network-confirm-save-button'));
+
+    await waitFor(() => {
+      expect(putSnmpConfig).toHaveBeenCalledWith(
+        expect.objectContaining({ enabled: true, port: 2161, community: 'public' }),
+      );
+    });
+  });
+
+  it('test_save_empty_community_blocks_submit_and_skips_putSnmpConfig', async () => {
+    const user = userEvent.setup();
+    await renderNetworkPage();
+
+    await user.clear(screen.getByTestId('network-snmp-community-input'));
+    await user.click(screen.getByTestId('network-save-button'));
+
+    expect(await screen.findByTestId('network-snmp-community-error')).toHaveTextContent(
+      'Community must not be empty',
+    );
+    expect(putSnmpConfig).not.toHaveBeenCalled();
+  });
+
+  it('test_confirm_dialog_snmp_only_save_shows_reload_message', async () => {
+    const user = userEvent.setup();
+    await renderNetworkPage();
+
+    await makeFormDirty(user, 'network-snmp-port-input', '2161');
+    await user.click(screen.getByTestId('network-save-button'));
+
+    expect(await screen.findByTestId('network-confirm-dialog-description')).toHaveTextContent(
+      'SNMP changes apply on reload without reboot.',
+    );
+  });
+
+  it('test_snmp_load_error_disables_snmp_fields', async () => {
+    vi.mocked(getSnmpConfig).mockRejectedValue(new Error('SNMP unavailable'));
+    await renderNetworkPage();
+
+    expect(await screen.findByTestId('network-snmp-load-error')).toHaveTextContent(
+      'SNMP unavailable',
+    );
+    expect(screen.getByTestId('network-snmp-port-input')).toBeDisabled();
+    expect(screen.getByTestId('network-snmp-community-input')).toBeDisabled();
+  });
+
+  it('test_save_skips_snmp_put_when_config_unavailable', async () => {
+    vi.mocked(getSnmpConfig).mockRejectedValue(new Error('SNMP unavailable'));
+    const user = userEvent.setup();
+    await renderNetworkPage();
+    await screen.findByTestId('network-snmp-load-error');
+
+    await makeFormDirty(user, 'network-http-port-input', '8080');
+    await user.click(screen.getByTestId('network-save-button'));
+    await user.click(await screen.findByTestId('network-confirm-save-button'));
+
+    await waitFor(() => {
+      expect(setNetworkProtocols).toHaveBeenCalled();
+    });
+    expect(putSnmpConfig).not.toHaveBeenCalled();
   });
 });

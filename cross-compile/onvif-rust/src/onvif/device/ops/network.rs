@@ -559,85 +559,98 @@ pub async fn handle_get_network_protocols(
         && let Some(network_info) = platform.network_info()
         && let Ok(protocols) = network_info.get_network_protocols().await
     {
-        // Convert platform protocol info to ONVIF types
         let network_protocols: Vec<NetworkProtocol> = protocols
             .iter()
-            .map(|p| {
+            .filter_map(|p| {
                 let name = match p.name.to_uppercase().as_str() {
                     "HTTP" => NetworkProtocolType::HTTP,
                     "HTTPS" => NetworkProtocolType::HTTPS,
                     "RTSP" => NetworkProtocolType::RTSP,
-                    _ => NetworkProtocolType::HTTP, // Default fallback
+                    _ => return None,
                 };
-                NetworkProtocol {
+                Some(NetworkProtocol {
                     name,
                     enabled: p.enabled,
                     port: p.ports.iter().map(|&p| p as i32).collect(),
-                }
+                })
             })
             .collect();
-
         return Ok(GetNetworkProtocolsResponse { network_protocols });
     }
 
-    // Return default protocol info from config if no platform
-    let http_port = config.read().server.port as i32;
-
+    let cfg = config.read();
     Ok(GetNetworkProtocolsResponse {
         network_protocols: vec![
             NetworkProtocol {
                 name: NetworkProtocolType::HTTP,
                 enabled: true,
-                port: vec![http_port],
+                port: vec![cfg.server.port as i32],
             },
             NetworkProtocol {
                 name: NetworkProtocolType::RTSP,
                 enabled: true,
-                port: vec![554],
+                port: vec![cfg.media.rtsp_port as i32],
             },
         ],
     })
 }
 
-/// Handle SetNetworkProtocols request.
-///
-/// Ports belong to this process's own listeners, so they go to `config.toml`,
-/// not to the anyka-init overlay. Both listeners bind at startup, so the change
-/// takes effect at the next restart.
+/// Handle SetNetworkProtocols request (HTTP/RTSP only; SNMP is `/api/snmp`).
 pub async fn handle_set_network_protocols(
     config: &Arc<ConfigRuntime>,
     request: SetNetworkProtocols,
 ) -> OnvifResult<SetNetworkProtocolsResponse> {
+    let (http_port, rtsp_port) = parse_http_rtsp_ports(&request)?;
+    apply_http_rtsp_ports(config, http_port, rtsp_port);
+    Ok(SetNetworkProtocolsResponse {})
+}
+
+fn parse_http_rtsp_ports(request: &SetNetworkProtocols) -> OnvifResult<(Option<i32>, Option<i32>)> {
     let mut http_port: Option<i32> = None;
     let mut rtsp_port: Option<i32> = None;
-
     for proto in &request.network_protocols {
-        if !proto.enabled {
-            return Err(OnvifError::invalid_arg_val(
-                "NoConfig",
-                "disabling HTTP/RTSP listeners is not supported",
-            ));
-        }
-        let port = *proto.port.first().ok_or_else(|| {
-            OnvifError::invalid_arg_val("NoConfig", "protocol entry carries no port")
-        })?;
-        if !(1..=65535).contains(&port) {
-            return Err(OnvifError::invalid_arg_val(
-                "NoConfig",
-                "port must be between 1 and 65535",
-            ));
-        }
         match proto.name {
-            NetworkProtocolType::HTTP => http_port = Some(port),
-            NetworkProtocolType::RTSP => rtsp_port = Some(port),
             NetworkProtocolType::HTTPS => {
                 return Err(OnvifError::ActionNotSupported(
                     "HTTPS: no TLS listener exists".to_string(),
                 ));
             }
+            NetworkProtocolType::HTTP | NetworkProtocolType::RTSP => {
+                if !proto.enabled {
+                    return Err(OnvifError::invalid_arg_val(
+                        "NoConfig",
+                        "disabling HTTP/RTSP listeners is not supported",
+                    ));
+                }
+                if proto.port.len() != 1 {
+                    return Err(OnvifError::invalid_arg_val(
+                        "NoConfig",
+                        "protocol entry must carry exactly one port",
+                    ));
+                }
+                let port = proto.port[0];
+                if !(1..=65535).contains(&port) {
+                    return Err(OnvifError::invalid_arg_val(
+                        "NoConfig",
+                        "port must be between 1 and 65535",
+                    ));
+                }
+                match proto.name {
+                    NetworkProtocolType::HTTP => http_port = Some(port),
+                    NetworkProtocolType::RTSP => rtsp_port = Some(port),
+                    _ => unreachable!(),
+                }
+            }
         }
     }
+    Ok((http_port, rtsp_port))
+}
 
+fn apply_http_rtsp_ports(
+    config: &Arc<ConfigRuntime>,
+    http_port: Option<i32>,
+    rtsp_port: Option<i32>,
+) {
     let mut cfg = config.write();
     if let Some(port) = http_port {
         cfg.server.port = port as u16;
@@ -645,8 +658,6 @@ pub async fn handle_set_network_protocols(
     if let Some(port) = rtsp_port {
         cfg.media.rtsp_port = port as u16;
     }
-
-    Ok(SetNetworkProtocolsResponse {})
 }
 
 #[cfg(test)]
@@ -1066,8 +1077,21 @@ mod tests {
             .await
             .unwrap();
 
-        // Should have at least HTTP protocol
         assert!(!response.network_protocols.is_empty());
+        assert!(
+            response
+                .network_protocols
+                .iter()
+                .any(|p| p.name == NetworkProtocolType::HTTP),
+            "HTTP must be advertised"
+        );
+        assert!(
+            response
+                .network_protocols
+                .iter()
+                .any(|p| p.name == NetworkProtocolType::RTSP),
+            "RTSP must be advertised"
+        );
     }
 
     #[tokio::test]
@@ -1132,6 +1156,23 @@ mod tests {
                 .is_err()
         );
         assert_eq!(config.read().server.port, before);
+    }
+
+    #[tokio::test]
+    async fn test_set_network_protocols_rejects_multiple_ports() {
+        let config = create_test_config();
+        let request = SetNetworkProtocols {
+            network_protocols: vec![NetworkProtocol {
+                name: NetworkProtocolType::HTTP,
+                enabled: true,
+                port: vec![8080, 8081],
+            }],
+        };
+        assert!(
+            handle_set_network_protocols(&config, request)
+                .await
+                .is_err()
+        );
     }
 
     #[tokio::test]

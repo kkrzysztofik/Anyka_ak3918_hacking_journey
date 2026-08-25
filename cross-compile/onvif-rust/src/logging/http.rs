@@ -310,9 +310,14 @@ fn sanitize_and_truncate_body(body: &Bytes, max_bytes: usize, sanitize: bool) ->
         body_str.to_string()
     };
 
-    // Truncate if needed
+    // Truncate if needed. Step back to a char boundary first: `max_bytes` is a
+    // byte count, and slicing through a multi-byte character panics.
     let truncated = if sanitized.len() > max_bytes {
-        format!("{}...[truncated]", &sanitized[..max_bytes])
+        let mut end = max_bytes;
+        while end > 0 && !sanitized.is_char_boundary(end) {
+            end -= 1;
+        }
+        format!("{}...[truncated]", &sanitized[..end])
     } else {
         sanitized
     };
@@ -347,6 +352,61 @@ fn sanitize_soap_body(body: &str) -> String {
         result = sanitize_xml_element(&result, element);
     }
 
+    sanitize_json_community(&result)
+}
+
+/// Mask JSON `"community":"…"` (SNMP REST) so it never reaches `/mnt/logs`.
+///
+/// String scan (no regex): matches the rest of this module and keeps `regex`
+/// as a test-only dependency.
+fn sanitize_json_community(body: &str) -> String {
+    const KEY: &str = "\"community\"";
+    let mut result = String::with_capacity(body.len());
+    let mut remaining = body;
+    while let Some(key_start) = remaining.find(KEY) {
+        result.push_str(&remaining[..key_start]);
+        result.push_str(KEY);
+        let after_key = &remaining[key_start + KEY.len()..];
+        let Some(colon_rel) = after_key.find(':') else {
+            result.push_str(after_key);
+            return result;
+        };
+        if !after_key[..colon_rel].chars().all(char::is_whitespace) {
+            // Not a JSON key:value — keep scanning after this KEY occurrence.
+            remaining = &remaining[key_start + KEY.len()..];
+            continue;
+        }
+        result.push_str(&after_key[..=colon_rel]);
+        let after_colon = &after_key[colon_rel + 1..];
+        let trimmed = after_colon.trim_start();
+        let ws_len = after_colon.len() - trimmed.len();
+        result.push_str(&after_colon[..ws_len]);
+        if !trimmed.starts_with('"') {
+            remaining = after_colon;
+            continue;
+        }
+        result.push_str("\"***\"");
+        let after_open = &trimmed[1..];
+        // Find the closing quote, honouring backslash escapes. A plain `find`
+        // stops at the `"` inside `\"` and spills the rest of the secret.
+        let mut end = None;
+        let mut escaped = false;
+        for (i, c) in after_open.char_indices() {
+            if escaped {
+                escaped = false;
+            } else if c == '\\' {
+                escaped = true;
+            } else if c == '"' {
+                end = Some(i);
+                break;
+            }
+        }
+        remaining = match end {
+            Some(e) => &after_open[e + 1..],
+            None => "",
+        };
+    }
+    result.push_str(remaining);
     result
 }
 
@@ -420,6 +480,37 @@ fn process_opening_tag(after_open: &str, element_name: &str) -> TagProcessResult
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_sanitize_masks_json_community() {
+        let body = r#"{"enabled":true,"port":161,"community":"s3cret","sys_name":"cam"}"#;
+        let out = sanitize_soap_body(body);
+        assert!(
+            !out.contains("s3cret"),
+            "community must never reach the log: {out}"
+        );
+        assert!(
+            out.contains("\"port\":161"),
+            "unrelated fields survive: {out}"
+        );
+    }
+
+    #[test]
+    fn test_sanitize_json_community_escaped_quote_masks_value() {
+        // A plain `find('"')` closes on the escaped quote and spills `b"` into
+        // the log along with the rest of the secret.
+        let body = r#"{"community":"a\"b","port":161}"#;
+        let out = sanitize_json_community(body);
+        assert_eq!(out, r#"{"community":"***","port":161}"#);
+    }
+
+    #[test]
+    fn test_truncation_never_splits_a_utf8_character() {
+        // 'é' occupies bytes 9..11, so a 10-byte limit lands mid-character.
+        let body = Bytes::from(format!("{}é{}", "a".repeat(9), "b".repeat(20)));
+        let out = sanitize_and_truncate_body(&body, 10, false);
+        assert_eq!(out, "aaaaaaaaa...[truncated]");
+    }
 
     #[test]
     fn test_sanitize_password() {
