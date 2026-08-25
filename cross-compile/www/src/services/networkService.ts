@@ -40,6 +40,17 @@ export interface NetworkProtocols {
   rtsp: number;
 }
 
+export interface SnmpConfig {
+  enabled: boolean;
+  port: number;
+  community: string;
+  sys_contact: string;
+  sys_name: string;
+  sys_location: string;
+}
+
+export type SnmpPatch = Partial<SnmpConfig>;
+
 export interface NetworkConfig {
   interfaces: NetworkInterface[];
   dns: DNSConfig;
@@ -262,6 +273,40 @@ export async function putNetworkOverlay(patch: NetworkOverlayPatch): Promise<voi
   if (!response.ok) {
     const text = await response.text();
     throw new Error(text || `Overlay save failed (${response.status})`);
+  }
+}
+
+/**
+ * Read SNMP agent settings from GET /api/snmp.
+ */
+export async function getSnmpConfig(): Promise<SnmpConfig> {
+  const response = await authorizedFetch('/api/snmp');
+  if (!response.ok) {
+    throw new Error(`Failed to load SNMP config (${response.status})`);
+  }
+  return (await response.json()) as SnmpConfig;
+}
+
+/**
+ * Write SNMP settings via PUT /api/snmp.
+ */
+export async function putSnmpConfig(patch: SnmpPatch): Promise<void> {
+  const body: SnmpPatch = {};
+  for (const [key, value] of Object.entries(patch)) {
+    if (value !== undefined) {
+      (body as Record<string, unknown>)[key] = value;
+    }
+  }
+
+  const response = await authorizedFetch('/api/snmp', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text || `SNMP save failed (${response.status})`);
   }
 }
 

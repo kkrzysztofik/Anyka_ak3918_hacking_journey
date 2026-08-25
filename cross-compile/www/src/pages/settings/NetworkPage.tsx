@@ -61,7 +61,9 @@ import {
   type NetworkConfig,
   getNetworkConfig,
   getNetworkOverlay,
+  getSnmpConfig,
   putNetworkOverlay,
+  putSnmpConfig,
   setDNS,
   setNetworkDefaultGateway,
   setNetworkInterface,
@@ -85,6 +87,9 @@ const networkSchema = z
     secondaryDNS: z.string().regex(ipRegex, 'Invalid IP address').optional().or(z.literal('')),
     httpPort: z.number().int().min(1, 'Port must be 1-65535').max(65535, 'Port must be 1-65535'),
     rtspPort: z.number().int().min(1, 'Port must be 1-65535').max(65535, 'Port must be 1-65535'),
+    snmpEnabled: z.boolean(),
+    snmpPort: z.number().int().min(1, 'Port must be 1-65535').max(65535, 'Port must be 1-65535'),
+    snmpCommunity: z.string().min(1, 'Community must not be empty').max(64),
   })
   .superRefine((data, ctx) => {
     if (!data.dhcp) {
@@ -179,6 +184,11 @@ export default function NetworkPage() {
     queryFn: getNetworkOverlay,
   });
 
+  const { data: snmp } = useQuery({
+    queryKey: ['snmpConfig'],
+    queryFn: getSnmpConfig,
+  });
+
   const form = useForm<NetworkFormData>({
     resolver: zodResolver(networkSchema) as Resolver<NetworkFormData>,
     defaultValues: {
@@ -194,6 +204,9 @@ export default function NetworkPage() {
       secondaryDNS: '',
       httpPort: 80,
       rtspPort: 554,
+      snmpEnabled: true,
+      snmpPort: 161,
+      snmpCommunity: 'public',
     },
   });
 
@@ -223,9 +236,12 @@ export default function NetworkPage() {
         secondaryDNS: pending?.dns?.[1] ?? config.dns.dnsServers[1] ?? '',
         httpPort: config.protocols.http,
         rtspPort: config.protocols.rtsp,
+        snmpEnabled: snmp?.enabled ?? true,
+        snmpPort: snmp?.port ?? 161,
+        snmpCommunity: snmp?.community ?? 'public',
       });
     }
-  }, [config, overlay, diagnostics?.wifi?.ssid, form]);
+  }, [config, overlay, snmp, diagnostics?.wifi?.ssid, form]);
 
   const mutation = useMutation({
     mutationFn: async (values: NetworkFormData) => {
@@ -256,14 +272,22 @@ export default function NetworkPage() {
       await runNetworkStep('Port configuration failed', () =>
         setNetworkProtocols(values.httpPort, values.rtspPort),
       );
+      await runNetworkStep('SNMP configuration failed', () =>
+        putSnmpConfig({
+          enabled: values.snmpEnabled,
+          port: values.snmpPort,
+          community: values.snmpCommunity,
+        }),
+      );
     },
     onSuccess: () => {
       toast.success('Network settings saved', {
         description:
-          'Changes are saved and will apply after the next reboot. The device may be unreachable until then if IP or ports changed.',
+          'Changes are saved and will apply after the next reboot. The device may be unreachable until then if IP or ports changed. SNMP changes apply on reload without reboot.',
       });
       queryClient.invalidateQueries({ queryKey: ['networkConfig'] });
       queryClient.invalidateQueries({ queryKey: ['networkOverlay'] });
+      queryClient.invalidateQueries({ queryKey: ['snmpConfig'] });
       setConfirmOpen(false);
     },
     onError: (error) => {
@@ -303,6 +327,9 @@ export default function NetworkPage() {
         secondaryDNS: pending?.dns?.[1] ?? config.dns.dnsServers[1] ?? '',
         httpPort: config.protocols.http,
         rtspPort: config.protocols.rtsp,
+        snmpEnabled: snmp?.enabled ?? true,
+        snmpPort: snmp?.port ?? 161,
+        snmpCommunity: snmp?.community ?? 'public',
       });
       toast.info('Form reset to current values');
     }
@@ -719,6 +746,83 @@ export default function NetworkPage() {
                             onChange={(e) => field.onChange(Number.parseInt(e.target.value))}
                             className="border-[#3a3a3c] bg-transparent text-white"
                             data-testid="network-rtsp-port-input"
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+              </SettingsCardContent>
+            </SettingsCard>
+
+            <SettingsCard>
+              <SettingsCardHeader>
+                <div className="flex items-center gap-[12px]">
+                  <div className="flex size-[40px] items-center justify-center rounded-[10px] bg-[rgba(48,209,88,0.1)]">
+                    <Server className="size-5 text-[#30d158]" />
+                  </div>
+                  <div>
+                    <SettingsCardTitle>SNMP</SettingsCardTitle>
+                    <SettingsCardDescription>
+                      Read-only SNMPv2c agent (applies without reboot)
+                    </SettingsCardDescription>
+                  </div>
+                </div>
+              </SettingsCardHeader>
+              <SettingsCardContent className="space-y-[24px]">
+                <FormField
+                  control={form.control}
+                  name="snmpEnabled"
+                  render={({ field }) => (
+                    <FormItem className="flex items-center justify-between gap-[16px]">
+                      <div>
+                        <FormLabel className="text-[#a1a1a6]">Enable SNMP</FormLabel>
+                        <FormDescription className="text-[#636366]">
+                          Default community &quot;public&quot; is insecure on untrusted networks
+                        </FormDescription>
+                      </div>
+                      <FormControl>
+                        <Switch
+                          checked={field.value}
+                          onCheckedChange={field.onChange}
+                          data-testid="network-snmp-enabled-switch"
+                        />
+                      </FormControl>
+                    </FormItem>
+                  )}
+                />
+                <div className="grid grid-cols-1 gap-[24px] md:grid-cols-2">
+                  <FormField
+                    control={form.control}
+                    name="snmpPort"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel className="text-[#a1a1a6]">SNMP Port</FormLabel>
+                        <FormControl>
+                          <Input
+                            type="number"
+                            {...field}
+                            onChange={(e) => field.onChange(Number.parseInt(e.target.value))}
+                            className="border-[#3a3a3c] bg-transparent text-white"
+                            data-testid="network-snmp-port-input"
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="snmpCommunity"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel className="text-[#a1a1a6]">RO Community</FormLabel>
+                        <FormControl>
+                          <Input
+                            {...field}
+                            className="border-[#3a3a3c] bg-transparent text-white"
+                            data-testid="network-snmp-community-input"
                           />
                         </FormControl>
                         <FormMessage />

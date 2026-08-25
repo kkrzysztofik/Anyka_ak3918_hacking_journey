@@ -646,6 +646,12 @@ impl OnvifServer {
                         .put(crate::diagnostics::network::handle_put_network)
                         .layer(timeout()),
                 );
+                api = api.route(
+                    "/snmp",
+                    get(crate::diagnostics::snmp::handle_get_snmp)
+                        .put(crate::diagnostics::snmp::handle_put_snmp)
+                        .layer(timeout()),
+                );
             }
             let api = api
                 .fallback(|| async { StatusCode::NOT_FOUND })
@@ -661,6 +667,11 @@ impl OnvifServer {
                 )))
                 .layer(axum::Extension(Arc::new(
                     crate::diagnostics::network::NetworkState::from_update_root(
+                        self.config.update_root.clone(),
+                    ),
+                )))
+                .layer(axum::Extension(Arc::new(
+                    crate::diagnostics::snmp::SnmpApiState::from_update_root(
                         self.config.update_root.clone(),
                     ),
                 )));

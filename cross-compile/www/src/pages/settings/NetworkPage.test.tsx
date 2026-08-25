@@ -10,7 +10,9 @@ import {
   getNetworkConfig,
   getNetworkInterfaces,
   getNetworkOverlay,
+  getSnmpConfig,
   putNetworkOverlay,
+  putSnmpConfig,
   setDNS,
   setNetworkDefaultGateway,
   setNetworkInterface,
@@ -31,7 +33,9 @@ vi.mock('@/services/networkService', () => ({
   getNetworkConfig: vi.fn(),
   getNetworkInterfaces: vi.fn(),
   getNetworkOverlay: vi.fn(),
+  getSnmpConfig: vi.fn(),
   putNetworkOverlay: vi.fn(),
+  putSnmpConfig: vi.fn(),
   setNetworkInterface: vi.fn(),
   setNetworkDefaultGateway: vi.fn(),
   setDNS: vi.fn(),
@@ -83,6 +87,14 @@ describe('NetworkPage', () => {
     vi.clearAllMocks();
     vi.mocked(getNetworkConfig).mockResolvedValue(MOCK_DATA.network);
     vi.mocked(getNetworkOverlay).mockResolvedValue(EMPTY_OVERLAY);
+    vi.mocked(getSnmpConfig).mockResolvedValue({
+      enabled: true,
+      port: 161,
+      community: 'public',
+      sys_contact: '',
+      sys_name: '',
+      sys_location: '',
+    });
     vi.mocked(getNetworkInterfaces).mockResolvedValue([
       {
         token: 'wlan0',
@@ -99,6 +111,7 @@ describe('NetworkPage', () => {
     ]);
     vi.mocked(getDiagnostics).mockResolvedValue(MOCK_DIAGNOSTICS);
     vi.mocked(putNetworkOverlay).mockResolvedValue(undefined);
+    vi.mocked(putSnmpConfig).mockResolvedValue(undefined);
     vi.mocked(setNetworkInterface).mockResolvedValue(undefined);
     vi.mocked(setNetworkDefaultGateway).mockResolvedValue(undefined);
     vi.mocked(setDNS).mockResolvedValue(undefined);
