@@ -917,6 +917,8 @@ function SoundTestCard() {
         toast.success('Playing…');
       } else if (result === 'debounced') {
         toast.info('Skipped (debounce)');
+      } else if (result === 'busy') {
+        toast.error('Speaker busy, try again');
       }
     },
     onError: (error: Error) => {

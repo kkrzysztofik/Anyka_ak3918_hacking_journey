@@ -732,6 +732,18 @@ describe('DiagnosticsPage', () => {
       expect(screen.getByTestId('sound-play-button')).toBeDisabled();
     });
 
+    it('should disable play and show message when events are empty even if enabled', async () => {
+      vi.mocked(getSoundStatus).mockResolvedValue({
+        enabled: true,
+        events: [],
+      });
+
+      renderWithProviders(<DiagnosticsPage />);
+
+      expect(await screen.findByTestId('sound-disabled-message')).toBeInTheDocument();
+      expect(screen.getByTestId('sound-play-button')).toBeDisabled();
+    });
+
     it('should call playSound with the selected event and toast success', async () => {
       const user = userEvent.setup();
       renderWithProviders(<DiagnosticsPage />);
@@ -741,7 +753,20 @@ describe('DiagnosticsPage', () => {
 
       await waitFor(() => {
         expect(playSound).toHaveBeenCalledWith('boot_ready');
-        expect(toast.success).toHaveBeenCalled();
+        expect(toast.success).toHaveBeenCalledWith(expect.stringMatching(/Playing/i));
+      });
+    });
+
+    it('should toast info when playSound resolves debounced', async () => {
+      vi.mocked(playSound).mockResolvedValue('debounced');
+      const user = userEvent.setup();
+      renderWithProviders(<DiagnosticsPage />);
+
+      await screen.findByTestId('sound-play-button');
+      await user.click(screen.getByTestId('sound-play-button'));
+
+      await waitFor(() => {
+        expect(toast.info).toHaveBeenCalledWith(expect.stringMatching(/debounce/i));
       });
     });
 
@@ -755,6 +780,19 @@ describe('DiagnosticsPage', () => {
 
       await waitFor(() => {
         expect(toast.error).toHaveBeenCalledWith(expect.stringMatching(/busy/i));
+      });
+    });
+
+    it('should toast error when playSound rejects with a generic error', async () => {
+      vi.mocked(playSound).mockRejectedValue(new Error('speaker offline'));
+      const user = userEvent.setup();
+      renderWithProviders(<DiagnosticsPage />);
+
+      await screen.findByTestId('sound-play-button');
+      await user.click(screen.getByTestId('sound-play-button'));
+
+      await waitFor(() => {
+        expect(toast.error).toHaveBeenCalledWith(expect.stringMatching(/speaker offline/i));
       });
     });
   });
