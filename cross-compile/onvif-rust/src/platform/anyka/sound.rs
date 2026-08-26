@@ -70,6 +70,11 @@ where
         }
     }
 
+    /// Borrow the active sound policy (enabled, events, volume, debounce).
+    pub fn config(&self) -> &SoundConfig {
+        &self.config
+    }
+
     /// Play a named event clip. Never treats busy/debounce/disabled as an error.
     pub fn play(&self, event: &str) -> PlatformResult<SoundPlayResult> {
         if !self.config.enabled {
