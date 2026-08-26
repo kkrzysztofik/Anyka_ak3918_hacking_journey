@@ -15,6 +15,21 @@ use crate::config::sound::SoundConfig;
 use crate::platform::PlatformError;
 use crate::platform::PlatformResult;
 
+/// Policy-layer result of `SoundPlayer::play` (distinct from sink `SoundPlayOutcome`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SoundPlayResult {
+    /// Sink accepted the play request.
+    Accepted,
+    /// Sink reported busy; clip was dropped.
+    Busy,
+    /// Repeat within debounce window; no sink call.
+    Debounced,
+    /// Sound config disabled; no sink call.
+    Disabled,
+    /// No clip mapped for the event; no sink call.
+    NoClip,
+}
+
 /// Outcome of asking the daemon (or a test sink) to play a clip.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SoundPlayOutcome {
@@ -55,15 +70,15 @@ where
         }
     }
 
-    /// Fire-and-forget play for a named event. Never treats busy as an error.
-    pub fn play(&self, event: &str) -> PlatformResult<()> {
+    /// Play a named event clip. Never treats busy/debounce/disabled as an error.
+    pub fn play(&self, event: &str) -> PlatformResult<SoundPlayResult> {
         if !self.config.enabled {
             debug!(event, "sound disabled; skip");
-            return Ok(());
+            return Ok(SoundPlayResult::Disabled);
         }
         let Some(clip) = self.config.clip_for(event) else {
             debug!(event, "no clip mapped; skip");
-            return Ok(());
+            return Ok(SoundPlayResult::NoClip);
         };
 
         let now = (self.clock)();
@@ -76,7 +91,7 @@ where
                 && now.duration_since(*prev) < Duration::from_secs(self.config.debounce_secs)
             {
                 debug!(event, "within debounce; skip");
-                return Ok(());
+                return Ok(SoundPlayResult::Debounced);
             }
             last.insert(event.to_string(), now);
         }
@@ -86,11 +101,11 @@ where
         match self.sink.play_file(path_str.as_ref(), self.config.volume)? {
             SoundPlayOutcome::Accepted => {
                 debug!(event, path = %path_str, "sound play accepted");
-                Ok(())
+                Ok(SoundPlayResult::Accepted)
             }
             SoundPlayOutcome::Busy => {
                 debug!(event, path = %path_str, "sound play busy; dropped");
-                Ok(())
+                Ok(SoundPlayResult::Busy)
             }
         }
     }
@@ -356,7 +371,7 @@ mod tests {
             Arc::clone(&sink),
             &clock,
         );
-        p.play("boot_ready").unwrap();
+        assert_eq!(p.play("boot_ready").unwrap(), SoundPlayResult::Disabled);
         assert!(sink.calls().is_empty());
     }
 
@@ -369,7 +384,7 @@ mod tests {
             Arc::clone(&sink),
             &clock,
         );
-        p.play("network_lost").unwrap();
+        assert_eq!(p.play("network_lost").unwrap(), SoundPlayResult::NoClip);
         assert!(sink.calls().is_empty());
     }
 
@@ -382,7 +397,7 @@ mod tests {
             Arc::clone(&sink),
             &clock,
         );
-        p.play("boot_ready").unwrap();
+        assert_eq!(p.play("boot_ready").unwrap(), SoundPlayResult::Accepted);
         assert_eq!(sink.calls(), vec![("sounds/boot.raw".into(), 3)]);
     }
 
@@ -395,9 +410,9 @@ mod tests {
             Arc::clone(&sink),
             &clock,
         );
-        p.play("boot_ready").unwrap();
+        assert_eq!(p.play("boot_ready").unwrap(), SoundPlayResult::Accepted);
         clock.advance(10);
-        p.play("boot_ready").unwrap();
+        assert_eq!(p.play("boot_ready").unwrap(), SoundPlayResult::Debounced);
         assert_eq!(sink.calls().len(), 1);
     }
 
@@ -410,9 +425,9 @@ mod tests {
             Arc::clone(&sink),
             &clock,
         );
-        p.play("boot_ready").unwrap();
+        assert_eq!(p.play("boot_ready").unwrap(), SoundPlayResult::Accepted);
         clock.advance(30);
-        p.play("boot_ready").unwrap();
+        assert_eq!(p.play("boot_ready").unwrap(), SoundPlayResult::Accepted);
         assert_eq!(sink.calls().len(), 2);
     }
 
@@ -428,9 +443,9 @@ mod tests {
             Arc::clone(&sink),
             &clock,
         );
-        p.play("network_up").unwrap();
+        assert_eq!(p.play("network_up").unwrap(), SoundPlayResult::Accepted);
         clock.advance(5);
-        p.play("upgrade_result").unwrap();
+        assert_eq!(p.play("upgrade_result").unwrap(), SoundPlayResult::Accepted);
         assert_eq!(sink.calls().len(), 2);
     }
 
@@ -444,7 +459,7 @@ mod tests {
             Arc::clone(&sink),
             &clock,
         );
-        assert!(p.play("boot_ready").is_ok());
+        assert_eq!(p.play("boot_ready").unwrap(), SoundPlayResult::Busy);
         assert_eq!(sink.calls().len(), 1);
     }
 
@@ -455,7 +470,7 @@ mod tests {
         let mut c = cfg(true, &[("boot_ready", "boot.raw")]);
         c.clip_dir = "/mnt/anyka_hack/onvif/sounds".into();
         let p = player(c, Arc::clone(&sink), &clock);
-        p.play("boot_ready").unwrap();
+        assert_eq!(p.play("boot_ready").unwrap(), SoundPlayResult::Accepted);
         assert_eq!(sink.calls()[0].0, "/mnt/anyka_hack/onvif/sounds/boot.raw");
     }
 
