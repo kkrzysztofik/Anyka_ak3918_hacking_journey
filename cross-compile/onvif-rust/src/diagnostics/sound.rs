@@ -93,7 +93,10 @@ fn play_result_response(result: PlatformResult<SoundPlayResult>) -> axum::respon
                 None => (status, "sound unavailable or unknown event").into_response(),
             }
         }
-        Err(e) => (StatusCode::SERVICE_UNAVAILABLE, e.to_string()).into_response(),
+        Err(e) => {
+            tracing::warn!(error = %e, "sound play failed");
+            (StatusCode::SERVICE_UNAVAILABLE, "sound playback failed").into_response()
+        }
     }
 }
 

@@ -161,11 +161,12 @@ int handle_audio_play(int fd, const uint8_t *req, uint32_t req_len)
 }
 
 /* CMD_AUDIO_STOP — reserved. There is no ak_ao cancel that is safe mid-frame;
- * the watchdog in the worker bounds playback instead. Reports current state. */
+ * the watchdog in the worker bounds playback instead. Until cancellation exists,
+ * report an error rather than pretending the stop succeeded. */
 int handle_audio_stop(int fd, const uint8_t *req, uint32_t req_len)
 {
     (void)req;
     (void)req_len;
-    log_debug("[sound] stop: no-op (playing=%d)", sound_is_playing());
-    return send_response(fd, STATUS_OK, NULL, 0);
+    log_debug("[sound] stop: unsupported (playing=%d)", sound_is_playing());
+    return send_response(fd, STATUS_ERROR, NULL, 0);
 }

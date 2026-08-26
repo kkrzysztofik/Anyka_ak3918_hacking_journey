@@ -69,7 +69,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn defaults_are_safe_and_quiet() {
+    fn test_sound_config_defaults_are_safe_and_quiet() {
         let c = SoundConfig::default();
         assert!(!c.enabled, "sound must be opt-in");
         assert!(c.volume <= 6, "volume must stay in the DAC range");
@@ -77,13 +77,13 @@ mod tests {
     }
 
     #[test]
-    fn volume_above_dac_range_is_clamped() {
+    fn test_sound_config_volume_above_dac_range_is_clamped() {
         let c: SoundConfig = toml::from_str("enabled = true\nvolume = 99").unwrap();
         assert_eq!(c.volume, 6);
     }
 
     #[test]
-    fn unmapped_event_resolves_to_no_clip() {
+    fn test_sound_config_unmapped_event_resolves_to_no_clip() {
         let c: SoundConfig =
             toml::from_str("enabled = true\n[events]\nboot_ready = \"boot.raw\"").unwrap();
         assert_eq!(c.clip_for("boot_ready"), Some("boot.raw"));

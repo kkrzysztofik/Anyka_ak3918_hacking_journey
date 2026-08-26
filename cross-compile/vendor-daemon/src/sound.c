@@ -34,5 +34,18 @@ int sound_parse_play_req(const uint8_t *req, uint32_t req_len, struct sound_req 
         return -1;
 
     memcpy(out->path, req + 16, path_len);
+
+    /* Confine playback to the SD-card tree. Absolute paths only; no ".." escapes. */
+    if (out->path[0] != '/')
+        return -1;
+    if (strstr(out->path, "/../") != NULL)
+        return -1;
+    {
+        size_t n = strlen(out->path);
+        if (n >= 3 && strcmp(out->path + n - 3, "/..") == 0)
+            return -1;
+    }
+    if (strncmp(out->path, SOUND_PATH_PREFIX, sizeof(SOUND_PATH_PREFIX) - 1) != 0)
+        return -1;
     return 0;
 }

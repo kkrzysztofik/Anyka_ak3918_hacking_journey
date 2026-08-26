@@ -308,7 +308,7 @@ Makefile target and no CI job. Wire all three up now.
 
 ```make
 HOST_CC ?= gcc
-TESTS = test_sound_parse
+TESTS = test_sound_parse test_push_slots test_ring_epoch
 
 test:
 	@for t in $(TESTS); do \
@@ -650,7 +650,8 @@ catches an AO-open failure or a wrong link before it is buried under policy code
 ```bash
 uv run python3 - <<'PY'
 import ftplib
-f = ftplib.FTP("192.168.2.198", timeout=30); f.login("root", "www123")
+import os
+f = ftplib.FTP("192.168.2.198", timeout=30); f.login(os.environ["CAMERA_USER"], os.environ["CAMERA_PASS"])
 f.cwd("/mnt/anyka_hack/slots/a/vendor-daemon")
 for local, remote in [
     ("cross-compile/vendor-daemon/build/vendor-daemon.bin", "vendor-daemon.bin.new"),

@@ -917,8 +917,6 @@ function SoundTestCard() {
         toast.success('Playing…');
       } else if (result === 'debounced') {
         toast.info('Skipped (debounce)');
-      } else if (result === 'busy') {
-        toast.error('Speaker busy, try again');
       }
     },
     onError: (error: Error) => {
@@ -938,9 +936,9 @@ function SoundTestCard() {
   return (
     <Card className="border-border bg-card overflow-hidden" data-testid="sound-card">
       <CardHeader className="border-border border-b">
-        <div className="flex items-center justify-between gap-3">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-500/10">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-blue-500/10">
               <Volume2 className="h-5 w-5 text-blue-500" />
             </div>
             <div>
@@ -955,13 +953,17 @@ function SoundTestCard() {
               </p>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Select
               value={effectiveEvent || undefined}
               onValueChange={setSelectedEvent}
               disabled={!controlsEnabled}
             >
-              <SelectTrigger className="h-7 w-44 text-xs" data-testid="sound-event-select">
+              <SelectTrigger
+                className="h-7 w-full text-xs sm:w-44"
+                data-testid="sound-event-select"
+                aria-label="Sound event"
+              >
                 <SelectValue placeholder="Select event" />
               </SelectTrigger>
               <SelectContent>

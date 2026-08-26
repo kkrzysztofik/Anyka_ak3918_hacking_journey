@@ -1,5 +1,7 @@
 #include <pthread.h>
 #include <stdio.h>
+#include <sys/stat.h>
+#include <errno.h>
 #include <string.h>
 #include <time.h>
 
@@ -32,6 +34,14 @@ static void *sound_thread(void *arg)
     (void)arg;
     struct timespec start;
     clock_gettime(CLOCK_MONOTONIC, &start);
+
+    {
+        struct stat st;
+        if (stat(current.path, &st) != 0 || !S_ISREG(st.st_mode)) {
+            log_warn("[sound] refusing non-regular path %s", current.path);
+            goto done;
+        }
+    }
 
     FILE *fp = fopen(current.path, "rb");
     if (fp == NULL) {
@@ -66,11 +76,36 @@ static void *sound_thread(void *arg)
                      current.path, SOUND_MAX_MS);
             break;
         }
-        if (ak_ao_send_frame(ao, buf, (int)n, 0) < 0) {
-            log_warn("[sound] send_frame failed after %llu bytes", sent);
-            break;
+        {
+            size_t off = 0;
+            int send_failed = 0;
+            while (off < n) {
+                if (elapsed_ms(&start) > SOUND_MAX_MS) {
+                    log_warn("[sound] watchdog: aborting %s after %d ms",
+                             current.path, SOUND_MAX_MS);
+                    send_failed = 1;
+                    break;
+                }
+                int rc = ak_ao_send_frame(ao, buf + off, (int)(n - off), 0);
+                if (rc < 0) {
+                    log_warn("[sound] send_frame failed after %llu bytes", sent);
+                    send_failed = 1;
+                    break;
+                }
+                if (rc == 0) {
+                    /* Non-blocking: wait briefly rather than spin. */
+                    struct timespec ts = { .tv_sec = 0, .tv_nsec = 5 * 1000 * 1000 };
+                    nanosleep(&ts, NULL);
+                    continue;
+                }
+                off += (size_t)rc;
+                sent += (unsigned long long)rc;
+            }
+            if (send_failed)
+                break;
+            if (off < n)
+                break;
         }
-        sent += n;
     }
 
     ak_ao_notice_frame_end(ao);

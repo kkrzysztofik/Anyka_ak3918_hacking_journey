@@ -38,7 +38,7 @@ audition a mapped event without restarting or flapping the link.
 
 ## Architecture
 
-```
+```text
 WebUI Diagnostics card
   │  GET  /api/sound
   │  POST /api/sound/play { event }

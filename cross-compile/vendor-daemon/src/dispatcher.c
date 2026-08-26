@@ -57,6 +57,8 @@ static int is_lifecycle_cmd(int32_t cmd)
     case CMD_AENC_SET_ATTR:
     case CMD_AUDIO_START_PUSH:
     case CMD_AUDIO_STOP_PUSH:
+    case CMD_AUDIO_PLAY:
+    case CMD_AUDIO_STOP:
     case CMD_SHUTDOWN:
         return 1;
     default:

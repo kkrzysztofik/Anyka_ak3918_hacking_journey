@@ -100,7 +100,7 @@ MP3's only advantage is file size, which is worth nothing at chime length
 
 Mechanism in C, policy in Rust.
 
-```
+```text
 supervisor / network / applier ─┐
                                 ├─► SoundPlayer (Rust)  ── IPC ──►  handlers_audio.c
 WebUI ──► ONVIF/HTTP ───────────┘   debounce, event→clip,           play worker thread:

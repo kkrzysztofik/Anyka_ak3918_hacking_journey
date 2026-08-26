@@ -1347,6 +1347,7 @@ impl Application {
                         let c = config_runtime.read();
                         (c.sound.clone(), c.update.root.clone())
                     };
+                    let sound_enabled = sound_cfg.enabled;
                     let sound_player = crate::platform::sound::build_shared_player(
                         sound_cfg,
                         config_dir,
@@ -1367,18 +1368,20 @@ impl Application {
                                 "failed to start attach supervisor: {e}"
                             ))
                         })?;
-                    let link_player = Arc::clone(&sound_player);
-                    tokio::spawn(crate::platform::sound::run_link_watcher(
-                        link_player,
-                        "wlan0".to_string(),
-                        link_shutdown,
-                    ));
-                    let trial_player = Arc::clone(&sound_player);
-                    tokio::spawn(crate::platform::sound::run_trial_watcher(
-                        trial_player,
-                        std::path::PathBuf::from(update_root),
-                        trial_shutdown,
-                    ));
+                    if sound_enabled {
+                        let link_player = Arc::clone(&sound_player);
+                        tokio::spawn(crate::platform::sound::run_link_watcher(
+                            link_player,
+                            "wlan0".to_string(),
+                            link_shutdown,
+                        ));
+                        let trial_player = Arc::clone(&sound_player);
+                        tokio::spawn(crate::platform::sound::run_trial_watcher(
+                            trial_player,
+                            std::path::PathBuf::from(update_root),
+                            trial_shutdown,
+                        ));
+                    }
                     crate::platform::supervisor::watch_for_fatal(availability.clone(), || {
                         tracing::error!(
                             event = "attach_given_up_fatal",

@@ -103,14 +103,23 @@ where
 
         let path = clip_path(&self.config.clip_dir, clip);
         let path_str = path.to_string_lossy();
-        match self.sink.play_file(path_str.as_ref(), self.config.volume)? {
-            SoundPlayOutcome::Accepted => {
+        match self.sink.play_file(path_str.as_ref(), self.config.volume) {
+            Ok(SoundPlayOutcome::Accepted) => {
                 debug!(event, path = %path_str, "sound play accepted");
                 Ok(SoundPlayResult::Accepted)
             }
-            SoundPlayOutcome::Busy => {
+            Ok(SoundPlayOutcome::Busy) => {
                 debug!(event, path = %path_str, "sound play busy; dropped");
                 Ok(SoundPlayResult::Busy)
+            }
+            Err(e) => {
+                // Sink never played — clear debounce so a retry is not suppressed.
+                let mut last = self
+                    .last_played
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                last.remove(event);
+                Err(e)
             }
         }
     }
@@ -368,7 +377,7 @@ mod tests {
     }
 
     #[test]
-    fn disabled_config_plays_nothing() {
+    fn test_play_disabled_config_plays_nothing() {
         let sink = Arc::new(FakeSink::default());
         let clock = TestClock::new();
         let p = player(
@@ -381,7 +390,7 @@ mod tests {
     }
 
     #[test]
-    fn unmapped_event_plays_nothing() {
+    fn test_play_unmapped_event_plays_nothing() {
         let sink = Arc::new(FakeSink::default());
         let clock = TestClock::new();
         let p = player(
@@ -394,7 +403,7 @@ mod tests {
     }
 
     #[test]
-    fn first_event_plays() {
+    fn test_play_first_event_is_accepted() {
         let sink = Arc::new(FakeSink::default());
         let clock = TestClock::new();
         let p = player(
@@ -407,7 +416,7 @@ mod tests {
     }
 
     #[test]
-    fn repeat_within_debounce_is_dropped() {
+    fn test_play_repeat_within_debounce_is_dropped() {
         let sink = Arc::new(FakeSink::default());
         let clock = TestClock::new();
         let p = player(
@@ -422,7 +431,7 @@ mod tests {
     }
 
     #[test]
-    fn repeat_after_debounce_plays_again() {
+    fn test_play_repeat_after_debounce_plays_again() {
         let sink = Arc::new(FakeSink::default());
         let clock = TestClock::new();
         let p = player(
@@ -437,7 +446,7 @@ mod tests {
     }
 
     #[test]
-    fn debounce_is_per_event_not_global() {
+    fn test_play_debounce_is_per_event_not_global() {
         let sink = Arc::new(FakeSink::default());
         let clock = TestClock::new();
         let p = player(
@@ -455,7 +464,7 @@ mod tests {
     }
 
     #[test]
-    fn busy_response_is_not_an_error() {
+    fn test_play_busy_response_is_not_an_error() {
         let sink = Arc::new(FakeSink::default());
         sink.push_outcome(Ok(SoundPlayOutcome::Busy));
         let clock = TestClock::new();
@@ -469,7 +478,7 @@ mod tests {
     }
 
     #[test]
-    fn clip_path_is_joined_under_clip_dir() {
+    fn test_clip_path_is_joined_under_clip_dir() {
         let sink = Arc::new(FakeSink::default());
         let clock = TestClock::new();
         let mut c = cfg(true, &[("boot_ready", "boot.raw")]);
@@ -480,9 +489,10 @@ mod tests {
     }
 
     #[test]
-    fn sink_error_is_propagated() {
+    fn test_play_sink_error_is_propagated_and_clears_debounce() {
         let sink = Arc::new(FakeSink::default());
         sink.push_outcome(Err(PlatformError::HardwareFailure("boom".into())));
+        sink.push_outcome(Ok(SoundPlayOutcome::Accepted));
         let clock = TestClock::new();
         let p = player(
             cfg(true, &[("boot_ready", "boot.raw")]),
@@ -490,10 +500,13 @@ mod tests {
             &clock,
         );
         assert!(p.play("boot_ready").is_err());
+        // Immediate retry must not be reported as Debounced after a sink failure.
+        assert_eq!(p.play("boot_ready").unwrap(), SoundPlayResult::Accepted);
+        assert_eq!(sink.calls().len(), 2);
     }
 
     #[test]
-    fn link_edge_ignores_steady_state_and_baseline() {
+    fn test_link_edge_ignores_steady_state_and_baseline() {
         let mut w = LinkEdgeWatcher::default();
         assert_eq!(w.observe(true), None); // baseline
         assert_eq!(w.observe(true), None); // steady
@@ -504,7 +517,7 @@ mod tests {
     }
 
     #[test]
-    fn trial_confirm_fires_once_on_marker_clear() {
+    fn test_trial_confirm_fires_once_on_marker_clear() {
         let mut w = TrialConfirmWatcher::default();
         assert!(!w.observe(false)); // never saw marker
         assert!(!w.observe(true)); // saw it

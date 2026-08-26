@@ -15,7 +15,7 @@ export interface SoundStatus {
   events: SoundEventItem[];
 }
 
-export type PlaySoundStatus = 'accepted' | 'busy' | 'debounced';
+export type PlaySoundStatus = 'accepted' | 'debounced';
 
 /**
  * Read configured sound events and enabled flag from GET /api/sound.
@@ -68,7 +68,7 @@ export async function playSound(event: string, signal?: AbortSignal): Promise<Pl
       ? (payload as { status: string }).status
       : undefined;
 
-  if (status === 'accepted' || status === 'debounced' || status === 'busy') {
+  if (status === 'accepted' || status === 'debounced') {
     return status;
   }
 

@@ -14,7 +14,7 @@
 
 ---
 
-### Task 1: Richer `SoundPlayer::play` outcome (TDD)
+## Task 1: Richer `SoundPlayer::play` outcome (TDD)
 
 **Files:**
 - Modify: `cross-compile/onvif-rust/src/platform/anyka/sound.rs`
