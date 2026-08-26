@@ -11,7 +11,9 @@ use std::time::{Duration, Instant};
 use tracing::debug;
 
 use crate::config::sound::SoundConfig;
-use crate::platform::{PlatformError, PlatformResult};
+#[cfg(test)]
+use crate::platform::PlatformError;
+use crate::platform::PlatformResult;
 
 /// Outcome of asking the daemon (or a test sink) to play a clip.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -70,11 +72,11 @@ where
                 .last_played
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            if let Some(prev) = last.get(event) {
-                if now.duration_since(*prev) < Duration::from_secs(self.config.debounce_secs) {
-                    debug!(event, "within debounce; skip");
-                    return Ok(());
-                }
+            if let Some(prev) = last.get(event)
+                && now.duration_since(*prev) < Duration::from_secs(self.config.debounce_secs)
+            {
+                debug!(event, "within debounce; skip");
+                return Ok(());
             }
             last.insert(event.to_string(), now);
         }
