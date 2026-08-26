@@ -10,5 +10,7 @@ int handle_ai_set_aslc_volume(int fd, const uint8_t *req, uint32_t req_len);
 int handle_aenc_open(int fd, const uint8_t *req, uint32_t req_len);
 int handle_aenc_close(int fd, const uint8_t *req, uint32_t req_len);
 int handle_aenc_set_attr(int fd, const uint8_t *req, uint32_t req_len);
+int handle_audio_play(int fd, const uint8_t *req, uint32_t req_len);
+int handle_audio_stop(int fd, const uint8_t *req, uint32_t req_len);
 
 #endif /* VENDOR_DAEMON_HANDLERS_AUDIO_H */

@@ -297,6 +297,14 @@ int process_request(int fd)
         ret = handle_audio_stop_push(fd, req_buf, req_len);
         break;
 
+    /* --- Audio playback --- */
+    case CMD_AUDIO_PLAY:
+        ret = handle_audio_play(fd, req_buf, req_len);
+        break;
+    case CMD_AUDIO_STOP:
+        ret = handle_audio_stop(fd, req_buf, req_len);
+        break;
+
     /* --- Audio Input --- */
     case CMD_AI_OPEN:
         ret = handle_ai_open(fd, req_buf, req_len);
