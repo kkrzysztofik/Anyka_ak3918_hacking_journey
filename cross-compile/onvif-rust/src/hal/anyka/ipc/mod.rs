@@ -20,6 +20,8 @@ mod osd;
 mod shm_ring;
 mod video;
 
+pub use audio::AudioPlayStatus;
+
 use crate::platform::PlatformError;
 use crate::platform::PlatformResult;
 use crate::platform::common::{OwnedFrame, StreamId};
@@ -276,6 +278,8 @@ const CMD_AENC_CLOSE: i32 = 55;
 const CMD_AENC_SET_ATTR: i32 = 56;
 const CMD_AUDIO_START_PUSH: i32 = 57;
 const CMD_AUDIO_STOP_PUSH: i32 = 58;
+const CMD_AUDIO_PLAY: i32 = 59;
+const CMD_AUDIO_STOP: i32 = 60;
 const CMD_ISP_SET_BRIGHTNESS: i32 = 100;
 const CMD_ISP_SET_CONTRAST: i32 = 101;
 const CMD_ISP_SET_SATURATION: i32 = 102;
@@ -303,6 +307,10 @@ const CMD_HELLO: i32 = 300;
 /// caught something the epoch gate should already have refused — a bug or a
 /// version skew, worth a loud message either way.
 const VD_STATUS_STALE_EPOCH: i32 = -2;
+
+/// A play request arrived while the single AO worker was busy. Mirrors
+/// `VD_STATUS_BUSY` in the daemon — expected under load, not a fault.
+const VD_STATUS_BUSY: i32 = -3;
 
 /// Sentinel meaning "not attached to any daemon generation".
 ///
@@ -557,6 +565,8 @@ impl AnykaIpc {
             CMD_AENC_SET_ATTR => "AENC_SET_ATTR",
             CMD_AUDIO_START_PUSH => "AUDIO_START_PUSH",
             CMD_AUDIO_STOP_PUSH => "AUDIO_STOP_PUSH",
+            CMD_AUDIO_PLAY => "AUDIO_PLAY",
+            CMD_AUDIO_STOP => "AUDIO_STOP",
             CMD_ISP_SET_BRIGHTNESS => "ISP_SET_BRIGHTNESS",
             CMD_ISP_SET_CONTRAST => "ISP_SET_CONTRAST",
             CMD_ISP_SET_SATURATION => "ISP_SET_SATURATION",
