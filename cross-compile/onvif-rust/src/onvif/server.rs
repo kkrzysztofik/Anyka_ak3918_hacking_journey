@@ -774,6 +774,11 @@ async fn validate_content_type(request: Request, next: Next) -> Response {
         return next.run(request).await;
     }
 
+    // REST /api routes use JSON; SOAP Content-Type rules apply to ONVIF only.
+    if request.uri().path().starts_with("/api/") {
+        return next.run(request).await;
+    }
+
     let content_type = request
         .headers()
         .get(header::CONTENT_TYPE)
@@ -1809,6 +1814,36 @@ mod tests {
 
         let response = app.oneshot(request).await.unwrap();
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    /// POST /api/sound/play uses JSON; SOAP Content-Type middleware must not 415 it.
+    #[tokio::test]
+    async fn test_post_sound_play_accepts_json_content_type() {
+        use axum::body::Body;
+        use axum::http::{Request, StatusCode};
+        use tower::ServiceExt;
+
+        let app = make_diagnostics_app_with_user(
+            true,
+            "admin",
+            crate::config::UserLevel::Administrator,
+            0,
+        );
+
+        let request = Request::builder()
+            .method("POST")
+            .uri("/api/sound/play")
+            .header("Authorization", "Basic YWRtaW46cGFzcw==") // admin:pass
+            .header("Content-Type", "application/json")
+            .body(Body::from(r#"{"event":"boot_ready"}"#))
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_ne!(
+            response.status(),
+            StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            "JSON POST /api/sound/play must not be rejected by SOAP Content-Type gate"
+        );
     }
 
     #[tokio::test]
