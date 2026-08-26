@@ -90,6 +90,7 @@ LDFLAGS = \
 	  -lmpi_osd \
 	  -lmpi_venc \
 	  -lplat_ai \
+	  -lplat_ao \
 	  -lmpi_aenc \
 	  -lplat_common \
 	  -lakispsdk \
