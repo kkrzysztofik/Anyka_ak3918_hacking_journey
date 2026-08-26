@@ -558,3 +558,18 @@ enabled = true
 position = "lower-right"
 date_format = "iso"
 time_format = "h24"
+
+# -----------------------------------------------------------------------------
+# Event audio playback (speaker chimes via vendor-daemon CMD_AUDIO_PLAY)
+# -----------------------------------------------------------------------------
+[sound]
+enabled = true
+clip_dir = "sounds"
+volume = 3
+debounce_secs = 30
+
+[sound.events]
+boot_ready = "boot.raw"
+network_lost = "alert.raw"
+network_up = "ok.raw"
+upgrade_result = "ok.raw"
