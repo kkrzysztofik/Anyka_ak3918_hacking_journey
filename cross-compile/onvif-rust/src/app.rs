@@ -1335,12 +1335,45 @@ impl Application {
                     // block on it, which is what lets the device service answer while
                     // the video pipeline is still down.
                     let platform = Arc::new(p);
-                    let (availability, supervisor_task) =
-                        platform.spawn_supervisor(shutdown_rx).map_err(|e| {
+                    let config_dir = std::path::Path::new(config_path)
+                        .parent()
+                        .unwrap_or(std::path::Path::new("/etc/onvif"));
+                    let (sound_cfg, update_root) = {
+                        let c = config_runtime.read();
+                        (c.sound.clone(), c.update.root.clone())
+                    };
+                    let sound_player = crate::platform::sound::build_shared_player(
+                        sound_cfg,
+                        config_dir,
+                        platform.ipc_client(),
+                    );
+                    let boot_player = Arc::clone(&sound_player);
+                    let on_available: Arc<dyn Fn() + Send + Sync> = Arc::new(move || {
+                        crate::platform::sound::play_event(&boot_player, "boot_ready");
+                    });
+                    // Extra shutdown subscriptions for the event-audio watchers
+                    // before the supervisor consumes `shutdown_rx`.
+                    let link_shutdown = shutdown_rx.resubscribe();
+                    let trial_shutdown = shutdown_rx.resubscribe();
+                    let (availability, supervisor_task) = platform
+                        .spawn_supervisor(shutdown_rx, Some(on_available))
+                        .map_err(|e| {
                             StartupError::Platform(format!(
                                 "failed to start attach supervisor: {e}"
                             ))
                         })?;
+                    let link_player = Arc::clone(&sound_player);
+                    tokio::spawn(crate::platform::sound::run_link_watcher(
+                        link_player,
+                        "wlan0".to_string(),
+                        link_shutdown,
+                    ));
+                    let trial_player = Arc::clone(&sound_player);
+                    tokio::spawn(crate::platform::sound::run_trial_watcher(
+                        trial_player,
+                        std::path::PathBuf::from(update_root),
+                        trial_shutdown,
+                    ));
                     crate::platform::supervisor::watch_for_fatal(availability.clone(), || {
                         tracing::error!(
                             event = "attach_given_up_fatal",

@@ -112,6 +112,157 @@ impl SoundSink for crate::hal::anyka::ipc::AnykaIpc {
     }
 }
 
+impl SoundSink for Arc<crate::hal::anyka::ipc::AnykaIpc> {
+    fn play_file(&self, path: &str, volume: u8) -> PlatformResult<SoundPlayOutcome> {
+        (**self).play_file(path, volume)
+    }
+}
+
+/// Shared player used by boot / network / upgrade call sites.
+pub type SharedSoundPlayer =
+    Arc<SoundPlayer<Arc<crate::hal::anyka::ipc::AnykaIpc>, fn() -> Instant>>;
+
+/// Build a production player: real clock, IPC sink, resolved clip directory.
+pub fn build_shared_player(
+    mut config: SoundConfig,
+    config_dir: &Path,
+    ipc: Arc<crate::hal::anyka::ipc::AnykaIpc>,
+) -> SharedSoundPlayer {
+    if !Path::new(&config.clip_dir).is_absolute() {
+        config.clip_dir = config_dir.join(&config.clip_dir).display().to_string();
+    }
+    if !config.enabled {
+        tracing::info!(
+            event = "sound_disabled",
+            "[sound] enabled=false; event clips silent"
+        );
+    } else if !Path::new(&config.clip_dir).is_dir() {
+        tracing::warn!(
+            event = "sound_clip_dir_missing",
+            dir = %config.clip_dir,
+            "[sound] clip_dir missing; plays will fail until populated"
+        );
+    }
+    Arc::new(SoundPlayer::new(config, ipc, Instant::now))
+}
+
+/// Best-effort play: never panics, never blocks the caller on audio policy errors.
+pub fn play_event(player: &SharedSoundPlayer, event: &str) {
+    if let Err(e) = player.play(event) {
+        tracing::warn!(error = %e, event, "sound play failed");
+    }
+}
+
+/// Edge detector for a boolean link signal.
+///
+/// The first sample only sets the baseline (no chime for the state at start).
+/// Later transitions emit `network_up` / `network_lost`.
+#[derive(Debug, Default)]
+pub struct LinkEdgeWatcher {
+    prev: Option<bool>,
+}
+
+impl LinkEdgeWatcher {
+    pub fn observe(&mut self, up: bool) -> Option<&'static str> {
+        match self.prev {
+            None => {
+                self.prev = Some(up);
+                None
+            }
+            Some(was) if was == up => None,
+            Some(true) => {
+                self.prev = Some(false);
+                Some("network_lost")
+            }
+            Some(false) => {
+                self.prev = Some(true);
+                Some("network_up")
+            }
+        }
+    }
+}
+
+/// Fires once when a trial marker disappears after having been seen.
+#[derive(Debug, Default)]
+pub struct TrialConfirmWatcher {
+    saw_marker: bool,
+    fired: bool,
+}
+
+impl TrialConfirmWatcher {
+    /// `true` means play `upgrade_result` once.
+    pub fn observe(&mut self, marker_present: bool) -> bool {
+        if self.fired {
+            return false;
+        }
+        if marker_present {
+            self.saw_marker = true;
+            return false;
+        }
+        if self.saw_marker {
+            self.fired = true;
+            return true;
+        }
+        false
+    }
+}
+
+/// Read `/sys/class/net/<iface>/operstate` — only `up` counts as linked.
+pub fn read_link_up(iface: &str) -> bool {
+    let path = format!("/sys/class/net/{iface}/operstate");
+    std::fs::read_to_string(path)
+        .map(|s| s.trim() == "up")
+        .unwrap_or(false)
+}
+
+/// True if `state/trial-a` or `state/trial-b` exists under the update root.
+pub fn trial_marker_present(update_root: &Path) -> bool {
+    let state = update_root.join("state");
+    state.join("trial-a").exists() || state.join("trial-b").exists()
+}
+
+const LINK_POLL: Duration = Duration::from_secs(2);
+
+/// Poll link state until shutdown; play on edges only.
+pub async fn run_link_watcher(
+    player: SharedSoundPlayer,
+    iface: String,
+    mut shutdown: tokio::sync::broadcast::Receiver<()>,
+) {
+    let mut edge = LinkEdgeWatcher::default();
+    let mut ticker = tokio::time::interval(LINK_POLL);
+    loop {
+        tokio::select! {
+            _ = shutdown.recv() => return,
+            _ = ticker.tick() => {
+                if let Some(event) = edge.observe(read_link_up(&iface)) {
+                    play_event(&player, event);
+                }
+            }
+        }
+    }
+}
+
+/// Poll trial markers until shutdown; play once when a seen marker clears.
+pub async fn run_trial_watcher(
+    player: SharedSoundPlayer,
+    update_root: PathBuf,
+    mut shutdown: tokio::sync::broadcast::Receiver<()>,
+) {
+    let mut watcher = TrialConfirmWatcher::default();
+    let mut ticker = tokio::time::interval(LINK_POLL);
+    loop {
+        tokio::select! {
+            _ = shutdown.recv() => return,
+            _ = ticker.tick() => {
+                if watcher.observe(trial_marker_present(&update_root)) {
+                    play_event(&player, "upgrade_result");
+                }
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -317,5 +468,28 @@ mod tests {
             &clock,
         );
         assert!(p.play("boot_ready").is_err());
+    }
+
+    #[test]
+    fn link_edge_ignores_steady_state_and_baseline() {
+        let mut w = LinkEdgeWatcher::default();
+        assert_eq!(w.observe(true), None); // baseline
+        assert_eq!(w.observe(true), None); // steady
+        assert_eq!(w.observe(false), Some("network_lost"));
+        assert_eq!(w.observe(false), None);
+        assert_eq!(w.observe(true), Some("network_up"));
+        assert_eq!(w.observe(true), None);
+    }
+
+    #[test]
+    fn trial_confirm_fires_once_on_marker_clear() {
+        let mut w = TrialConfirmWatcher::default();
+        assert!(!w.observe(false)); // never saw marker
+        assert!(!w.observe(true)); // saw it
+        assert!(!w.observe(true));
+        assert!(w.observe(false)); // cleared → fire
+        assert!(!w.observe(false)); // once only
+        assert!(!w.observe(true));
+        assert!(!w.observe(false));
     }
 }

@@ -223,6 +223,7 @@ pub async fn run_supervisor(
     target: Arc<dyn AttachTarget>,
     tx: &watch::Sender<Availability>,
     mut shutdown: broadcast::Receiver<()>,
+    on_available: Option<Arc<dyn Fn() + Send + Sync>>,
 ) {
     let mut backoff = Backoff::new();
     let mut breaker = CircuitBreaker::new();
@@ -298,6 +299,9 @@ pub async fn run_supervisor(
                 breaker.record_success();
                 backoff.reset();
                 let _ = tx.send(Availability::Available);
+                if let Some(hook) = on_available.as_ref() {
+                    hook();
+                }
 
                 tokio::select! {
                     _ = shutdown.recv() => {
@@ -508,6 +512,7 @@ mod tests {
     // ------------------------------------------------------------------
 
     use crate::platform::PlatformError;
+    use std::sync::Arc;
     use std::sync::Mutex as StdMutex;
     use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
 
@@ -622,7 +627,7 @@ mod tests {
         let (tx, _rx) = watch::channel(Availability::Unavailable);
 
         let (_shutdown_tx, shutdown_rx) = broadcast::channel(1);
-        run_supervisor(target.clone(), &tx, shutdown_rx).await;
+        run_supervisor(target.clone(), &tx, shutdown_rx, None).await;
 
         assert_eq!(
             target.init_calls.load(AtomicOrdering::SeqCst),
@@ -647,7 +652,7 @@ mod tests {
         let (_shutdown_tx, shutdown_rx) = broadcast::channel(1);
         let stop = tokio::time::timeout(
             std::time::Duration::from_secs(600),
-            run_supervisor(target.clone(), &tx, shutdown_rx),
+            run_supervisor(target.clone(), &tx, shutdown_rx, None),
         )
         .await;
 
@@ -667,7 +672,7 @@ mod tests {
         let (tx, _rx) = watch::channel(Availability::Unavailable);
 
         let (_shutdown_tx, shutdown_rx) = broadcast::channel(1);
-        run_supervisor(target.clone(), &tx, shutdown_rx).await;
+        run_supervisor(target.clone(), &tx, shutdown_rx, None).await;
 
         let failures = ATTACH_FAILURE_LIMIT as usize;
         assert_eq!(target.init_calls.load(AtomicOrdering::SeqCst), failures);
@@ -689,7 +694,7 @@ mod tests {
         let run = tokio::spawn({
             let target = target.clone();
             let tx = tx.clone();
-            async move { run_supervisor(target, &tx, shutdown_rx).await }
+            async move { run_supervisor(target, &tx, shutdown_rx, None).await }
         });
 
         // Let the absent-daemon retry path start, then cancel.
@@ -714,7 +719,7 @@ mod tests {
                 hold: true,
             });
             let tx = tx.clone();
-            async move { run_supervisor(target, &tx, shutdown_rx).await }
+            async move { run_supervisor(target, &tx, shutdown_rx, None).await }
         });
 
         // Advance until Available is published and wait_for_loss is holding.
@@ -762,6 +767,26 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
+    async fn test_supervisor_on_available_fires_once_per_successful_bring_up() {
+        let target = std::sync::Arc::new(MockTarget::new(true, 1));
+        let (tx, _rx) = watch::channel(Availability::Unavailable);
+        let fired = std::sync::Arc::new(AtomicUsize::new(0));
+        let fired_hook = std::sync::Arc::clone(&fired);
+        let hook: Arc<dyn Fn() + Send + Sync> = Arc::new(move || {
+            fired_hook.fetch_add(1, AtomicOrdering::SeqCst);
+        });
+
+        let (_shutdown_tx, shutdown_rx) = broadcast::channel(1);
+        run_supervisor(target.clone(), &tx, shutdown_rx, Some(hook)).await;
+
+        assert_eq!(
+            fired.load(AtomicOrdering::SeqCst),
+            1,
+            "boot_ready hook must fire once on Available, not on every poll or retry"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
     async fn test_supervisor_available_then_unwinds_on_loss() {
         // One clean bring-up, then peer loss, then repeated failures until the
         // breaker opens.
@@ -769,7 +794,7 @@ mod tests {
         let (tx, _rx) = watch::channel(Availability::Unavailable);
 
         let (_shutdown_tx, shutdown_rx) = broadcast::channel(1);
-        run_supervisor(target.clone(), &tx, shutdown_rx).await;
+        run_supervisor(target.clone(), &tx, shutdown_rx, None).await;
 
         assert_eq!(
             *target.seen_while_waiting.lock().unwrap(),
