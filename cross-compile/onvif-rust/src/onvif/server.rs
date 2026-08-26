@@ -204,6 +204,8 @@ pub struct OnvifServer {
     rate_limiter: Arc<RateLimiter>,
     /// Optional diagnostics state. `None` disables the /api routes entirely.
     diagnostics: Option<Arc<crate::diagnostics::state::DiagnosticsState>>,
+    /// Sound REST state; defaults to empty (no player) until `with_sound` is called.
+    sound: Arc<crate::diagnostics::sound::SoundApiState>,
 }
 
 /// Validate security configuration for TLS and authentication.
@@ -311,6 +313,7 @@ impl OnvifServer {
             memory_monitor,
             rate_limiter,
             diagnostics: None,
+            sound: Arc::new(crate::diagnostics::sound::SoundApiState::empty()),
         })
     }
 
@@ -387,6 +390,7 @@ impl OnvifServer {
             memory_monitor: Arc::clone(app_state.memory_monitor()),
             rate_limiter: Arc::clone(app_state.rate_limiter()),
             diagnostics: None,
+            sound: Arc::new(crate::diagnostics::sound::SoundApiState::empty()),
         })
     }
 
@@ -400,6 +404,15 @@ impl OnvifServer {
         diagnostics: Arc<crate::diagnostics::state::DiagnosticsState>,
     ) -> Self {
         self.diagnostics = Some(diagnostics);
+        self
+    }
+
+    /// Attach sound REST state for `GET /api/sound` and `POST /api/sound/play`.
+    ///
+    /// Defaults to [`SoundApiState::empty`] (no player) when not called.
+    #[must_use]
+    pub fn with_sound(mut self, sound: crate::diagnostics::sound::SoundApiState) -> Self {
+        self.sound = Arc::new(sound);
         self
     }
 
@@ -652,6 +665,14 @@ impl OnvifServer {
                         .put(crate::diagnostics::snmp::handle_put_snmp)
                         .layer(timeout()),
                 );
+                api = api.route(
+                    "/sound",
+                    get(crate::diagnostics::sound::handle_get_sound).layer(timeout()),
+                );
+                api = api.route(
+                    "/sound/play",
+                    post(crate::diagnostics::sound::handle_play_sound).layer(timeout()),
+                );
             }
             let api = api
                 .fallback(|| async { StatusCode::NOT_FOUND })
@@ -674,7 +695,8 @@ impl OnvifServer {
                     crate::diagnostics::snmp::SnmpApiState::from_update_root(
                         self.config.update_root.clone(),
                     ),
-                )));
+                )))
+                .layer(axum::Extension(Arc::clone(&self.sound)));
             app = app.nest("/api", api);
         }
 
@@ -1764,6 +1786,24 @@ mod tests {
         let request = Request::builder()
             .method("GET")
             .uri("/api/network")
+            .body(Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn test_get_sound_requires_auth() {
+        use axum::body::Body;
+        use axum::http::{Request, StatusCode};
+        use tower::ServiceExt;
+
+        let app = make_diagnostics_app(true);
+
+        let request = Request::builder()
+            .method("GET")
+            .uri("/api/sound")
             .body(Body::empty())
             .unwrap();
 

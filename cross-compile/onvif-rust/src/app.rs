@@ -53,6 +53,8 @@ pub struct PlatformInit {
     pub availability: Option<tokio::sync::watch::Receiver<Availability>>,
     /// Supervisor task; awaited on shutdown before platform teardown.
     pub supervisor_task: Option<JoinHandle<()>>,
+    /// Shared event-audio player; `None` on stub / non-Anyka / degraded bring-up.
+    pub sound_player: Option<crate::platform::sound::SharedSoundPlayer>,
 }
 
 /// Shared application state for dependency injection.
@@ -1063,6 +1065,7 @@ impl Application {
             platform,
             availability,
             supervisor_task,
+            sound_player,
         } = match platform_source {
             PlatformSource::Detect => {
                 Self::init_platform(
@@ -1081,6 +1084,7 @@ impl Application {
                     platform: Some(p),
                     availability: None,
                     supervisor_task: None,
+                    sound_player: None,
                 }
             }
         };
@@ -1181,7 +1185,8 @@ impl Application {
         let server = Arc::new(
             OnvifServer::with_app_state(server_config, app_state.clone())
                 .map_err(|e| StartupError::Network(e.to_string()))?
-                .with_diagnostics(Arc::clone(&diagnostics)),
+                .with_diagnostics(Arc::clone(&diagnostics))
+                .with_sound(crate::diagnostics::sound::SoundApiState::new(sound_player)),
         );
 
         progress.complete_phase();
@@ -1388,6 +1393,7 @@ impl Application {
                         platform: Some(platform as Arc<dyn Platform>),
                         availability: Some(availability),
                         supervisor_task: Some(supervisor_task),
+                        sound_player: Some(sound_player),
                     });
                 }
                 Err(e) => {
@@ -1415,6 +1421,7 @@ impl Application {
                         platform: Some(Arc::new(stub_platform) as Arc<dyn Platform>),
                         availability: None,
                         supervisor_task: None,
+                        sound_player: None,
                     })
                 }
                 Err(e) => {
