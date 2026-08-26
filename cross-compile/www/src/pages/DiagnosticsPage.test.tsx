@@ -795,5 +795,29 @@ describe('DiagnosticsPage', () => {
         expect(toast.error).toHaveBeenCalledWith(expect.stringMatching(/speaker offline/i));
       });
     });
+
+    it('should fall back to the first event when the selected event disappears from config', async () => {
+      const user = userEvent.setup();
+      const { queryClient } = renderWithProviders(<DiagnosticsPage />);
+
+      await screen.findByTestId('sound-event-select');
+      await user.click(screen.getByTestId('sound-event-select'));
+      await user.click(screen.getByTestId('sound-event-option-motion_detected'));
+
+      vi.mocked(getSoundStatus).mockResolvedValue({
+        enabled: true,
+        events: [{ id: 'boot_ready', clip: 'boot.wav' }],
+      });
+      await queryClient.invalidateQueries({ queryKey: ['sound-status'] });
+      await waitFor(() => {
+        expect(screen.getByTestId('sound-play-button')).not.toBeDisabled();
+      });
+
+      await user.click(screen.getByTestId('sound-play-button'));
+
+      await waitFor(() => {
+        expect(playSound).toHaveBeenCalledWith('boot_ready');
+      });
+    });
   });
 });

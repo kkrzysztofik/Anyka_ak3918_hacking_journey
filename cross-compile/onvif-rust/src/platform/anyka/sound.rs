@@ -113,12 +113,15 @@ where
                 Ok(SoundPlayResult::Busy)
             }
             Err(e) => {
-                // Sink never played — clear debounce so a retry is not suppressed.
+                // Clear debounce only for this invocation — a concurrent retry may
+                // have replaced the entry with a newer timestamp.
                 let mut last = self
                     .last_played
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner);
-                last.remove(event);
+                if last.get(event) == Some(&now) {
+                    last.remove(event);
+                }
                 Err(e)
             }
         }
@@ -333,6 +336,76 @@ mod tests {
         }
     }
 
+    /// Blocks the first `play_file` until `release()` is called, then returns `first_outcome`.
+    struct StallingFakeSink {
+        calls: Mutex<Vec<(String, u8)>>,
+        gate: Arc<(Mutex<bool>, std::sync::Condvar)>,
+        first_outcome: Mutex<Option<PlatformResult<SoundPlayOutcome>>>,
+        play_count: Mutex<usize>,
+        entered: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    }
+
+    impl StallingFakeSink {
+        fn new(
+            gate: Arc<(Mutex<bool>, std::sync::Condvar)>,
+            first_outcome: PlatformResult<SoundPlayOutcome>,
+        ) -> Self {
+            Self {
+                calls: Mutex::new(Vec::new()),
+                gate,
+                first_outcome: Mutex::new(Some(first_outcome)),
+                play_count: Mutex::new(0),
+                entered: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            }
+        }
+
+        fn calls(&self) -> Vec<(String, u8)> {
+            self.calls.lock().unwrap().clone()
+        }
+
+        fn entered(&self) -> Arc<std::sync::atomic::AtomicBool> {
+            Arc::clone(&self.entered)
+        }
+
+        fn release(gate: &Arc<(Mutex<bool>, std::sync::Condvar)>) {
+            *gate.0.lock().unwrap() = true;
+            gate.1.notify_all();
+        }
+    }
+
+    impl SoundSink for StallingFakeSink {
+        fn play_file(&self, path: &str, volume: u8) -> PlatformResult<SoundPlayOutcome> {
+            self.calls.lock().unwrap().push((path.to_string(), volume));
+            let is_first = {
+                let mut count = self.play_count.lock().unwrap();
+                *count += 1;
+                *count == 1
+            };
+            if is_first {
+                self.entered
+                    .store(true, std::sync::atomic::Ordering::Release);
+                let gate = Arc::clone(&self.gate);
+                let mut released = gate.0.lock().unwrap();
+                while !*released {
+                    released = gate.1.wait(released).unwrap();
+                }
+                return self
+                    .first_outcome
+                    .lock()
+                    .unwrap()
+                    .take()
+                    .unwrap_or(Ok(SoundPlayOutcome::Accepted));
+            }
+            Ok(SoundPlayOutcome::Accepted)
+        }
+    }
+
+    impl SoundSink for Arc<StallingFakeSink> {
+        fn play_file(&self, path: &str, volume: u8) -> PlatformResult<SoundPlayOutcome> {
+            (**self).play_file(path, volume)
+        }
+    }
+
     struct TestClock {
         now: Mutex<Instant>,
     }
@@ -373,6 +446,14 @@ mod tests {
         sink: Arc<FakeSink>,
         clock: &Arc<TestClock>,
     ) -> SoundPlayer<Arc<FakeSink>, impl Fn() -> Instant + Send + Sync + 'static> {
+        SoundPlayer::new(config, sink, clock.getter())
+    }
+
+    fn stalling_player(
+        config: SoundConfig,
+        sink: Arc<StallingFakeSink>,
+        clock: &Arc<TestClock>,
+    ) -> SoundPlayer<Arc<StallingFakeSink>, impl Fn() -> Instant + Send + Sync + 'static> {
         SoundPlayer::new(config, sink, clock.getter())
     }
 
@@ -486,6 +567,41 @@ mod tests {
         let p = player(c, Arc::clone(&sink), &clock);
         assert_eq!(p.play("boot_ready").unwrap(), SoundPlayResult::Accepted);
         assert_eq!(sink.calls()[0].0, "/mnt/anyka_hack/onvif/sounds/boot.raw");
+    }
+
+    #[test]
+    fn test_play_sink_error_does_not_clear_newer_debounce_entry() {
+        let gate = Arc::new((Mutex::new(false), std::sync::Condvar::new()));
+        let sink = Arc::new(StallingFakeSink::new(
+            Arc::clone(&gate),
+            Err(PlatformError::HardwareFailure("stall".into())),
+        ));
+        let clock = Arc::new(TestClock::new());
+        let p = Arc::new(stalling_player(
+            cfg(true, &[("boot_ready", "boot.raw")]),
+            Arc::clone(&sink),
+            &clock,
+        ));
+
+        let p_stalled = Arc::clone(&p);
+        let gate_clone = Arc::clone(&gate);
+        let entered = sink.entered();
+        let stalled = std::thread::spawn(move || {
+            assert!(p_stalled.play("boot_ready").is_err());
+        });
+
+        while !entered.load(std::sync::atomic::Ordering::Acquire) {
+            std::thread::yield_now();
+        }
+
+        clock.advance(31);
+        assert_eq!(p.play("boot_ready").unwrap(), SoundPlayResult::Accepted);
+
+        StallingFakeSink::release(&gate_clone);
+        stalled.join().unwrap();
+
+        assert_eq!(p.play("boot_ready").unwrap(), SoundPlayResult::Debounced);
+        assert_eq!(sink.calls().len(), 2);
     }
 
     #[test]

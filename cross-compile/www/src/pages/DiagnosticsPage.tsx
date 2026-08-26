@@ -908,7 +908,9 @@ function SoundTestCard() {
   const events = status?.events ?? [];
   const controlsEnabled = status?.enabled === true && events.length > 0;
   const showDisabledMessage = status !== undefined && !controlsEnabled;
-  const effectiveEvent = selectedEvent || events[0]?.id || '';
+  const effectiveEvent = events.some((event) => event.id === selectedEvent)
+    ? selectedEvent
+    : (events[0]?.id ?? '');
 
   const playMutation = useMutation({
     mutationFn: (event: string) => playSound(event),
