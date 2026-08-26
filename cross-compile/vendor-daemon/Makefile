@@ -112,7 +112,7 @@ BUILD_DIR = build
 SRCS      = $(wildcard $(SRC_DIR)/*.c)
 OBJS      = $(SRCS:$(SRC_DIR)/%.c=$(BUILD_DIR)/%.o)
 
-.PHONY: all release debug clean install sync-libs
+.PHONY: all release debug clean install sync-libs test
 
 all: $(BUILD_DIR)/$(TARGET)
 
@@ -121,6 +121,17 @@ release:
 
 debug:
 	$(MAKE) BUILD_MODE=debug all
+
+HOST_CC ?= gcc
+TESTS = test_sound_parse
+
+test:
+	@mkdir -p $(BUILD_DIR)
+	@for t in $(TESTS); do \
+	  $(HOST_CC) -std=gnu99 -Wall -Wextra -Isrc -Iinclude \
+	      -o $(BUILD_DIR)/$$t tests/$$t.c src/sound.c || exit 1; \
+	  $(BUILD_DIR)/$$t || exit 1; \
+	done
 
 $(BUILD_DIR)/$(TARGET): $(OBJS)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
