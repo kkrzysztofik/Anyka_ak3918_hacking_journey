@@ -16,6 +16,7 @@ pub mod network_info;
 pub(crate) mod night_mode;
 pub mod ptz_actor;
 pub mod ptz_control;
+pub mod sound;
 pub mod supervisor;
 mod video_encoder;
 pub use video_encoder::StreamOpenParams;
