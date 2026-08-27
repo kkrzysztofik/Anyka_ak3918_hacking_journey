@@ -65,20 +65,55 @@ use crate::streaming::bridge::BytesMutPool;
 
 /// Magic value identifying the shared memory region ("VDFS")
 pub const VD_SHM_MAGIC: u32 = 0x5644_4653;
-/// Version of the shared memory protocol (v3 adds the daemon `epoch`)
-pub const VD_SHM_VERSION: u32 = 3;
-/// Minimum supported version (v1 layout still accepted for backward compat)
-pub const VD_SHM_VERSION_MIN: u32 = 1;
+/// Version of the shared memory protocol (v4 widens the slot to 256 KB)
+pub const VD_SHM_VERSION: u32 = 4;
+/// Minimum supported version.
+///
+/// Raised from 1 to 4 alongside [`VD_SHM_SLOT_SIZE`]: v1-v3 all used a 128 KB
+/// slot, and both sides index slots by that stride, so accepting an older ring
+/// would resolve every slot to the wrong offset and hand back garbage rather
+/// than fail. There is no backward compatibility to preserve — the daemon and
+/// this reader are deployed as a pair.
+pub const VD_SHM_VERSION_MIN: u32 = 4;
 /// Number of slots in the ring buffer
 pub const VD_SHM_SLOT_COUNT: u32 = 8;
-/// Size of each slot (header + data)
-pub const VD_SHM_SLOT_SIZE: usize = 128 * 1024; // 128 KB per slot
+/// Size of each slot (header + data): 256 KB.
+///
+/// Must stay in lockstep with `VD_SHM_SLOT_SIZE` in
+/// `vendor-daemon/include/vd_ring_buffer.h` — both sides mmap
+/// [`VD_SHM_TOTAL_SIZE`] and index slots by this stride, so a mismatch
+/// silently desyncs every offset.
+///
+/// Sized from measurement: 720p keyframes on the main stream run ~184 KB and
+/// creep upward with scene detail. At the previous 128 KB every keyframe was
+/// rejected by the size guard in the daemon's `push.c`, so the main stream
+/// carried P-frames only and no client could ever decode or cut on one.
+pub const VD_SHM_SLOT_SIZE: usize = 256 * 1024; // 256 KB per slot
 /// Size of the ring header structure
 pub const VD_SHM_HEADER_SIZE: usize = 64;
 /// Size of each slot header
 pub const VD_SHM_SLOT_HDR_SIZE: usize = 64;
 /// Size of data portion of each slot
 pub const VD_SHM_SLOT_DATA_SIZE: usize = VD_SHM_SLOT_SIZE - VD_SHM_SLOT_HDR_SIZE;
+
+/// Largest keyframe measured on the main stream, in bytes.
+///
+/// Recorded from `frame_too_large` telemetry on hardware. Keyframes grew with
+/// scene detail, so this is a floor on what the slot has to accommodate rather
+/// than a fixed property of the encoder.
+const LARGEST_OBSERVED_KEYFRAME_BYTES: usize = 187_876;
+
+/// A slot must hold a whole 720p keyframe.
+///
+/// The daemon writes a frame only when it fits in a slot and drops it
+/// otherwise, so a slot smaller than a keyframe strips every keyframe from the
+/// main stream: clients cannot decode from a late join and a recorder cannot
+/// cut a segment. That is exactly what the previous 128 KB slot did.
+///
+/// Checked at compile time rather than in a test — it is a property of the
+/// constants, so a regression should fail the build, not wait for a test run.
+/// Expressed as a lower bound so the slot can still be grown.
+const _: () = assert!(VD_SHM_SLOT_DATA_SIZE > LARGEST_OBSERVED_KEYFRAME_BYTES);
 /// Total size of the shared memory region
 pub const VD_SHM_TOTAL_SIZE: usize =
     VD_SHM_HEADER_SIZE + (VD_SHM_SLOT_COUNT as usize) * VD_SHM_SLOT_SIZE;
@@ -1304,6 +1339,20 @@ pub(in crate::hal::anyka::ipc) mod tests {
         assert_eq!(
             VD_SHM_TOTAL_SIZE,
             VD_SHM_HEADER_SIZE + (VD_SHM_SLOT_COUNT as usize) * VD_SHM_SLOT_SIZE
+        );
+    }
+
+    /// The slot stride is part of the wire contract, so changing it must move
+    /// the protocol version with it — a reader using the old stride resolves
+    /// every slot to the wrong offset and returns garbage instead of failing.
+    #[test]
+    fn test_slot_size_change_is_version_gated() {
+        assert_eq!(VD_SHM_SLOT_SIZE, 256 * 1024);
+        assert_eq!(VD_SHM_VERSION, 4);
+        assert_eq!(
+            VD_SHM_VERSION_MIN, VD_SHM_VERSION,
+            "v1-v3 used a 128 KB slot; accepting them against this stride would \
+             desync every offset"
         );
     }
 

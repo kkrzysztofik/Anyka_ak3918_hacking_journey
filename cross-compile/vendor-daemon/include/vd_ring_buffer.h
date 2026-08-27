@@ -35,8 +35,12 @@ extern "C" {
  *  v1: Initial layout (8 header fields + 32 bytes padding)
  *  v2: Added overflow diagnostic counters in header, wall-clock timing in slot header
  *  v3: Added the `epoch` field used to detect daemon restarts
+ *  v4: VD_SHM_SLOT_SIZE 128 KB -> 256 KB. Both sides index slots by this
+ *      stride, so a v3 reader against a v4 ring resolves every slot to the
+ *      wrong offset. The bump makes that mismatch fail validation instead of
+ *      silently returning garbage frames.
  */
-#define VD_SHM_VERSION     3
+#define VD_SHM_VERSION     4
 
 /** Default total shared memory size: 1 MB */
 #define VD_SHM_DEFAULT_SIZE (1024 * 1024)
@@ -44,8 +48,21 @@ extern "C" {
 /** Number of slots in the ring buffer */
 #define VD_SHM_SLOT_COUNT  8
 
-/** Size of each slot (including header): 128 KB */
-#define VD_SHM_SLOT_SIZE   (128 * 1024)
+/**
+ * Size of each slot (including header): 256 KB.
+ *
+ * Must stay in lockstep with VD_SHM_SLOT_SIZE in
+ * onvif-rust/src/hal/anyka/ipc/shm_ring.rs -- both sides mmap
+ * VD_SHM_TOTAL_SIZE and index slots by this stride, so a mismatch silently
+ * desyncs every offset.
+ *
+ * Sized from measurement, not guesswork: 720p keyframes on the main stream run
+ * ~184 KB and creep upward with scene detail, so at the previous 128 KB every
+ * one of them was rejected by the size guard in push.c and the stream carried
+ * P-frames only. See also METHOD_ISIZE_CTRL in handlers_venc.c, which caps the
+ * encoder side so this ceiling is not approached again.
+ */
+#define VD_SHM_SLOT_SIZE   (256 * 1024)
 
 /** Ring buffer header size */
 #define VD_SHM_HEADER_SIZE 64
