@@ -95,6 +95,25 @@ pub const VD_SHM_HEADER_SIZE: usize = 64;
 pub const VD_SHM_SLOT_HDR_SIZE: usize = 64;
 /// Size of data portion of each slot
 pub const VD_SHM_SLOT_DATA_SIZE: usize = VD_SHM_SLOT_SIZE - VD_SHM_SLOT_HDR_SIZE;
+
+/// Largest keyframe measured on the main stream, in bytes.
+///
+/// Recorded from `frame_too_large` telemetry on hardware. Keyframes grew with
+/// scene detail, so this is a floor on what the slot has to accommodate rather
+/// than a fixed property of the encoder.
+const LARGEST_OBSERVED_KEYFRAME_BYTES: usize = 187_876;
+
+/// A slot must hold a whole 720p keyframe.
+///
+/// The daemon writes a frame only when it fits in a slot and drops it
+/// otherwise, so a slot smaller than a keyframe strips every keyframe from the
+/// main stream: clients cannot decode from a late join and a recorder cannot
+/// cut a segment. That is exactly what the previous 128 KB slot did.
+///
+/// Checked at compile time rather than in a test — it is a property of the
+/// constants, so a regression should fail the build, not wait for a test run.
+/// Expressed as a lower bound so the slot can still be grown.
+const _: () = assert!(VD_SHM_SLOT_DATA_SIZE > LARGEST_OBSERVED_KEYFRAME_BYTES);
 /// Total size of the shared memory region
 pub const VD_SHM_TOTAL_SIZE: usize =
     VD_SHM_HEADER_SIZE + (VD_SHM_SLOT_COUNT as usize) * VD_SHM_SLOT_SIZE;
@@ -1320,27 +1339,6 @@ pub(in crate::hal::anyka::ipc) mod tests {
         assert_eq!(
             VD_SHM_TOTAL_SIZE,
             VD_SHM_HEADER_SIZE + (VD_SHM_SLOT_COUNT as usize) * VD_SHM_SLOT_SIZE
-        );
-    }
-
-    /// A slot must hold a whole 720p keyframe.
-    ///
-    /// The daemon writes a frame only when it fits in a slot and silently drops
-    /// it otherwise, so a slot smaller than a keyframe strips every keyframe
-    /// from the main stream: clients cannot decode from a late join and a
-    /// recorder cannot cut a segment. Measured keyframes reached 187876 bytes
-    /// and grew with scene detail — that is what the previous 128 KB slot
-    /// rejected.
-    ///
-    /// Asserted as a lower bound rather than an exact size, so the slot may
-    /// still be grown while a regression below a real keyframe fails here.
-    #[test]
-    fn test_slot_fits_a_real_keyframe() {
-        const LARGEST_OBSERVED_KEYFRAME_BYTES: usize = 187_876;
-        assert!(
-            VD_SHM_SLOT_DATA_SIZE > LARGEST_OBSERVED_KEYFRAME_BYTES,
-            "slot data size {VD_SHM_SLOT_DATA_SIZE} must exceed the largest observed \
-             keyframe ({LARGEST_OBSERVED_KEYFRAME_BYTES} bytes) or the daemon drops it"
         );
     }
 
