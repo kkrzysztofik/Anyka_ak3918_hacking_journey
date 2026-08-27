@@ -146,8 +146,16 @@ $(BUILD_DIR)/test_ring_epoch: tests/test_ring_epoch.c
 $(BUILD_DIR)/$(TARGET): $(OBJS)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
+# -MMD -MP emits a .d file per object listing the headers it included, so a
+# header edit rebuilds the objects that use it. Without this the rule depended
+# on the .c alone: editing vd_ring_buffer.h and running make produced a new
+# binary that still had the old constants compiled in, which crash-looped on
+# device while reporting the previous slot size.
 $(BUILD_DIR)/%.o: $(SRC_DIR)/%.c | $(BUILD_DIR)
-	$(CC) $(CFLAGS) -c -o $@ $<
+	$(CC) $(CFLAGS) -MMD -MP -c -o $@ $<
+
+DEPS = $(OBJS:.o=.d)
+-include $(DEPS)
 
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
