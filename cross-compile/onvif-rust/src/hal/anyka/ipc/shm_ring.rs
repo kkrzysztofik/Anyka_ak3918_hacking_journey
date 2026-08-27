@@ -65,10 +65,16 @@ use crate::streaming::bridge::BytesMutPool;
 
 /// Magic value identifying the shared memory region ("VDFS")
 pub const VD_SHM_MAGIC: u32 = 0x5644_4653;
-/// Version of the shared memory protocol (v3 adds the daemon `epoch`)
-pub const VD_SHM_VERSION: u32 = 3;
-/// Minimum supported version (v1 layout still accepted for backward compat)
-pub const VD_SHM_VERSION_MIN: u32 = 1;
+/// Version of the shared memory protocol (v4 widens the slot to 256 KB)
+pub const VD_SHM_VERSION: u32 = 4;
+/// Minimum supported version.
+///
+/// Raised from 1 to 4 alongside [`VD_SHM_SLOT_SIZE`]: v1-v3 all used a 128 KB
+/// slot, and both sides index slots by that stride, so accepting an older ring
+/// would resolve every slot to the wrong offset and hand back garbage rather
+/// than fail. There is no backward compatibility to preserve — the daemon and
+/// this reader are deployed as a pair.
+pub const VD_SHM_VERSION_MIN: u32 = 4;
 /// Number of slots in the ring buffer
 pub const VD_SHM_SLOT_COUNT: u32 = 8;
 /// Size of each slot (header + data): 256 KB.
@@ -1314,6 +1320,41 @@ pub(in crate::hal::anyka::ipc) mod tests {
         assert_eq!(
             VD_SHM_TOTAL_SIZE,
             VD_SHM_HEADER_SIZE + (VD_SHM_SLOT_COUNT as usize) * VD_SHM_SLOT_SIZE
+        );
+    }
+
+    /// A slot must hold a whole 720p keyframe.
+    ///
+    /// The daemon writes a frame only when it fits in a slot and silently drops
+    /// it otherwise, so a slot smaller than a keyframe strips every keyframe
+    /// from the main stream: clients cannot decode from a late join and a
+    /// recorder cannot cut a segment. Measured keyframes reached 187876 bytes
+    /// and grew with scene detail — that is what the previous 128 KB slot
+    /// rejected.
+    ///
+    /// Asserted as a lower bound rather than an exact size, so the slot may
+    /// still be grown while a regression below a real keyframe fails here.
+    #[test]
+    fn test_slot_fits_a_real_keyframe() {
+        const LARGEST_OBSERVED_KEYFRAME_BYTES: usize = 187_876;
+        assert!(
+            VD_SHM_SLOT_DATA_SIZE > LARGEST_OBSERVED_KEYFRAME_BYTES,
+            "slot data size {VD_SHM_SLOT_DATA_SIZE} must exceed the largest observed \
+             keyframe ({LARGEST_OBSERVED_KEYFRAME_BYTES} bytes) or the daemon drops it"
+        );
+    }
+
+    /// The slot stride is part of the wire contract, so changing it must move
+    /// the protocol version with it — a reader using the old stride resolves
+    /// every slot to the wrong offset and returns garbage instead of failing.
+    #[test]
+    fn test_slot_size_change_is_version_gated() {
+        assert_eq!(VD_SHM_SLOT_SIZE, 256 * 1024);
+        assert_eq!(VD_SHM_VERSION, 4);
+        assert_eq!(
+            VD_SHM_VERSION_MIN, VD_SHM_VERSION,
+            "v1-v3 used a 128 KB slot; accepting them against this stride would \
+             desync every offset"
         );
     }
 

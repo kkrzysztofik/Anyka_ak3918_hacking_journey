@@ -35,8 +35,12 @@ extern "C" {
  *  v1: Initial layout (8 header fields + 32 bytes padding)
  *  v2: Added overflow diagnostic counters in header, wall-clock timing in slot header
  *  v3: Added the `epoch` field used to detect daemon restarts
+ *  v4: VD_SHM_SLOT_SIZE 128 KB -> 256 KB. Both sides index slots by this
+ *      stride, so a v3 reader against a v4 ring resolves every slot to the
+ *      wrong offset. The bump makes that mismatch fail validation instead of
+ *      silently returning garbage frames.
  */
-#define VD_SHM_VERSION     3
+#define VD_SHM_VERSION     4
 
 /** Default total shared memory size: 1 MB */
 #define VD_SHM_DEFAULT_SIZE (1024 * 1024)
