@@ -339,6 +339,21 @@ static void *push_frame_thread(void *arg)
 
         /* Try ring buffer write */
         int ring_slot = -1;
+        /*
+         * A frame larger than a slot skips the whole write block below, and
+         * every drop counter and warning lives inside that block -- so it was
+         * silently discarded with no trace. Keyframes are several times the size
+         * of a P-frame, so this path sheds exactly the frames a recorder needs.
+         */
+        if (g_ring_buffer != NULL && frame_len > VD_SHM_SLOT_DATA_SIZE) {
+            log_warn("event=frame_too_large stream=%u seq_no=%u frame_type=%u frame_len=%u limit=%u diag_monotonic_ms=%llu",
+                     state->stream_id,
+                     seq_no,
+                     ring_frame_type,
+                     frame_len,
+                     (unsigned)VD_SHM_SLOT_DATA_SIZE,
+                     (unsigned long long)diag_monotonic_ms());
+        }
         if (g_ring_buffer != NULL && frame_len <= VD_SHM_SLOT_DATA_SIZE) {
             pthread_mutex_lock(&g_ring_write_lock);
             ring_slot = vd_ring_write(g_ring_buffer, vs.data, frame_len,

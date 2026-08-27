@@ -71,8 +71,18 @@ pub const VD_SHM_VERSION: u32 = 3;
 pub const VD_SHM_VERSION_MIN: u32 = 1;
 /// Number of slots in the ring buffer
 pub const VD_SHM_SLOT_COUNT: u32 = 8;
-/// Size of each slot (header + data)
-pub const VD_SHM_SLOT_SIZE: usize = 128 * 1024; // 128 KB per slot
+/// Size of each slot (header + data): 256 KB.
+///
+/// Must stay in lockstep with `VD_SHM_SLOT_SIZE` in
+/// `vendor-daemon/include/vd_ring_buffer.h` — both sides mmap
+/// [`VD_SHM_TOTAL_SIZE`] and index slots by this stride, so a mismatch
+/// silently desyncs every offset.
+///
+/// Sized from measurement: 720p keyframes on the main stream run ~184 KB and
+/// creep upward with scene detail. At the previous 128 KB every keyframe was
+/// rejected by the size guard in the daemon's `push.c`, so the main stream
+/// carried P-frames only and no client could ever decode or cut on one.
+pub const VD_SHM_SLOT_SIZE: usize = 256 * 1024; // 256 KB per slot
 /// Size of the ring header structure
 pub const VD_SHM_HEADER_SIZE: usize = 64;
 /// Size of each slot header

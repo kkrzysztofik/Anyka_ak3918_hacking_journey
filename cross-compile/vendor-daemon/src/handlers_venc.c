@@ -52,6 +52,40 @@ int handle_venc_open(int fd, const uint8_t *req, uint32_t req_len)
         log_error("[venc] open failed (NULL handle)");
         return send_response(fd, STATUS_ERROR, NULL, 0);
     }
+
+    /*
+     * Scene check defaults to ON (ak_venc.h: "the default switch flag is open")
+     * and overrides goplen when it decides the scene is motionless: the encoder
+     * then emits one IDR at open and never another. A recorder cuts segments on
+     * keyframes, so that camera records ~15% of wall clock -- one segment per
+     * client reconnect. Deterministic GOPs are worth more here than the bitrate
+     * saving. Must be called after open and before the stream is requested.
+     */
+    if (ak_venc_set_check_scene(handle, 0) != 0)
+        log_warn("[venc] set_check_scene(0) failed; goplen may be ignored on a static scene");
+
+    /*
+     * The goplen passed to ak_venc_open is not honoured on the main channel:
+     * that stream emits one IDR at open and never another, so a recorder can
+     * never cut a segment. Read back what the encoder actually took, then set
+     * it explicitly through the runtime setter and read it back again. The log
+     * line is the evidence for which of the two paths the SDK respects.
+     */
+    /*
+     * Cap keyframe size at the encoder. A 720p keyframe measured ~184 KB and
+     * grows with scene detail; anything over VD_SHM_SLOT_DATA_SIZE is rejected
+     * outright by the ring write in push.c, which drops every keyframe and
+     * leaves the stream undecodable for a late joiner. The slot was enlarged to
+     * match reality, and this keeps the encoder from walking back up to it.
+     */
+    if (ak_venc_set_method(handle, METHOD_ISIZE_CTRL) != 0)
+        log_warn("[venc] set_method(ISIZE_CTRL) failed; keyframes are not size-capped");
+
+    int gop_at_open = ak_venc_get_gop_len(handle);
+    int gop_set_rc  = ak_venc_set_gop_len(handle, (int)param.goplen);
+    int gop_now     = ak_venc_get_gop_len(handle);
+    log_warn("[venc] chn=%d goplen requested=%ld at_open=%d set_rc=%d now=%d",
+             (int)param.use_chn, param.goplen, gop_at_open, gop_set_rc, gop_now);
     int slot = vd_obj_register(VD_OBJ_KIND_VENC, handle);
     if (slot < 0) {
         log_error("[venc] object table full; refusing open");
