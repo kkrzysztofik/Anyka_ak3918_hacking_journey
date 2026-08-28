@@ -22,18 +22,31 @@ static struct sound_req current;
  * Clips are chimes; anything past this is a fault, not a long file. */
 #define SOUND_MAX_MS        30000
 
-/* Speaker amplifier enable. The DA drives nothing audible until this is high;
- * discovered on .198. Nothing in the vendor SDK touches it. */
+/* Amplifier shutdown pin, and it is ACTIVE HIGH — the name reads like an
+ * enable, but it is not.
+ *
+ * Measured on .198 at the 8002D (LM4871-class, BTL) on 2026-08-29:
+ *   SPK_PA = 1  ->  outputs 0 V     (shutdown)
+ *   SPK_PA = 0  ->  outputs VDD/2   (enabled, 2.5 V on a 5 V rail)
+ *
+ * The pin is low at boot and ak_ao_enable_speaker() never touches it, so the
+ * stock state is "enabled". An earlier revision wrote 1 here believing it was
+ * an enable, which silently shut the amplifier off before every play: the SDK
+ * still reported success end to end, so it looked like dead hardware.
+ *
+ * We only ever drive it low, and never restore it: leaving the amp enabled is
+ * the boot state, and setting it high again would make the next play silent
+ * with no diagnostic. */
 #define SPK_PA_SYSFS        "/sys/user-gpio/SPK_PA"
 
-static void spk_pa_set(int enabled)
+static void spk_amp_enable(void)
 {
     FILE *f = fopen(SPK_PA_SYSFS, "w");
     if (f == NULL) {
         log_warn("[sound] cannot open %s", SPK_PA_SYSFS);
         return;
     }
-    fputc(enabled ? '1' : '0', f);
+    fputc('0', f);
     fclose(f);
 }
 
@@ -105,7 +118,7 @@ static void *sound_thread(void *arg)
     size_t n;
     unsigned long long sent = 0;
 
-    spk_pa_set(1);
+    spk_amp_enable();
 
     while ((n = fread(buf, 1, sizeof(buf), fp)) > 0) {
         if (elapsed_ms(&start) > SOUND_MAX_MS) {
@@ -150,7 +163,6 @@ static void *sound_thread(void *arg)
         nanosleep(&ts, NULL);
     }
 
-    spk_pa_set(0);
     ak_ao_enable_speaker(ao, AUDIO_FUNC_DISABLE);
     ak_ao_close(ao);
     fclose(fp);
