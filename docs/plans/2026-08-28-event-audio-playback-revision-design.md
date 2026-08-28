@@ -157,11 +157,63 @@ Unchanged in shape from the original design, plus:
 - **Device, regression**: RTSP/FLV audio still flowing after a play; daemon and
   onvif-rust PIDs unchanged.
 
+## Addendum 2026-08-28: we ship a foreign `libplat_ao`
+
+Investigated after `## ERROR: CHIP(14) unsupported` appeared in every playback
+log. Recorded so it is not re-derived.
+
+`libplat_ao` hardcodes `s_ininfo.chip = AUDIOLIB_CHIP_AK39XXEV3` for every
+filter open (`libplat/include_inner/pcm.h:168,196`). That enum member is **14**
+(`medialib_global.h:133-152`, counting from `AUDIOLIB_CHIP_UNKNOW = 0`).
+`libakaudiofilter`'s `ak_aslc_init` accepts only 0, 1 or 2 — disassembly of the
+shipped lib: `if ((unsigned)(v-1) <= 1) ok; if (v != 0) { printf("## ERROR:
+CHIP(%d) unsupported"); return -1; }`. So ASLC can never open.
+
+**Why:** the versions do not match, because our `libplat_ao.so` is not this
+camera's.
+
+| version | location | form |
+| --- | --- | --- |
+| V2.4.03 | `/usr/bin/anyka_ipc` (vendor main app) | statically linked |
+| V2.4.02 | `/usr/bin/ak_adec_demo` | statically linked |
+| **V1.2.02** | **ours**, from `anyka_reference/IOT-ANYKA-PTZdaemon/libs/` | the only `.so` |
+
+The camera's rootfs contains **no `libplat_ao.so` at all** — nothing outside our
+SD payload exports `ak_ao_open`. The native V2.4.x exists only as static code
+inside stock binaries, so it cannot be linked against, and the original design's
+claim that our libs are "md5-identical to the camera's stock vendor lib set"
+does not hold for this one: there is nothing to be identical to.
+
+Consequences:
+
+- The abandoned `system("ak_adec_demo")` workaround was, accidentally, the only
+  path using the **correct** `libplat_ao` for this SoC. That is a stronger
+  argument for it than the one the original design rejected.
+- Unknown residual risk: whether V1.2.02 differs from V2.4.x in more than the
+  chip constant — DAC register layout or ioctl numbering would produce
+  silence while every status call still reports success.
+
+ASLC itself is **harmless to lose**: the write path skips a NULL aslc
+(`ak_ao.c:566`) and the source notes it applies only to volume 7-12, above our
+0-6 DAC range. Options, none taken: keep V1.2.02; shell out to reach V2.4.02;
+source a V2.4.x `.so` from a newer SDK; or patch the chip immediate
+(`e3a0300e` → `e3a03002`) and accept wrong-silicon ASLC tuning. Prefer raising
+clip loudness in `make_speech.py` over any of these — the clips currently sit at
+RMS 0.105 FS while peaking at 1.0, so limiting buys ~7 dB *and* removes existing
+clipping.
+
 ## Risks
 
-1. **Not yet verified on hardware.** The root cause is source-grounded and
-   matches the 2× log signature quantitatively, but the fix is unproven. The
-   headless assertions above are the gate.
+1. **Not yet verified on hardware, and currently unverifiable.** As of
+   2026-08-28 `.198` produces only a click per play from *any* source, including
+   the stock `ak_adec_demo` that worked on 2026-08-27. Survives a power cycle.
+   See [[198-speaker-output-dead-since-tts-work]]. The fixes below are grounded
+   in the vendored SDK source, not in a passing listen test.
+1. **The symptom that motivated this design was misread.** "Tones work, TTS
+   does not" was a **timeline artifact** — the tones were tested before the
+   output stage failed and the speech after. The three defects found are real
+   and independently confirmed against `ak_ao.c`, but they are not established
+   as the cause of the original silence.
 2. **Capture contention may be real.** Removing `push_stop_audio()` is the
    lazy correct default; the test in §4 decides.
 3. **Only `.198` is verified.** `.127` (zt9101) still unconfirmed — but this
