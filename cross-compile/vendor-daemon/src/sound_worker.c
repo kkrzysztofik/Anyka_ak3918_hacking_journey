@@ -83,12 +83,15 @@ static void *sound_thread(void *arg)
      * set_resample is inert in the vendored source (ak_ao.c:1412-1424 has its
      * body commented out and returns AK_SUCCESS) — kept for demo fidelity and
      * because the shipped lib may differ, but do not chase a resample bug here.
-     * ak_adec_demo.c:245-248 — the binary the shell-out workaround called —
-     * pins volume to 6 (max) plus 2 of ASLC gain, which is why playback was
-     * deafening. We honour the configured level and leave ASLC off. */
+     *
+     * No ak_ao_set_aslc_volume: ak_ao_demo.c never calls it, and dac_set_aslc
+     * (ak_ao.c:373-390) opens the filter before it looks at the value, so even
+     * passing 0 forces an sdfilter_open that fails on this chip with
+     * "CHIP(14) unsupported". Harmless — the write path skips a NULL aslc
+     * (ak_ao.c:566) and it only applies to volume 7-12 anyway — but it dumped
+     * a spurious error into every playback log. */
     ak_ao_enable_speaker(ao, AUDIO_FUNC_ENABLE);
     ak_ao_set_dac_volume(ao, current.volume);
-    ak_ao_set_aslc_volume(ao, 0);
     ak_ao_set_resample(ao, AUDIO_FUNC_DISABLE);
     ak_ao_clear_frame_buffer(ao);
 
