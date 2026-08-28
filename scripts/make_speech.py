@@ -106,7 +106,10 @@ def api_request(path: str, key: str, payload: dict | None = None) -> bytes:
     except urllib.error.HTTPError as e:
         body = e.read().decode("utf-8", "replace")[:400]
         hint = ""
-        if e.code == 401:
+        if "library voices" in body:
+            hint = ("\n  Free accounts cannot use Voice Library voices via the API."
+                    "\n  Run --list-voices and pick one marked 'ok' (category=premade).")
+        elif e.code == 401:
             hint = "  (bad or expired ELEVENLABS_API_KEY)"
         elif e.code == 422:
             hint = "  (voice id or model not accepted -- try --list-voices)"
@@ -116,11 +119,26 @@ def api_request(path: str, key: str, payload: dict | None = None) -> bytes:
 
 
 def list_voices(key: str) -> None:
+    """List voices, flagging which ones a free account may actually use.
+
+    Free accounts can synthesise with `premade` voices but not with `library`
+    ones added from the Voice Library -- those return "Free users cannot use
+    library voices via the API". The category is the only way to tell them
+    apart before spending a request, so show it and sort usable ones first.
+    """
     voices = json.loads(api_request("/voices", key))["voices"]
-    print(f"{'voice_id':24} {'name':22} labels")
-    for v in voices:
+    usable = {"premade", "cloned", "generated", "professional"}
+
+    print(f"{'':3} {'voice_id':24} {'name':22} {'category':13} labels")
+    for v in sorted(voices, key=lambda x: x.get("category") != "premade"):
+        cat = v.get("category", "?")
+        mark = "ok " if cat in usable else "PAID"
         labels = ", ".join(f"{k}={x}" for k, x in (v.get("labels") or {}).items())
-        print(f"{v['voice_id']:24} {v.get('name', '?'):22} {labels}")
+        print(f"{mark:3} {v['voice_id']:24} {v.get('name', '?'):22} {cat:13} {labels}")
+
+    print("\n'ok' = usable on a free account. 'PAID' = library voice, needs a "
+          "paid plan.\neleven_multilingual_v2 speaks Polish on any voice; "
+          "prosody varies, so try a few.")
 
 
 def synthesize_mp3(text: str, *, key: str, voice: str, model: str) -> bytes:
