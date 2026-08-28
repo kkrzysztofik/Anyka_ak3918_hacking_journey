@@ -24,9 +24,6 @@ int sound_parse_play_req(const uint8_t *req, uint32_t req_len, struct sound_req 
  * -1 on failure to start. */
 int sound_play_async(const struct sound_req *req);
 
-/* True if the worker is currently playing. */
-int sound_is_playing(void);
-
 /* Duplicate s16le mono samples into interleaved stereo.
  *
  * The DA accepts stereo only: handing it a mono buffer makes each channel take

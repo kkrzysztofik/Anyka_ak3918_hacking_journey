@@ -161,14 +161,6 @@ done:
     return NULL;
 }
 
-int sound_is_playing(void)
-{
-    pthread_mutex_lock(&lock);
-    int p = playing;
-    pthread_mutex_unlock(&lock);
-    return p;
-}
-
 int sound_play_async(const struct sound_req *req)
 {
     pthread_mutex_lock(&lock);

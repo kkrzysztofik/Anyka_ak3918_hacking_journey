@@ -84,11 +84,10 @@ enum cmd_id {
      * chain rather than marshalling three handles across IPC. */
     CMD_AUDIO_START_PUSH          = 57,
     CMD_AUDIO_STOP_PUSH           = 58,
-    /* Audio playback (speaker).  Backed by libplat_ao.so.  Rust owns all policy:
+    /* Audio playback (speaker).  Rust owns all policy:
      * event->clip mapping, debounce and drop-if-busy.  The daemon just plays a
      * file. Async: the response means "accepted", not "finished". */
     CMD_AUDIO_PLAY                = 59,
-    CMD_AUDIO_STOP                = 60,
     /* Imaging / ISP */
     CMD_ISP_SET_BRIGHTNESS        = 100,
     CMD_ISP_SET_CONTRAST          = 101,
