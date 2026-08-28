@@ -7,6 +7,7 @@
 
 #include "sound.h"
 #include "log.h"
+#include "ak_global.h"                    /* AUDIO_FUNC_ENABLE / _DISABLE */
 #include "ak_ao.h"
 
 /* One DAC, one worker. `playing` is guarded by `lock` rather than atomics
@@ -20,6 +21,21 @@ static struct sound_req current;
 /* A wedged play must not hold the DAC forever and block every later sound.
  * Clips are chimes; anything past this is a fault, not a long file. */
 #define SOUND_MAX_MS        30000
+
+/* Speaker amplifier enable. The DA drives nothing audible until this is high;
+ * discovered on .198. Nothing in the vendor SDK touches it. */
+#define SPK_PA_SYSFS        "/sys/user-gpio/SPK_PA"
+
+static void spk_pa_set(int enabled)
+{
+    FILE *f = fopen(SPK_PA_SYSFS, "w");
+    if (f == NULL) {
+        log_warn("[sound] cannot open %s", SPK_PA_SYSFS);
+        return;
+    }
+    fputc(enabled ? '1' : '0', f);
+    fclose(f);
+}
 
 static long elapsed_ms(const struct timespec *start)
 {
@@ -62,53 +78,77 @@ static void *sound_thread(void *arg)
         goto done;
     }
 
-    /* The vendor demo pins this to 6 (max) plus 2 of ASLC gain, which is why
-     * playback was deafening. We honour the configured level and leave ASLC off. */
+    /* Order and necessity per ak_ao_demo.c:149-159; the header marks speaker,
+     * resample and clear_frame_buffer mandatory before the first send_frame.
+     * set_resample is inert in the vendored source (ak_ao.c:1412-1424 has its
+     * body commented out and returns AK_SUCCESS) — kept for demo fidelity and
+     * because the shipped lib may differ, but do not chase a resample bug here.
+     * ak_adec_demo.c:245-248 — the binary the shell-out workaround called —
+     * pins volume to 6 (max) plus 2 of ASLC gain, which is why playback was
+     * deafening. We honour the configured level and leave ASLC off. */
+    ak_ao_enable_speaker(ao, AUDIO_FUNC_ENABLE);
     ak_ao_set_dac_volume(ao, current.volume);
     ak_ao_set_aslc_volume(ao, 0);
+    ak_ao_set_resample(ao, AUDIO_FUNC_DISABLE);
+    ak_ao_clear_frame_buffer(ao);
 
+    /* The DA is stereo-only: handing it a mono buffer makes each channel take
+     * every other sample, so a clip plays at half length and double pitch. We
+     * duplicate each sample into L/R before sending, as ak_ao_demo.c does for a
+     * mono source. `sent` therefore reaches 2x the file size — DA-side stereo
+     * bytes, not a leak. */
     unsigned char buf[SOUND_CHUNK_BYTES];
+    unsigned char stereo[SOUND_CHUNK_BYTES * 2];
     size_t n;
     unsigned long long sent = 0;
+
+    spk_pa_set(1);
+
     while ((n = fread(buf, 1, sizeof(buf), fp)) > 0) {
         if (elapsed_ms(&start) > SOUND_MAX_MS) {
             log_warn("[sound] watchdog: aborting %s after %d ms",
                      current.path, SOUND_MAX_MS);
             break;
         }
-        {
-            size_t off = 0;
-            int send_failed = 0;
-            while (off < n) {
-                if (elapsed_ms(&start) > SOUND_MAX_MS) {
-                    log_warn("[sound] watchdog: aborting %s after %d ms",
-                             current.path, SOUND_MAX_MS);
-                    send_failed = 1;
-                    break;
-                }
-                int rc = ak_ao_send_frame(ao, buf + off, (int)(n - off), 0);
-                if (rc < 0) {
-                    log_warn("[sound] send_frame failed after %llu bytes", sent);
-                    send_failed = 1;
-                    break;
-                }
-                if (rc == 0) {
-                    /* Non-blocking: wait briefly rather than spin. */
-                    struct timespec ts = { .tv_sec = 0, .tv_nsec = 5 * 1000 * 1000 };
-                    nanosleep(&ts, NULL);
-                    continue;
-                }
-                off += (size_t)rc;
-                sent += (unsigned long long)rc;
-            }
-            if (send_failed)
-                break;
-            if (off < n)
-                break;
+        /* Not 2 * n: a trailing odd byte has no whole sample and is dropped. */
+        int stereo_len = sound_dup_mono_to_stereo(buf, (int)n, stereo);
+
+        /* One call per chunk is complete. ak_ao_send_frame returns AK_SUCCESS
+         * (0), NOT a byte count — the header's "real sent data len" is wrong:
+         * write_dac_driver's count is folded into da_data_size and the return
+         * is overwritten with AK_SUCCESS (ak_ao.c:713-725). It loops write()
+         * internally until the whole buffer is consumed and ignores `ms`, so
+         * retrying on a 0 return would resend the same chunk forever. */
+        if (ak_ao_send_frame(ao, stereo, stereo_len, 0) < 0) {
+            log_warn("[sound] send_frame failed after %llu bytes", sent);
+            break;
         }
+        sent += (unsigned long long)stereo_len;
     }
 
     ak_ao_notice_frame_end(ao);
+
+    /* Wait for the DA to actually play what we queued: send_frame only means
+     * "handed to the driver", so closing here truncates the tail.
+     *
+     * Only if something was queued. FINISHED is reachable only from PLAYING,
+     * which the driver enters only once it reports bytes in flight
+     * (ak_ao.c:1062-1083); with sent == 0 — empty clip, or a first send that
+     * failed — the handle sits in DATA_NOT_ENOUGH forever and this would spin
+     * the full watchdog holding the DAC and SPK_PA, dropping every request in
+     * that window. ak_ao_demo.c:222 guards on read_len instead, which still
+     * hangs (unbounded!) on an empty file. */
+    while (sent > 0 && ak_ao_get_play_status(ao) != AO_PLAY_STATUS_FINISHED) {
+        if (elapsed_ms(&start) > SOUND_MAX_MS) {
+            log_warn("[sound] watchdog: drain timed out for %s", current.path);
+            break;
+        }
+        struct timespec ts = { .tv_sec = 0, .tv_nsec = 10 * 1000 * 1000 };
+        nanosleep(&ts, NULL);
+    }
+
+    spk_pa_set(0);
+    ak_ao_enable_speaker(ao, AUDIO_FUNC_DISABLE);
     ak_ao_close(ao);
     fclose(fp);
     log_info("event=sound_played path=%s bytes=%llu volume=%d",
