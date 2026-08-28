@@ -62,6 +62,11 @@ DEFAULT_PEAK_DB = -2.0
 # starts to sound squashed.
 DEFAULT_COMPRESS = "acompressor=threshold=-18dB:ratio=4:attack=5:release=50"
 
+# mp3_44100_128 works on any account tier. pcm_16000 needs a paid plan, but it
+# is already our target rate and skips the mp3 encode/decode, so prefer it if
+# the account allows.
+DEFAULT_FORMAT = "mp3_44100_128"
+
 # Short phrases for a small speaker; filenames match [sound.events] in config.toml.
 CLIPS: dict[str, str] = {
     "boot.raw": "Kamera gotowa.",
@@ -141,35 +146,43 @@ def list_voices(key: str) -> None:
           "prosody varies, so try a few.")
 
 
-def synthesize_mp3(text: str, *, key: str, voice: str, model: str) -> bytes:
-    """Request mp3 rather than a pcm_* output_format.
+def synthesize(text: str, *, key: str, voice: str, model: str, fmt: str) -> bytes:
+    """Fetch audio in `fmt`.
 
-    mp3_44100_128 is available on every account tier, whereas the pcm_* formats
-    are gated on paid plans. ffmpeg has to run anyway for resampling and
-    loudness, so decoding mp3 costs us nothing and avoids a tier dependency.
+    mp3_44100_128 works on every account tier. The pcm_* formats need a paid
+    plan, but pcm_16000 is worth using if you have one: it is already our target
+    rate and skips the mp3 encode/decode round-trip, so no lossy generation
+    sits between the model and the DAC.
     """
     return api_request(
-        f"/text-to-speech/{voice}?output_format=mp3_44100_128",
+        f"/text-to-speech/{voice}?output_format={fmt}",
         key,
         {"text": text, "model_id": model},
     )
 
 
 def to_pcm(
-    mp3: bytes, *, ffmpeg: str, lufs: float, peak_db: float, compress: str
+    audio: bytes, *, ffmpeg: str, lufs: float, peak_db: float, compress: str, fmt: str
 ) -> bytes:
     """Decode, compress, normalise loudness, resample to 16 kHz mono s16le."""
     chain = f"{compress},loudnorm=I={lufs}:TP={peak_db}:LRA=11" if compress \
         else f"loudnorm=I={lufs}:TP={peak_db}:LRA=11"
 
+    # pcm_* responses are headerless, so ffmpeg has to be told the layout.
+    # Anything else (mp3) is a self-describing container.
+    in_args: list[str] = []
+    if fmt.startswith("pcm_"):
+        in_args = ["-f", "s16le", "-ar", fmt.removeprefix("pcm_"), "-ac", "1"]
+
     with tempfile.TemporaryDirectory(prefix="anyka-speech-") as tmp:
-        src = Path(tmp) / "clip.mp3"
+        src = Path(tmp) / "clip.in"
         raw = Path(tmp) / "clip.raw"
-        src.write_bytes(mp3)
+        src.write_bytes(audio)
 
         subprocess.run(
             [
                 ffmpeg, "-y", "-hide_banner", "-loglevel", "error",
+                *in_args,
                 "-i", str(src),
                 # Compress then loudnorm, both before the rate change: they
                 # work on the decoded stream and ffmpeg resamples internally
@@ -224,6 +237,9 @@ def main() -> int:
                    help=f"true-peak ceiling in dBFS (default {DEFAULT_PEAK_DB})")
     p.add_argument("--compress", default=DEFAULT_COMPRESS,
                    help="ffmpeg filter applied before loudnorm; empty string to disable")
+    p.add_argument("--format", dest="fmt", default=DEFAULT_FORMAT,
+                   help=f"ElevenLabs output_format (default {DEFAULT_FORMAT}); "
+                        "paid plans can use pcm_16000 to skip the mp3 step")
     p.add_argument("--list-voices", action="store_true", help="List voices and exit")
     args = p.parse_args()
 
@@ -236,10 +252,11 @@ def main() -> int:
     OUT.mkdir(parents=True, exist_ok=True)
 
     for name, text in CLIPS.items():
-        mp3 = synthesize_mp3(text, key=key, voice=args.voice, model=args.model)
+        audio = synthesize(text, key=key, voice=args.voice, model=args.model,
+                           fmt=args.fmt)
         pcm = apply_fade(
-            to_pcm(mp3, ffmpeg=ffmpeg, lufs=args.lufs, peak_db=args.peak_db,
-                   compress=args.compress)
+            to_pcm(audio, ffmpeg=ffmpeg, lufs=args.lufs, peak_db=args.peak_db,
+                   compress=args.compress, fmt=args.fmt)
         )
         (OUT / name).write_bytes(pcm)
 
