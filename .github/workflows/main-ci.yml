@@ -904,7 +904,7 @@ jobs:
           fi
 
       - name: Upload SonarCloud Scan Results to GitHub
-        uses: github/codeql-action/upload-sarif@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd  # v4.0.0
+        uses: github/codeql-action/upload-sarif@db488ddef3bf6cb639b32c2e9a7c0a7ea8271d28  # v4.0.0
         # SHA: 0d579ffd059c29b07949a3cce3983f0780820c98
         continue-on-error: true
         with:
