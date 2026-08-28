@@ -27,4 +27,14 @@ int sound_play_async(const struct sound_req *req);
 /* True if the worker is currently playing. */
 int sound_is_playing(void);
 
+/* Duplicate s16le mono samples into interleaved stereo.
+ *
+ * The DA accepts stereo only: handing it a mono buffer makes each channel take
+ * every other sample, which halves the effective rate and doubles the pitch.
+ * See ak_ao_demo.c:66 (copy_for_dual_channel).
+ *
+ * `dest` must have room for `len * 2` bytes. A trailing odd byte is dropped.
+ * Returns the number of bytes written to `dest`. */
+int sound_dup_mono_to_stereo(const unsigned char *src, int len, unsigned char *dest);
+
 #endif /* VENDOR_DAEMON_SOUND_H */

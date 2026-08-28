@@ -49,3 +49,17 @@ int sound_parse_play_req(const uint8_t *req, uint32_t req_len, struct sound_req 
         return -1;
     return 0;
 }
+
+int sound_dup_mono_to_stereo(const unsigned char *src, int len, unsigned char *dest)
+{
+    int samples = len / 2;
+    int j;
+
+    for (j = 0; j < samples; ++j) {
+        dest[j * 4]     = src[j * 2];
+        dest[j * 4 + 1] = src[j * 2 + 1];
+        dest[j * 4 + 2] = src[j * 2];
+        dest[j * 4 + 3] = src[j * 2 + 1];
+    }
+    return samples * 4;
+}

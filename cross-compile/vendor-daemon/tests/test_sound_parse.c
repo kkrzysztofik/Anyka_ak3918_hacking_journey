@@ -27,6 +27,40 @@ static uint32_t fill_play_req(uint8_t *buf, const char *path, int volume)
     return o + path_len;
 }
 
+static void test_dup_mono_to_stereo_duplicates_each_sample(void)
+{
+    /* Three s16le mono samples: 0x0102, 0x0304, 0x0506 (little-endian bytes). */
+    const unsigned char mono[6] = { 0x02, 0x01, 0x04, 0x03, 0x06, 0x05 };
+    unsigned char stereo[12] = { 0 };
+
+    int out_len = sound_dup_mono_to_stereo(mono, sizeof(mono), stereo);
+
+    assert(out_len == 12);
+    /* Sample 0 appears in both L and R. */
+    assert(stereo[0] == 0x02 && stereo[1] == 0x01);
+    assert(stereo[2] == 0x02 && stereo[3] == 0x01);
+    /* Sample 1. */
+    assert(stereo[4] == 0x04 && stereo[5] == 0x03);
+    assert(stereo[6] == 0x04 && stereo[7] == 0x03);
+    /* Sample 2. */
+    assert(stereo[8] == 0x06 && stereo[9] == 0x05);
+    assert(stereo[10] == 0x06 && stereo[11] == 0x05);
+}
+
+static void test_dup_mono_to_stereo_ignores_trailing_odd_byte(void)
+{
+    /* A truncated file can leave a dangling byte; it must not be half-copied. */
+    const unsigned char mono[3] = { 0x02, 0x01, 0xFF };
+    unsigned char stereo[8] = { 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA };
+
+    int out_len = sound_dup_mono_to_stereo(mono, sizeof(mono), stereo);
+
+    assert(out_len == 4);
+    assert(stereo[0] == 0x02 && stereo[1] == 0x01);
+    assert(stereo[2] == 0x02 && stereo[3] == 0x01);
+    assert(stereo[4] == 0xAA);  /* untouched */
+}
+
 int main(void)
 {
     uint8_t buf[256];
@@ -69,6 +103,10 @@ int main(void)
     /* Path traversal under the prefix is rejected. */
     len = fill_play_req(buf, "/mnt/anyka_hack/../etc/passwd", 3);
     assert(sound_parse_play_req(buf, len, &r) != 0);
+
+    /* The DA is stereo-only, so mono buffers must be interleaved first. */
+    test_dup_mono_to_stereo_duplicates_each_sample();
+    test_dup_mono_to_stereo_ignores_trailing_odd_byte();
 
     printf("test_sound_parse: OK\n");
     return 0;
