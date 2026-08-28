@@ -123,25 +123,18 @@ debug:
 	$(MAKE) BUILD_MODE=debug all
 
 HOST_CC ?= gcc
+HOST_TESTS = test_sound_parse test_push_slots test_ring_epoch
 
-# Host-side unit tests. Each test has its own link recipe because the older
-# suites embed translation units (push.c) or rely on header-only ring helpers.
-test: $(BUILD_DIR)/test_sound_parse $(BUILD_DIR)/test_push_slots $(BUILD_DIR)/test_ring_epoch
-	$(BUILD_DIR)/test_sound_parse
-	$(BUILD_DIR)/test_push_slots
-	$(BUILD_DIR)/test_ring_epoch
+# Host-side unit tests. test_push_slots and test_ring_epoch #include the
+# translation unit under test, so only test_sound_parse needs a second source.
+test: $(addprefix $(BUILD_DIR)/,$(HOST_TESTS))
+	@for t in $^; do echo "  $$t" && $$t || exit 1; done
 
-$(BUILD_DIR)/test_sound_parse: tests/test_sound_parse.c src/sound.c
+$(BUILD_DIR)/test_sound_parse: src/sound.c
+
+$(BUILD_DIR)/test_%: tests/test_%.c
 	@mkdir -p $(BUILD_DIR)
-	$(HOST_CC) -std=gnu99 -Wall -Wextra -Isrc -Iinclude -o $@ tests/test_sound_parse.c src/sound.c
-
-$(BUILD_DIR)/test_push_slots: tests/test_push_slots.c src/push.c
-	@mkdir -p $(BUILD_DIR)
-	$(HOST_CC) -std=gnu99 -Wall -Wextra -Isrc -Iinclude -o $@ tests/test_push_slots.c
-
-$(BUILD_DIR)/test_ring_epoch: tests/test_ring_epoch.c
-	@mkdir -p $(BUILD_DIR)
-	$(HOST_CC) -std=gnu99 -Wall -Wextra -Isrc -Iinclude -o $@ tests/test_ring_epoch.c
+	$(HOST_CC) -std=gnu99 -Wall -Wextra -Isrc -Iinclude -o $@ $^
 
 $(BUILD_DIR)/$(TARGET): $(OBJS)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
