@@ -4,7 +4,8 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Deserializer, Serialize};
 
-/// DAC range is [0, 6]; 0 is mute. Matches `SOUND_VOLUME_MAX` in the daemon.
+/// Matches `DAC_DEV_MAX_VOLUME` in the vendor SDK (`ak_ao.c:16`);
+/// `ak_ao_set_dac_volume` returns `AK_FAILED` above it. 0 is mute.
 const SOUND_VOLUME_MAX: u8 = 6;
 
 fn default_clip_dir() -> String {
@@ -19,6 +20,9 @@ fn default_debounce_secs() -> u64 {
     30
 }
 
+/// Clamp rather than reject: an out-of-range volume should not stop the camera
+/// booting. The daemon clamps too (`sound_parse_play_req`), but normalising here
+/// means the value the WebUI reads back is the value that will be applied.
 fn deserialize_volume<'de, D>(deserializer: D) -> Result<u8, D::Error>
 where
     D: Deserializer<'de>,
@@ -29,8 +33,8 @@ where
 
 /// Policy for playing short PCM clips on selected events.
 ///
-/// Defaults are safe and quiet: sound is opt-in, volume stays in the DAC range,
-/// and no events are mapped until configured.
+/// Defaults are safe and quiet: sound is opt-in and no events are mapped until
+/// configured.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct SoundConfig {
@@ -79,7 +83,7 @@ mod tests {
     #[test]
     fn test_sound_config_volume_above_dac_range_is_clamped() {
         let c: SoundConfig = toml::from_str("enabled = true\nvolume = 99").unwrap();
-        assert_eq!(c.volume, 6);
+        assert_eq!(c.volume, SOUND_VOLUME_MAX);
     }
 
     #[test]
