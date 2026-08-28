@@ -195,12 +195,55 @@ Consequences:
 
 ASLC itself is **harmless to lose**: the write path skips a NULL aslc
 (`ak_ao.c:566`) and the source notes it applies only to volume 7-12, above our
-0-6 DAC range. Options, none taken: keep V1.2.02; shell out to reach V2.4.02;
-source a V2.4.x `.so` from a newer SDK; or patch the chip immediate
-(`e3a0300e` → `e3a03002`) and accept wrong-silicon ASLC tuning. Prefer raising
-clip loudness in `make_speech.py` over any of these — the clips currently sit at
-RMS 0.105 FS while peaking at 1.0, so limiting buys ~7 dB *and* removes existing
-clipping.
+0-6 DAC range.
+
+### The board is EV2 and our library targets EV3
+
+`/proc/cpuinfo` and dmesg both report `Cloud39EV2_AK3918E80PIN_MNBD`,
+`ANYKA CPU AK3918 (ID 0x20150200)` — an AK39XX **EV2**. `AUDIOLIB_CHIP_AK39XXEV2`
+is 13; our library hardcodes 14 (`EV3`). So V1.2.02 is not merely an older
+version, it asserts a **different silicon revision** than the camera has. For a
+library that drives DAC registers that is a real latent risk, though it is *not*
+the cause of the 2026-08-28 silence — the native V2.4.02 path is equally silent.
+
+### A newer SDK does not exist publicly (searched 2026-08-28)
+
+Do not repeat this search. Every known `libplat_ao`:
+
+| version | source | form |
+| --- | --- | --- |
+| V2.4.03 | this camera's `/usr/bin/anyka_ipc` | static only |
+| V2.4.02 | this camera's `/usr/bin/ak_adec_demo` | static only |
+| V1.12.03 | `medevil84/ipcd` (AK3918EN080 v330) | Ghidra decompilation, no binary |
+| V1.2.02 | `kuhnchris/IOT-ANYKA-PTZdaemon` — **ours** | `.so` + `.a` |
+
+`biappi/anyka-fw` is an extracted rootfs from the **identical board string**. Its
+`/lib` ships `libakaudiocodec.so`, `libakaudiofilter.so`, `libakispsdk.so`,
+`libakstreamenc.so` and **no `libplat_*` at all** — independently confirming what
+this camera shows. A GitHub-wide filename search for `libplat_ao.so` returns
+exactly one hit, the decompilation above.
+
+**Conclusion: Cloud39EV2 firmware does not ship `libplat_ao` as a shared object.**
+The vendor statically links it into `anyka_ipc`. There is nothing to download.
+
+### Options, none taken
+
+1. Keep V1.2.02 and accept the EV2/EV3 mismatch and dead ASLC.
+2. `fork`+`execv` a stock binary to reach the native V2.4.02 — safe if done with
+   an argv array (no shell) and paths resolved from `/proc/self/exe`. Costs a
+   hard dependency on `/usr/bin/ak_adec_demo`, i.e. the `.127` zt9101 risk.
+3. Drop the vendor library entirely: `ak_ao` is a thin wrapper over
+   `open("/dev/akpcm_cdev0")` + ioctls + `write()`. The V1.12.03 decompilation
+   plus `OpenIPC/ak3918ev200`'s RE'd ioctl tables (which document
+   `akpcm_cdev0/1` and the codec) make a ~200-line direct driver plausible.
+4. Patch the chip immediate (`e3a0300e` → `e3a03002`) and accept wrong-silicon
+   ASLC tuning.
+
+Decide only after the output stage is repaired, using one A/B on the same clip:
+our worker (V1.2.02) versus `ak_adec_demo` (V2.4.02). If both play, option 1 wins
+for free. For loudness prefer raising clip level in `make_speech.py` over any of
+these — clips currently sit at RMS 0.105 FS while peaking at 1.0, so limiting
+buys ~7 dB *and* removes the existing clipping.
 
 ## Risks
 
