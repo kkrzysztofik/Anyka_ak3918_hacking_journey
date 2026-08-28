@@ -93,8 +93,14 @@ The header marks the middle three mandatory. The reference's
 `wait_play_finished()` accumulates `total_time` but **never checks it** — an
 unbounded poll. Ours must be bounded by the existing watchdog.
 
-Retain `spk_pa_set()` around playback. The `SPK_PA` amplifier GPIO is a real
-discovery from the workaround and is orthogonal to the buffer bug.
+**CORRECTED 2026-08-29 — this said "retain `spk_pa_set()`; the `SPK_PA`
+amplifier GPIO is a real discovery". That was wrong, and it was the actual
+cause of the silence.** `SPK_PA` is **active-high shutdown**, not an enable.
+Measured at the 8002D: `1` → outputs 0 V (shutdown), `0` → outputs VDD/2
+(enabled). The pin is low at boot and `ak_ao_enable_speaker()` never touches
+it, so the stock state is already enabled; the workaround's `spk_pa_set(1)`
+switched the amplifier **off** before every clip. Use `spk_amp_enable()`, which
+only ever drives it low. See the 2026-08-29 addendum.
 
 Buffer note: the send buffer must be `SOUND_CHUNK_BYTES * 2` to hold the
 duplicated frame, and the read chunk stays `SOUND_CHUNK_BYTES`.
@@ -140,7 +146,8 @@ supervisor, never stop-forever.
 Unchanged in shape from the original design, plus:
 
 - The drain poll is watchdog-bounded; a wedged DAC must not hold the worker.
-- `SPK_PA` is released on every exit path, including the watchdog abort.
+- `SPK_PA` is driven low (amp enabled) before playback and **never restored**.
+  Restoring it would shut the amp off and make the next play silent.
 
 ## Testing
 
@@ -245,18 +252,52 @@ for free. For loudness prefer raising clip level in `make_speech.py` over any of
 these — clips currently sit at RMS 0.105 FS while peaking at 1.0, so limiting
 buys ~7 dB *and* removes the existing clipping.
 
+## Addendum 2026-08-29: root cause was `SPK_PA` polarity — RESOLVED
+
+**Verified working on `.198`.** Our worker plays intelligible speech.
+
+`SPK_PA` is the 8002D's **shutdown** pin and it is **active high**. Measured
+with a meter at the amplifier:
+
+| `SPK_PA` | amp outputs (pins 5/8 to ground) | state |
+| --- | --- | --- |
+| 1 | 0 V | shutdown |
+| 0 | 2.5 V (VDD/2 on a 5 V rail) | enabled |
+
+The pin is low at boot and `ak_ao_enable_speaker()` never writes it — the stock
+state is enabled. The abandoned workaround added `spk_pa_set(1)` on the
+assumption that the name meant "enable"; nothing ever verified it. That single
+line switched the amplifier off before every clip.
+
+**Why it presented as dead hardware.** Every layer above the amp kept reporting
+success: `sent == 2 × filesize`, drain reaching `AO_PLAY_STATUS_FINISHED`, SDK
+logging `set volume 6` and `dac ioctl set sample: 8000`, dmesg logging
+`dac start` / `set_channel_source: s_dac=1` on every play. The amplifier was
+simply switched off downstream of all of it. Teardown measurements settled it:
+speaker 7.2 Ω (healthy), amp VDD→GND 15 kΩ (not shorted), VDD 5 V (rail good),
+outputs 0 V (shutdown).
+
+**How the diagnosis went wrong.** The "tones work, TTS does not" split that
+motivated this whole design was a **timeline artifact**: the original `ak_ao`
+worker never touched `SPK_PA` and played tones audibly; every build after the
+workaround forced it high and was silent. It looked content-dependent because
+the content changed at the same commit as the GPIO write. Worse, every
+"known-good control" run during debugging set `SPK_PA=1` first, so the control
+could not produce a positive result.
+
+The three defects found along the way (mono→stereo, send-loop retry, unguarded
+drain) are real and confirmed against `ak_ao.c`, and the worker could not have
+worked with them — but they were not what the original symptom was about.
+
 ## Risks
 
-1. **Not yet verified on hardware, and currently unverifiable.** As of
-   2026-08-28 `.198` produces only a click per play from *any* source, including
-   the stock `ak_adec_demo` that worked on 2026-08-27. Survives a power cycle.
-   See [[198-speaker-output-dead-since-tts-work]]. The fixes below are grounded
-   in the vendored SDK source, not in a passing listen test.
-1. **The symptom that motivated this design was misread.** "Tones work, TTS
-   does not" was a **timeline artifact** — the tones were tested before the
-   output stage failed and the speech after. The three defects found are real
-   and independently confirmed against `ak_ao.c`, but they are not established
-   as the cause of the original silence.
+1. **Only `.198` is verified.** `.127` (zt9101) unconfirmed; its amplifier may
+   differ in part or polarity. Measure before assuming.
+2. **Clip levels are hot.** Clips peak at 0.96–1.00 FS while `volume = 6` is DAC
+   max. Expect harshness; tune with limiting in `make_speech.py`.
+3. **The SD card's FAT is corrupting.** `.198` remounted read-only twice during
+   this work (`clusters badly computed`), which blocks the supervisor from
+   starting services. Needs `fsck`, unrelated to audio.
 2. **Capture contention may be real.** Removing `push_stop_audio()` is the
    lazy correct default; the test in §4 decides.
 3. **Only `.198` is verified.** `.127` (zt9101) still unconfirmed — but this
