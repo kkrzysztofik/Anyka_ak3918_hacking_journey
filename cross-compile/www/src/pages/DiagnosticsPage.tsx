@@ -1,6 +1,6 @@
 import React, { useCallback, useState } from 'react';
 
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import {
   Activity,
   Cpu,
@@ -12,8 +12,10 @@ import {
   Info,
   Move,
   Upload,
+  Volume2,
   Wifi,
 } from 'lucide-react';
+import { toast } from 'sonner';
 
 import { FirmwareUpgradeDialog } from '@/components/FirmwareUpgradeDialog';
 import { Sparkline } from '@/components/common/Sparkline';
@@ -34,6 +36,7 @@ import {
   type LogSource,
   getLogs,
 } from '@/services/diagnosticsService';
+import { getSoundStatus, playSound } from '@/services/soundService';
 
 const RESTART_THRESHOLD_S = 300; // 5 minutes
 const STALL_THRESHOLD_MS = 5000; // frame age above this → stalled
@@ -894,6 +897,109 @@ function FirmwareUpdateCard({
   );
 }
 
+function SoundTestCard() {
+  const [selectedEvent, setSelectedEvent] = useState<string>('');
+
+  const { data: status } = useQuery({
+    queryKey: ['sound-status'],
+    queryFn: ({ signal }) => getSoundStatus(signal),
+  });
+
+  const events = status?.events ?? [];
+  const controlsEnabled = status?.enabled === true && events.length > 0;
+  const showDisabledMessage = status !== undefined && !controlsEnabled;
+  const effectiveEvent = events.some((event) => event.id === selectedEvent)
+    ? selectedEvent
+    : (events[0]?.id ?? '');
+
+  const playMutation = useMutation({
+    mutationFn: (event: string) => playSound(event),
+    onSuccess: (result) => {
+      if (result === 'accepted') {
+        toast.success('Playing…');
+      } else if (result === 'debounced') {
+        toast.info('Skipped (debounce)');
+      }
+    },
+    onError: (error: Error) => {
+      if (/busy/i.test(error.message)) {
+        toast.error('Speaker busy, try again');
+      } else {
+        toast.error(error.message || 'Failed to play sound');
+      }
+    },
+  });
+
+  const handlePlay = () => {
+    if (!effectiveEvent) return;
+    playMutation.mutate(effectiveEvent);
+  };
+
+  return (
+    <Card className="border-border bg-card overflow-hidden" data-testid="sound-card">
+      <CardHeader className="border-border border-b">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-blue-500/10">
+              <Volume2 className="h-5 w-5 text-blue-500" />
+            </div>
+            <div>
+              <CardTitle
+                className="text-foreground text-sm font-semibold"
+                data-testid="sound-card-title"
+              >
+                Sound Test
+              </CardTitle>
+              <p className="text-muted-foreground text-xs" data-testid="sound-card-description">
+                Play the clip mapped to a configured event through the speaker
+              </p>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Select
+              value={effectiveEvent || undefined}
+              onValueChange={setSelectedEvent}
+              disabled={!controlsEnabled}
+            >
+              <SelectTrigger
+                className="h-7 w-full text-xs sm:w-44"
+                data-testid="sound-event-select"
+                aria-label="Sound event"
+              >
+                <SelectValue placeholder="Select event" />
+              </SelectTrigger>
+              <SelectContent>
+                {events.map((event) => (
+                  <SelectItem
+                    key={event.id}
+                    value={event.id}
+                    data-testid={`sound-event-option-${event.id}`}
+                  >
+                    {event.id}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button
+              size="sm"
+              data-testid="sound-play-button"
+              onClick={handlePlay}
+              disabled={!controlsEnabled || !effectiveEvent || playMutation.isPending}
+            >
+              Play
+            </Button>
+          </div>
+        </div>
+        {showDisabledMessage ? (
+          <p className="text-muted-foreground mt-3 text-xs" data-testid="sound-disabled-message">
+            Sound playback is disabled or no events are configured.
+          </p>
+        ) : null}
+      </CardHeader>
+    </Card>
+  );
+}
+
 export default function DiagnosticsPage() {
   const { data, isLoading, history, refetch } = useDiagnostics();
   const [logSource, setLogSource] = useState<LogSource>('onvif_rust');
@@ -956,6 +1062,8 @@ export default function DiagnosticsPage() {
         previousVersion={data?.firmware_version ?? null}
         onFinished={handleUpgradeFinished}
       />
+
+      <SoundTestCard />
 
       <SystemLogsCard
         logSource={logSource}

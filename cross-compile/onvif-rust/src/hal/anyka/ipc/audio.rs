@@ -5,11 +5,12 @@ use tracing::error;
 
 use crate::hal::common::audio::AudioHalTrait;
 use crate::hal::common::{AK_FAILED_I32, aenc_attr, audio_param, pcm_param};
-use crate::platform::PlatformResult;
+use crate::platform::{PlatformError, PlatformResult};
 
 use super::{
     AnykaIpc, CMD_AENC_CLOSE, CMD_AENC_OPEN, CMD_AENC_SET_ATTR, CMD_AI_CLOSE, CMD_AI_OPEN,
-    CMD_AI_SET_ADC_VOLUME, CMD_AI_SET_ASLC_VOLUME,
+    CMD_AI_SET_ADC_VOLUME, CMD_AI_SET_ASLC_VOLUME, CMD_AUDIO_PLAY, VD_STATUS_BUSY,
+    VD_STATUS_STALE_EPOCH,
 };
 
 impl AudioHalTrait for AnykaIpc {
@@ -114,5 +115,97 @@ impl AudioHalTrait for AnykaIpc {
 
     fn stop_audio_push(&self) -> PlatformResult<()> {
         AnykaIpc::stop_audio_push(self)
+    }
+}
+
+/// Result of `CMD_AUDIO_PLAY`: accepted for async playback, or busy (dropped).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AudioPlayStatus {
+    Accepted,
+    Busy,
+}
+
+impl AnykaIpc {
+    /// Ask the daemon to play a raw PCM file on the speaker.
+    ///
+    /// Wire: `[u32 rate][u32 ch][i32 volume][u32 path_len][path\0]`.
+    /// `VD_STATUS_BUSY` is a normal outcome, not an error.
+    pub fn audio_play(
+        &self,
+        path: &str,
+        sample_rate: u32,
+        channels: u32,
+        volume: i32,
+    ) -> PlatformResult<AudioPlayStatus> {
+        let path_bytes = path.as_bytes();
+        let path_len = (path_bytes.len() + 1) as u32; // include NUL
+        let mut req = Vec::with_capacity(16 + path_len as usize);
+        req.extend_from_slice(&sample_rate.to_le_bytes());
+        req.extend_from_slice(&channels.to_le_bytes());
+        req.extend_from_slice(&volume.to_le_bytes());
+        req.extend_from_slice(&path_len.to_le_bytes());
+        req.extend_from_slice(path_bytes);
+        req.push(0);
+
+        let (status, _) = self.send_request(CMD_AUDIO_PLAY, &req)?;
+        if status == VD_STATUS_STALE_EPOCH {
+            return Err(Self::stale_epoch_error(CMD_AUDIO_PLAY));
+        }
+        if status == VD_STATUS_BUSY {
+            return Ok(AudioPlayStatus::Busy);
+        }
+        if status != crate::hal::common::AK_SUCCESS_I32 {
+            return Err(PlatformError::HardwareFailure(format!(
+                "CMD_AUDIO_PLAY failed with status {status}"
+            )));
+        }
+        Ok(AudioPlayStatus::Accepted)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::test_helpers::FakeDaemon;
+    use super::super::{AnykaIpc, CMD_AUDIO_PLAY, VD_STATUS_BUSY};
+    use super::*;
+    use crate::hal::common::AK_SUCCESS_I32;
+    use std::sync::{Arc, Mutex};
+
+    #[test]
+    fn test_audio_play_encodes_wire_and_accepts() {
+        let captured = Arc::new(Mutex::new((0i32, Vec::new())));
+        let sink = Arc::clone(&captured);
+        let daemon = FakeDaemon::start(move |cmd, req| {
+            *sink.lock().unwrap() = (cmd, req.to_vec());
+            (AK_SUCCESS_I32, vec![])
+        });
+        let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+        ipc.set_epochs_for_test(1, 1);
+
+        let status = ipc
+            .audio_play("/tmp/a.raw", 8000, 1, 3)
+            .expect("play should succeed");
+        assert_eq!(status, AudioPlayStatus::Accepted);
+
+        let (cmd, req) = captured.lock().unwrap().clone();
+        assert_eq!(cmd, CMD_AUDIO_PLAY);
+        assert_eq!(&req[0..4], &8000u32.to_le_bytes());
+        assert_eq!(&req[4..8], &1u32.to_le_bytes());
+        assert_eq!(&req[8..12], &3i32.to_le_bytes());
+        let path_len = u32::from_le_bytes(req[12..16].try_into().unwrap());
+        assert_eq!(path_len, 11); // "/tmp/a.raw\0"
+        assert_eq!(&req[16..27], b"/tmp/a.raw\0");
+    }
+
+    #[test]
+    fn test_audio_play_busy_is_ok_outcome() {
+        let daemon = FakeDaemon::start(|_cmd, _req| (VD_STATUS_BUSY, vec![]));
+        let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+        ipc.set_epochs_for_test(1, 1);
+
+        let status = ipc
+            .audio_play("/tmp/a.raw", 8000, 1, 3)
+            .expect("busy is not an error");
+        assert_eq!(status, AudioPlayStatus::Busy);
     }
 }

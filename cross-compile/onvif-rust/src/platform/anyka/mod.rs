@@ -16,6 +16,7 @@ pub mod network_info;
 pub(crate) mod night_mode;
 pub mod ptz_actor;
 pub mod ptz_control;
+pub mod sound;
 pub mod supervisor;
 mod video_encoder;
 pub use video_encoder::StreamOpenParams;
@@ -390,11 +391,12 @@ impl AnykaPlatform {
     pub fn spawn_supervisor(
         self: &Arc<Self>,
         shutdown: broadcast::Receiver<()>,
+        on_available: Option<Arc<dyn Fn() + Send + Sync>>,
     ) -> PlatformResult<(watch::Receiver<Availability>, JoinHandle<()>)> {
         let (tx, rx) = watch::channel(Availability::Unavailable);
         let target: Arc<dyn AttachTarget> = Arc::new(PlatformAttachTarget::new(Arc::clone(self))?);
         let handle = tokio::spawn(async move {
-            run_supervisor(target, &tx, shutdown).await;
+            run_supervisor(target, &tx, shutdown, on_available).await;
         });
         Ok((rx, handle))
     }
@@ -406,9 +408,14 @@ impl AnykaPlatform {
         self.initialized.store(false, Ordering::SeqCst);
     }
 
-    /// The shared IPC client, for the supervisor.
+    /// The shared IPC client, for the supervisor and event-audio playback.
     pub(super) fn ipc(&self) -> &Arc<AnykaIpc> {
         &self.ipc
+    }
+
+    /// Clone of the IPC client for subsystems that need their own `Arc`.
+    pub fn ipc_client(&self) -> Arc<AnykaIpc> {
+        Arc::clone(&self.ipc)
     }
 
     /// Stop any running OSD tick and bring up a fresh one against the live VI.

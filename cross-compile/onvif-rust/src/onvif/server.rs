@@ -204,6 +204,8 @@ pub struct OnvifServer {
     rate_limiter: Arc<RateLimiter>,
     /// Optional diagnostics state. `None` disables the /api routes entirely.
     diagnostics: Option<Arc<crate::diagnostics::state::DiagnosticsState>>,
+    /// Event-audio player for the sound REST routes; `None` until `with_sound`.
+    sound: Option<crate::platform::sound::SharedSoundPlayer>,
 }
 
 /// Validate security configuration for TLS and authentication.
@@ -311,6 +313,7 @@ impl OnvifServer {
             memory_monitor,
             rate_limiter,
             diagnostics: None,
+            sound: None,
         })
     }
 
@@ -387,6 +390,7 @@ impl OnvifServer {
             memory_monitor: Arc::clone(app_state.memory_monitor()),
             rate_limiter: Arc::clone(app_state.rate_limiter()),
             diagnostics: None,
+            sound: None,
         })
     }
 
@@ -400,6 +404,15 @@ impl OnvifServer {
         diagnostics: Arc<crate::diagnostics::state::DiagnosticsState>,
     ) -> Self {
         self.diagnostics = Some(diagnostics);
+        self
+    }
+
+    /// Attach the event-audio player for `GET /api/sound` and `POST /api/sound/play`.
+    ///
+    /// Without it the routes still answer, reporting sound as unavailable.
+    #[must_use]
+    pub fn with_sound(mut self, player: Option<crate::platform::sound::SharedSoundPlayer>) -> Self {
+        self.sound = player;
         self
     }
 
@@ -652,6 +665,14 @@ impl OnvifServer {
                         .put(crate::diagnostics::snmp::handle_put_snmp)
                         .layer(timeout()),
                 );
+                api = api.route(
+                    "/sound",
+                    get(crate::diagnostics::sound::handle_get_sound).layer(timeout()),
+                );
+                api = api.route(
+                    "/sound/play",
+                    post(crate::diagnostics::sound::handle_play_sound).layer(timeout()),
+                );
             }
             let api = api
                 .fallback(|| async { StatusCode::NOT_FOUND })
@@ -674,7 +695,8 @@ impl OnvifServer {
                     crate::diagnostics::snmp::SnmpApiState::from_update_root(
                         self.config.update_root.clone(),
                     ),
-                )));
+                )))
+                .layer(axum::Extension(self.sound.clone()));
             app = app.nest("/api", api);
         }
 
@@ -749,6 +771,11 @@ impl OnvifServer {
 async fn validate_content_type(request: Request, next: Next) -> Response {
     // Only validate POST requests
     if request.method() != Method::POST {
+        return next.run(request).await;
+    }
+
+    // REST /api routes use JSON; SOAP Content-Type rules apply to ONVIF only.
+    if request.uri().path().starts_with("/api/") {
         return next.run(request).await;
     }
 
@@ -1769,6 +1796,54 @@ mod tests {
 
         let response = app.oneshot(request).await.unwrap();
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn test_get_sound_requires_auth() {
+        use axum::body::Body;
+        use axum::http::{Request, StatusCode};
+        use tower::ServiceExt;
+
+        let app = make_diagnostics_app(true);
+
+        let request = Request::builder()
+            .method("GET")
+            .uri("/api/sound")
+            .body(Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    /// POST /api/sound/play uses JSON; SOAP Content-Type middleware must not 415 it.
+    #[tokio::test]
+    async fn test_post_sound_play_accepts_json_content_type() {
+        use axum::body::Body;
+        use axum::http::{Request, StatusCode};
+        use tower::ServiceExt;
+
+        let app = make_diagnostics_app_with_user(
+            true,
+            "admin",
+            crate::config::UserLevel::Administrator,
+            0,
+        );
+
+        let request = Request::builder()
+            .method("POST")
+            .uri("/api/sound/play")
+            .header("Authorization", "Basic YWRtaW46cGFzcw==") // admin:pass
+            .header("Content-Type", "application/json")
+            .body(Body::from(r#"{"event":"boot_ready"}"#))
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_ne!(
+            response.status(),
+            StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            "JSON POST /api/sound/play must not be rejected by SOAP Content-Type gate"
+        );
     }
 
     #[tokio::test]

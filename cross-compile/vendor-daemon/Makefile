@@ -90,6 +90,7 @@ LDFLAGS = \
 	  -lmpi_osd \
 	  -lmpi_venc \
 	  -lplat_ai \
+	  -lplat_ao \
 	  -lmpi_aenc \
 	  -lplat_common \
 	  -lakispsdk \
@@ -111,7 +112,7 @@ BUILD_DIR = build
 SRCS      = $(wildcard $(SRC_DIR)/*.c)
 OBJS      = $(SRCS:$(SRC_DIR)/%.c=$(BUILD_DIR)/%.o)
 
-.PHONY: all release debug clean install sync-libs
+.PHONY: all release debug clean install sync-libs test
 
 all: $(BUILD_DIR)/$(TARGET)
 
@@ -120,6 +121,20 @@ release:
 
 debug:
 	$(MAKE) BUILD_MODE=debug all
+
+HOST_CC ?= gcc
+HOST_TESTS = test_sound_parse test_push_slots test_ring_epoch
+
+# Host-side unit tests. test_push_slots and test_ring_epoch #include the
+# translation unit under test, so only test_sound_parse needs a second source.
+test: $(addprefix $(BUILD_DIR)/,$(HOST_TESTS))
+	@for t in $^; do echo "  $$t" && $$t || exit 1; done
+
+$(BUILD_DIR)/test_sound_parse: src/sound.c
+
+$(BUILD_DIR)/test_%: tests/test_%.c
+	@mkdir -p $(BUILD_DIR)
+	$(HOST_CC) -std=gnu99 -Wall -Wextra -Isrc -Iinclude -o $@ $^
 
 $(BUILD_DIR)/$(TARGET): $(OBJS)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)

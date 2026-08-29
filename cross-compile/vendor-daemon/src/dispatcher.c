@@ -57,6 +57,7 @@ static int is_lifecycle_cmd(int32_t cmd)
     case CMD_AENC_SET_ATTR:
     case CMD_AUDIO_START_PUSH:
     case CMD_AUDIO_STOP_PUSH:
+    case CMD_AUDIO_PLAY:
     case CMD_SHUTDOWN:
         return 1;
     default:
@@ -295,6 +296,11 @@ int process_request(int fd)
         break;
     case CMD_AUDIO_STOP_PUSH:
         ret = handle_audio_stop_push(fd, req_buf, req_len);
+        break;
+
+    /* --- Audio playback --- */
+    case CMD_AUDIO_PLAY:
+        ret = handle_audio_play(fd, req_buf, req_len);
         break;
 
     /* --- Audio Input --- */

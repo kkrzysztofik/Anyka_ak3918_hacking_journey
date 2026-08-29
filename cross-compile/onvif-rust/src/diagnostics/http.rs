@@ -98,6 +98,8 @@ fn required_level_for_path(path: &str) -> AuthLevel {
     match path {
         "/logs" | "/logs/" => AuthLevel::Administrator,
         "/update" | "/update/" => AuthLevel::Administrator,
+        "/sound" | "/sound/" => AuthLevel::Administrator,
+        "/sound/play" | "/sound/play/" => AuthLevel::Administrator,
         "/diagnostics" | "/diagnostics/" => AuthLevel::User,
         // Fail closed: unknown routes require Administrator until explicitly opened.
         _ => AuthLevel::Administrator,
@@ -297,6 +299,19 @@ mod tests {
     #[test]
     fn test_required_level_for_path_update_requires_admin() {
         assert_eq!(required_level_for_path("/update"), AuthLevel::Administrator);
+    }
+
+    #[test]
+    fn test_required_level_for_path_sound_requires_admin() {
+        assert_eq!(required_level_for_path("/sound"), AuthLevel::Administrator);
+    }
+
+    #[test]
+    fn test_required_level_for_path_sound_play_requires_admin() {
+        assert_eq!(
+            required_level_for_path("/sound/play"),
+            AuthLevel::Administrator
+        );
     }
 
     #[test]

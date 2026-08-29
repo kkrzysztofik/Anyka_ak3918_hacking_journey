@@ -6,6 +6,7 @@
 #include "protocol.h"
 #include "log.h"
 #include "globals.h"
+#include "sound.h"
 #include "ak_ai.h"
 #include "ak_aenc.h"
 
@@ -135,4 +136,26 @@ int handle_aenc_set_attr(int fd, const uint8_t *req, uint32_t req_len)
     attr.aac_head = (enum aenc_aac_attr)aac_head_i32;
     int ret = ak_aenc_set_attr(handle, &attr);
     return send_response(fd, ret, NULL, 0);
+}
+
+/*
+ * CMD_AUDIO_PLAY — wire: [u32 rate][u32 ch][i32 volume][u32 path_len][path].
+ * Async: STATUS_OK means "accepted", not "finished". VD_STATUS_BUSY means a
+ * clip is already playing and this one was dropped — expected, not a fault.
+ */
+int handle_audio_play(int fd, const uint8_t *req, uint32_t req_len)
+{
+    struct sound_req sr;
+    if (sound_parse_play_req(req, req_len, &sr) != 0) {
+        log_warn("[sound] play: malformed request (%u bytes)", req_len);
+        return send_response(fd, STATUS_ERROR, NULL, 0);
+    }
+    int rc = sound_play_async(&sr);
+    if (rc == 1) {
+        log_debug("[sound] play: busy, dropping %s", sr.path);
+        return send_response(fd, VD_STATUS_BUSY, NULL, 0);
+    }
+    if (rc < 0)
+        return send_response(fd, STATUS_ERROR, NULL, 0);
+    return send_response(fd, STATUS_OK, NULL, 0);
 }

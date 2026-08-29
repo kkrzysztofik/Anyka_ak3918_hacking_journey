@@ -43,5 +43,10 @@ mod anyka;
 pub use common::*;
 pub use stub::*;
 
+/// Event-audio player — available on stub/host builds so diagnostics can name
+/// `SharedSoundPlayer` without the full Anyka platform re-export.
+#[cfg(use_stubs)]
+pub use anyka::sound;
+
 #[cfg(not(use_stubs))]
 pub use anyka::*;

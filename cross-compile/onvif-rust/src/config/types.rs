@@ -9,6 +9,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::config::sound::SoundConfig;
 use crate::onvif::types::common::DiscoveryMode;
 use crate::osd::format::{DateFormat, TimeFormat};
 use crate::osd::layout::Corner;
@@ -47,6 +48,9 @@ pub struct AppConfig {
     /// On-screen display (camera name + timestamp burned into video).
     #[serde(default)]
     pub osd: OsdConfig,
+    /// Event-triggered speaker chimes (`[sound]`).
+    #[serde(default)]
+    pub sound: SoundConfig,
 }
 
 impl Default for AppConfig {
@@ -79,6 +83,7 @@ impl Default for AppConfig {
             stream_profile_3: p3,
             stream_profile_4: p4,
             osd: OsdConfig::default(),
+            sound: SoundConfig::default(),
         }
     }
 }

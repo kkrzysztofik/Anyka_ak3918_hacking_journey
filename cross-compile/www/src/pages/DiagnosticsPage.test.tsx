@@ -7,18 +7,24 @@
 import { screen } from '@testing-library/react';
 import { waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { toast } from 'sonner';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { UseDiagnosticsResult } from '@/hooks/useDiagnostics';
 import { useDiagnostics } from '@/hooks/useDiagnostics';
 import type { Diagnostics } from '@/services/diagnosticsService';
 import { getLogs } from '@/services/diagnosticsService';
+import { getSoundStatus, playSound } from '@/services/soundService';
 import { renderWithProviders } from '@/test/componentTestHelpers';
 
 import DiagnosticsPage from './DiagnosticsPage';
 
 vi.mock('@/hooks/useDiagnostics');
 vi.mock('@/services/diagnosticsService');
+vi.mock('@/services/soundService');
+vi.mock('sonner', () => ({
+  toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() },
+}));
 
 const BASE_DIAG: Diagnostics = {
   status: 'healthy',
@@ -67,6 +73,14 @@ describe('DiagnosticsPage', () => {
   beforeEach(() => {
     vi.mocked(useDiagnostics).mockReturnValue(makeResult());
     vi.mocked(getLogs).mockResolvedValue([]);
+    vi.mocked(getSoundStatus).mockResolvedValue({
+      enabled: true,
+      events: [
+        { id: 'boot_ready', clip: 'boot.wav' },
+        { id: 'motion_detected', clip: 'motion.wav' },
+      ],
+    });
+    vi.mocked(playSound).mockResolvedValue('accepted');
   });
 
   it('test_DiagnosticsPage_render_shows_title_and_description', () => {
@@ -694,6 +708,116 @@ describe('DiagnosticsPage', () => {
       vi.mocked(useDiagnostics).mockReturnValue(makeResult({ ptz: null }));
       renderWithProviders(<DiagnosticsPage />);
       expect(screen.queryByTestId('diagnostics-ptz-title')).not.toBeInTheDocument();
+    });
+  });
+
+  describe('Sound test card', () => {
+    it('should render sound card controls when sound is enabled with events', async () => {
+      renderWithProviders(<DiagnosticsPage />);
+
+      expect(await screen.findByTestId('sound-card')).toBeInTheDocument();
+      expect(screen.getByTestId('sound-event-select')).toBeInTheDocument();
+      expect(screen.getByTestId('sound-play-button')).toBeInTheDocument();
+    });
+
+    it('should disable play and show message when sound is disabled', async () => {
+      vi.mocked(getSoundStatus).mockResolvedValue({
+        enabled: false,
+        events: [{ id: 'boot_ready', clip: 'boot.wav' }],
+      });
+
+      renderWithProviders(<DiagnosticsPage />);
+
+      expect(await screen.findByTestId('sound-disabled-message')).toBeInTheDocument();
+      expect(screen.getByTestId('sound-play-button')).toBeDisabled();
+    });
+
+    it('should disable play and show message when events are empty even if enabled', async () => {
+      vi.mocked(getSoundStatus).mockResolvedValue({
+        enabled: true,
+        events: [],
+      });
+
+      renderWithProviders(<DiagnosticsPage />);
+
+      expect(await screen.findByTestId('sound-disabled-message')).toBeInTheDocument();
+      expect(screen.getByTestId('sound-play-button')).toBeDisabled();
+    });
+
+    it('should call playSound with the selected event and toast success', async () => {
+      const user = userEvent.setup();
+      renderWithProviders(<DiagnosticsPage />);
+
+      await screen.findByTestId('sound-play-button');
+      await user.click(screen.getByTestId('sound-play-button'));
+
+      await waitFor(() => {
+        expect(playSound).toHaveBeenCalledWith('boot_ready');
+        expect(toast.success).toHaveBeenCalledWith(expect.stringMatching(/Playing/i));
+      });
+    });
+
+    it('should toast info when playSound resolves debounced', async () => {
+      vi.mocked(playSound).mockResolvedValue('debounced');
+      const user = userEvent.setup();
+      renderWithProviders(<DiagnosticsPage />);
+
+      await screen.findByTestId('sound-play-button');
+      await user.click(screen.getByTestId('sound-play-button'));
+
+      await waitFor(() => {
+        expect(toast.info).toHaveBeenCalledWith(expect.stringMatching(/debounce/i));
+      });
+    });
+
+    it('should toast error when playSound rejects as busy', async () => {
+      vi.mocked(playSound).mockRejectedValue(new Error('busy'));
+      const user = userEvent.setup();
+      renderWithProviders(<DiagnosticsPage />);
+
+      await screen.findByTestId('sound-play-button');
+      await user.click(screen.getByTestId('sound-play-button'));
+
+      await waitFor(() => {
+        expect(toast.error).toHaveBeenCalledWith(expect.stringMatching(/busy/i));
+      });
+    });
+
+    it('should toast error when playSound rejects with a generic error', async () => {
+      vi.mocked(playSound).mockRejectedValue(new Error('speaker offline'));
+      const user = userEvent.setup();
+      renderWithProviders(<DiagnosticsPage />);
+
+      await screen.findByTestId('sound-play-button');
+      await user.click(screen.getByTestId('sound-play-button'));
+
+      await waitFor(() => {
+        expect(toast.error).toHaveBeenCalledWith(expect.stringMatching(/speaker offline/i));
+      });
+    });
+
+    it('should fall back to the first event when the selected event disappears from config', async () => {
+      const user = userEvent.setup();
+      const { queryClient } = renderWithProviders(<DiagnosticsPage />);
+
+      await screen.findByTestId('sound-event-select');
+      await user.click(screen.getByTestId('sound-event-select'));
+      await user.click(screen.getByTestId('sound-event-option-motion_detected'));
+
+      vi.mocked(getSoundStatus).mockResolvedValue({
+        enabled: true,
+        events: [{ id: 'boot_ready', clip: 'boot.wav' }],
+      });
+      await queryClient.invalidateQueries({ queryKey: ['sound-status'] });
+      await waitFor(() => {
+        expect(screen.getByTestId('sound-play-button')).not.toBeDisabled();
+      });
+
+      await user.click(screen.getByTestId('sound-play-button'));
+
+      await waitFor(() => {
+        expect(playSound).toHaveBeenCalledWith('boot_ready');
+      });
     });
   });
 });

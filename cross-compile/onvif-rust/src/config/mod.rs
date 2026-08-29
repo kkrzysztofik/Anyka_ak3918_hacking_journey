@@ -39,6 +39,7 @@ mod persistence;
 pub mod profiles;
 mod runtime;
 pub mod snmp;
+pub mod sound;
 mod storage;
 pub mod types;
 pub mod users;

@@ -310,7 +310,7 @@ async fn test_spawn_supervisor_loss_receiver_taken_returns_initialization_failed
     );
     let (_shutdown_tx, shutdown_rx) = tokio::sync::broadcast::channel(1);
     let err = platform
-        .spawn_supervisor(shutdown_rx)
+        .spawn_supervisor(shutdown_rx, None)
         .expect_err("second ownership of loss rx must fail without panicking");
     match err {
         PlatformError::InitializationFailed(msg) => {
@@ -333,7 +333,7 @@ async fn test_spawn_supervisor_success_shuts_down_on_signal() {
     ));
     let (shutdown_tx, shutdown_rx) = tokio::sync::broadcast::channel(1);
     let (availability, handle) = platform
-        .spawn_supervisor(shutdown_rx)
+        .spawn_supervisor(shutdown_rx, None)
         .expect("first spawn must succeed");
 
     assert_eq!(

@@ -53,6 +53,8 @@ pub struct PlatformInit {
     pub availability: Option<tokio::sync::watch::Receiver<Availability>>,
     /// Supervisor task; awaited on shutdown before platform teardown.
     pub supervisor_task: Option<JoinHandle<()>>,
+    /// Shared event-audio player; `None` on stub / non-Anyka / degraded bring-up.
+    pub sound_player: Option<crate::platform::sound::SharedSoundPlayer>,
 }
 
 /// Shared application state for dependency injection.
@@ -1063,6 +1065,7 @@ impl Application {
             platform,
             availability,
             supervisor_task,
+            sound_player,
         } = match platform_source {
             PlatformSource::Detect => {
                 Self::init_platform(
@@ -1081,6 +1084,7 @@ impl Application {
                     platform: Some(p),
                     availability: None,
                     supervisor_task: None,
+                    sound_player: None,
                 }
             }
         };
@@ -1181,7 +1185,8 @@ impl Application {
         let server = Arc::new(
             OnvifServer::with_app_state(server_config, app_state.clone())
                 .map_err(|e| StartupError::Network(e.to_string()))?
-                .with_diagnostics(Arc::clone(&diagnostics)),
+                .with_diagnostics(Arc::clone(&diagnostics))
+                .with_sound(sound_player),
         );
 
         progress.complete_phase();
@@ -1335,12 +1340,44 @@ impl Application {
                     // block on it, which is what lets the device service answer while
                     // the video pipeline is still down.
                     let platform = Arc::new(p);
-                    let (availability, supervisor_task) =
-                        platform.spawn_supervisor(shutdown_rx).map_err(|e| {
+                    let (sound_cfg, update_root) = {
+                        let c = config_runtime.read();
+                        (c.sound.clone(), c.update.root.clone())
+                    };
+                    let sound_enabled = sound_cfg.enabled;
+                    let sound_player = crate::platform::sound::build_shared_player(
+                        sound_cfg,
+                        platform.ipc_client(),
+                    );
+                    let boot_player = Arc::clone(&sound_player);
+                    let on_available: Arc<dyn Fn() + Send + Sync> = Arc::new(move || {
+                        crate::platform::sound::play_event(&boot_player, "boot_ready");
+                    });
+                    // Extra shutdown subscriptions for the event-audio watchers
+                    // before the supervisor consumes `shutdown_rx`.
+                    let link_shutdown = shutdown_rx.resubscribe();
+                    let trial_shutdown = shutdown_rx.resubscribe();
+                    let (availability, supervisor_task) = platform
+                        .spawn_supervisor(shutdown_rx, Some(on_available))
+                        .map_err(|e| {
                             StartupError::Platform(format!(
                                 "failed to start attach supervisor: {e}"
                             ))
                         })?;
+                    if sound_enabled {
+                        let link_player = Arc::clone(&sound_player);
+                        tokio::spawn(crate::platform::sound::run_link_watcher(
+                            link_player,
+                            "wlan0".to_string(),
+                            link_shutdown,
+                        ));
+                        let trial_player = Arc::clone(&sound_player);
+                        tokio::spawn(crate::platform::sound::run_trial_watcher(
+                            trial_player,
+                            std::path::PathBuf::from(update_root),
+                            trial_shutdown,
+                        ));
+                    }
                     crate::platform::supervisor::watch_for_fatal(availability.clone(), || {
                         tracing::error!(
                             event = "attach_given_up_fatal",
@@ -1355,6 +1392,7 @@ impl Application {
                         platform: Some(platform as Arc<dyn Platform>),
                         availability: Some(availability),
                         supervisor_task: Some(supervisor_task),
+                        sound_player: Some(sound_player),
                     });
                 }
                 Err(e) => {
@@ -1382,6 +1420,7 @@ impl Application {
                         platform: Some(Arc::new(stub_platform) as Arc<dyn Platform>),
                         availability: None,
                         supervisor_task: None,
+                        sound_player: None,
                     })
                 }
                 Err(e) => {
