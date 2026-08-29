@@ -547,7 +547,7 @@ printf 'user = "admin:%s"\n' "$CAMERA_PASS" \
 uv run python3 scripts/debugging/cam_exec.py --host 192.168.2.198 \
   'cat /mnt/anyka_hack/active; echo; ls /mnt/anyka_hack/state/trial-* 2>/dev/null; echo TRIAL_CHECK_DONE; ls -l /tmp/vendor-frame-ring.shm; a=$(cat /mnt/anyka_hack/active); ls /mnt/anyka_hack/slots/$a/vendor-daemon/lib/libplat_ao.so; ls /mnt/anyka_hack/slots/$a/onvif/sounds/'
 # expect: active = a (flipped from b); no trial-* before TRIAL_CHECK_DONE;
-#         shm exactly 2097216; libplat_ao.so present; four .raw clips
+#         shm exactly 2097216; libplat_ao.so present; FOUR .raw clips
 
 # 5. ports
 for p in 80 554 8080; do nc -z -w3 192.168.2.198 $p && echo "$p up" || echo "$p DOWN"; done
@@ -727,7 +727,8 @@ printf 'user = "admin:%s"\n' "$CAMERA_PASS" \
 uv run python3 scripts/debugging/cam_exec.py --host 127.0.0.1 --port 12446 \
   'ifconfig wlan0 | head -2 | tail -1; cat /mnt/anyka_hack/active; echo; ls /mnt/anyka_hack/state/trial-* 2>/dev/null; echo TRIAL_CHECK_DONE; ls -l /tmp/vendor-frame-ring.shm; a=$(cat /mnt/anyka_hack/active); ls /mnt/anyka_hack/slots/$a/vendor-daemon/lib/libplat_ao.so; ls /mnt/anyka_hack/slots/$a/onvif/sounds/; grep -c "^\[sound\]" /mnt/anyka_hack/onvif/config.toml'
 # expect: wlan0 still .146; active = a; no trial-*; shm 2097216;
-#         libplat_ao.so present; four .raw clips; sound count = 1
+#         libplat_ao.so present (regression check -- it was already there);
+#         FOUR .raw clips, against ZERO before the upgrade; sound count = 1
 
 # 5. ports
 ssh -o BatchMode=yes root@192.168.3.137 \

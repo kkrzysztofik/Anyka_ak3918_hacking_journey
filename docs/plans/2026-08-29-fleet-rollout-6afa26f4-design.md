@@ -59,13 +59,19 @@ telnet is unreliable. Confirm during its task.)
 
 What the rollout actually delivers:
 
-**The audio playback stack**, which is genuinely absent. On `.146` and `.127` the
-active slot has no `vendor-daemon/lib/libplat_ao.so` and no `onvif/sounds/`
-directory at all. Ships: `ffdcac4d` (the library), `2a925f99`/`ac1ab1a9` (clips in
-the bundle plus a build-time guard on the full set), `acf8472f` (SPK_PA is
-active-high *shutdown*, not enable), `bcf6b1ac` (mono → stereo before
-`ak_ao_send_frame`), `57c9060d` (abort when the amplifier will not enable),
-`bc316423`/`69a9f84b` (clips regenerated with the corrected fade).
+**The audio clips.** Measured on `.146`, `.121` and `.127` on 2026-08-29:
+`slots/<active>/vendor-daemon/lib/libplat_ao.so` **is present** — it went out with
+the 2026-08-27 shm-slot deploy — but `slots/<active>/onvif/sounds/` holds
+**zero `.raw` files** on all three. The library and the daemon-side support are
+already there; the clips they would play are not. `2a925f99`/`ac1ab1a9` are
+exactly the fix (clips packaged in bundles, plus a build-time guard on the full
+set), and they are what this rollout carries.
+
+Alongside them: `acf8472f` (SPK_PA is active-high *shutdown*, not enable),
+`bcf6b1ac` (mono → stereo before `ak_ao_send_frame`), `57c9060d` (abort when the
+amplifier will not enable), `bc316423`/`69a9f84b` (clips regenerated with the
+corrected fade). Whether any of these are already in the deployed `-dirty` builds
+is **not knowable** — which is itself the argument below.
 
 **Version hygiene.** Every camera runs a `-dirty` build whose contents are not
 recoverable from git — the paragraph above had to be established by measuring a
@@ -246,9 +252,11 @@ whole audio chain — IPC verb, AO worker, amplifier polarity, clip decode — i
 way no remote check can.
 
 For the remote three, the reachable proxy is structural rather than audible:
-`slots/<active>/vendor-daemon/lib/libplat_ao.so` and
-`slots/<active>/onvif/sounds/*.raw` must exist after the upgrade — both are absent
-today — and `POST /api/sound/play` must return success.
+`slots/<active>/onvif/sounds/` must hold **four `.raw` files** after the upgrade,
+against **zero** today — that count is the single clearest before/after signal in
+the whole rollout — and `POST /api/sound/play` must return success.
+`libplat_ao.so` is checked too, but as a regression check only: it is already
+present, so its presence proves nothing new, only that nothing was lost.
 
 ## Order
 
