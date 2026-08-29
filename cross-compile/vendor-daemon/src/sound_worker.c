@@ -41,7 +41,14 @@ static struct sound_req current;
  * with no diagnostic. */
 #define SPK_PA_SYSFS        "/sys/user-gpio/SPK_PA"
 
-static void spk_amp_enable(void)
+/* Returns 0 on success, -1 if the amplifier could not be enabled.
+ *
+ * The caller must abort on failure. Playing into a disabled amplifier is
+ * silent but reports success at every layer -- ak_ao accepts the frames, the
+ * drain reaches FINISHED, and the worker logs event=sound_played -- which is
+ * exactly the blind spot that made the SPK_PA polarity bug take a day and a
+ * teardown to find. Do not let it fail quietly a second time. */
+static int spk_amp_enable(void)
 {
     /* open()+write() rather than stdio: O_WRONLY without O_CREAT makes it
      * impossible to create a file here (fopen("w") implies O_CREAT 0666, which
@@ -50,13 +57,17 @@ static void spk_amp_enable(void)
      * kernel handler parses independently. */
     int fd = open(SPK_PA_SYSFS, O_WRONLY);
     if (fd < 0) {
-        log_warn("[sound] cannot open %s", SPK_PA_SYSFS);
-        return;
+        log_error("[sound] cannot open %s: %s", SPK_PA_SYSFS, strerror(errno));
+        return -1;
     }
     if (write(fd, "0", 1) != 1) {
-        log_warn("[sound] cannot enable amplifier via %s", SPK_PA_SYSFS);
+        log_error("[sound] cannot enable amplifier via %s: %s",
+                  SPK_PA_SYSFS, strerror(errno));
+        close(fd);
+        return -1;
     }
     close(fd);
+    return 0;
 }
 
 static long elapsed_ms(const struct timespec *start)
@@ -135,7 +146,14 @@ static void *sound_thread(void *arg)
     size_t n;
     unsigned long long sent = 0;
 
-    spk_amp_enable();
+    /* Abort rather than pump PCM into a silent output stage: every layer above
+     * the amplifier would still report success. */
+    if (spk_amp_enable() != 0) {
+        ak_ao_enable_speaker(ao, AUDIO_FUNC_DISABLE);
+        ak_ao_close(ao);
+        fclose(fp);
+        goto done;
+    }
 
     while ((n = fread(buf, 1, sizeof(buf), fp)) > 0) {
         if (elapsed_ms(&start) > SOUND_MAX_MS) {

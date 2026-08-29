@@ -62,10 +62,10 @@ DEFAULT_PEAK_DB = -2.0
 # starts to sound squashed.
 DEFAULT_COMPRESS = "acompressor=threshold=-18dB:ratio=4:attack=5:release=50"
 
-# mp3_44100_128 works on any account tier. pcm_16000 needs a paid plan, but it
-# is already our target rate and skips the mp3 encode/decode, so prefer it if
-# the account allows.
-DEFAULT_FORMAT = "mp3_44100_128"
+# pcm_16000 is available from the Free tier up (only 44.1 kHz PCM needs Pro),
+# it is already our target rate, and it skips the mp3 encode/decode so no lossy
+# generation sits between the model and the DAC. Preferred.
+DEFAULT_FORMAT = "pcm_16000"
 
 # Short phrases for a small speaker; filenames match [sound.events] in config.toml.
 CLIPS: dict[str, str] = {
@@ -126,33 +126,50 @@ def api_request(path: str, key: str, payload: dict | None = None) -> bytes:
 def list_voices(key: str) -> None:
     """List voices, flagging which ones a free account may actually use.
 
-    Free accounts can synthesise with `premade` voices but not with `library`
-    ones added from the Voice Library -- those return "Free users cannot use
-    library voices via the API". The category is the only way to tell them
-    apart before spending a request, so show it and sort usable ones first.
+    Free accounts cannot synthesise with Voice Library voices -- those fail at
+    request time with "Free users cannot use library voices via the API".
+    Eligibility is `sharing.free_users_allowed`, not `category`: category
+    describes what kind of voice it is (premade/cloned/professional), which is
+    a different question and gets the answer wrong for shared voices.
+
+    Uses the v2 endpoint, which paginates; v1 silently returns only the first
+    page, so a voice you were looking for could simply not appear.
     """
-    voices = json.loads(api_request("/voices", key))["voices"]
-    usable = {"premade", "cloned", "generated", "professional"}
+    voices: list[dict] = []
+    page: str | None = None
+    while True:
+        q = "/v2/voices?page_size=100" + (f"&next_page_token={page}" if page else "")
+        data = json.loads(api_request(q, key))
+        voices.extend(data.get("voices", []))
+        if not data.get("has_more"):
+            break
+        page = data.get("next_page_token")
+        if not page:
+            break
 
-    print(f"{'':3} {'voice_id':24} {'name':22} {'category':13} labels")
-    for v in sorted(voices, key=lambda x: x.get("category") != "premade"):
-        cat = v.get("category", "?")
-        mark = "ok " if cat in usable else "PAID"
+    def free_ok(v: dict) -> bool:
+        sharing = v.get("sharing") or {}
+        # Absent sharing block => not a shared/library voice => usable.
+        return bool(sharing.get("free_users_allowed", True))
+
+    print(f"{'':4} {'voice_id':24} {'name':22} {'category':13} labels")
+    for v in sorted(voices, key=lambda x: not free_ok(x)):
         labels = ", ".join(f"{k}={x}" for k, x in (v.get("labels") or {}).items())
-        print(f"{mark:3} {v['voice_id']:24} {v.get('name', '?'):22} {cat:13} {labels}")
+        print(f"{'ok' if free_ok(v) else 'PAID':4} {v['voice_id']:24} "
+              f"{v.get('name', '?'):22} {v.get('category', '?'):13} {labels}")
 
-    print("\n'ok' = usable on a free account. 'PAID' = library voice, needs a "
-          "paid plan.\neleven_multilingual_v2 speaks Polish on any voice; "
-          "prosody varies, so try a few.")
+    print(f"\n{len(voices)} voices. 'ok' = free accounts may synthesise with it; "
+          "'PAID' = library voice needing a paid plan.\n"
+          "eleven_multilingual_v2 speaks Polish on any voice, but prosody "
+          "varies -- try a few.")
 
 
 def synthesize(text: str, *, key: str, voice: str, model: str, fmt: str) -> bytes:
     """Fetch audio in `fmt`.
 
-    mp3_44100_128 works on every account tier. The pcm_* formats need a paid
-    plan, but pcm_16000 is worth using if you have one: it is already our target
-    rate and skips the mp3 encode/decode round-trip, so no lossy generation
-    sits between the model and the DAC.
+    pcm_16000 is the default: available from the Free tier up (only 44.1 kHz PCM
+    requires Pro), already our target rate, and free of the mp3 encode/decode
+    round-trip. mp3_44100_128 remains available via --format as a fallback.
     """
     return api_request(
         f"/text-to-speech/{voice}?output_format={fmt}",
@@ -246,8 +263,9 @@ def main() -> int:
     p.add_argument("--compress", default=DEFAULT_COMPRESS,
                    help="ffmpeg filter applied before loudnorm; empty string to disable")
     p.add_argument("--format", dest="fmt", default=DEFAULT_FORMAT,
-                   help=f"ElevenLabs output_format (default {DEFAULT_FORMAT}); "
-                        "paid plans can use pcm_16000 to skip the mp3 step")
+                   help=f"ElevenLabs output_format (default {DEFAULT_FORMAT}, "
+                        "which avoids the mp3 round-trip); mp3_44100_128 is the "
+                        "fallback if a plan ever refuses pcm")
     p.add_argument("--list-voices", action="store_true", help="List voices and exit")
     args = p.parse_args()
 
