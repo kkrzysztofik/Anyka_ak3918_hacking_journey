@@ -77,7 +77,7 @@ trust.
 
 **Files:**
 - Run: `scripts/build_upgrade_bundle.sh`
-- Produces: `/tmp/bundle-6afa26f4.tar`
+- Produces: `/tmp/bundle-fleet.tar`
 
 **Step 1: Confirm the tree is clean and on the target commit**
 
@@ -87,9 +87,15 @@ git -C /home/kmk/dev/anyka-dev describe --always --dirty
 ```
 
 Expected: the first command prints nothing (untracked files are fine); the second
-prints exactly `6afa26f4`.
+prints a clean hash with **no `-dirty` suffix**.
 
-**STOP if it prints `6afa26f4-dirty`.** The entire fleet already runs `-dirty`
+**Record that hash — it is `$STAMP` for the rest of this plan.** It is not
+necessarily `6afa26f4`: the design and plan commits moved `HEAD`, and doc-only
+commits change no binaries, so building from the current clean `HEAD` is correct.
+As of 2026-08-29 it is `b2518aca`. Every gate below compares against `$STAMP`,
+never against a hash written in this document.
+
+**STOP if it prints any `-dirty` suffix.** The entire fleet already runs `-dirty`
 versions, so a dirty stamp defeats every verification gate downstream. If the
 build has already run once in this checkout, reset the artifacts it rewrites:
 
@@ -112,11 +118,11 @@ patch; do not "fix" it by unpinning `tower-http`.
 
 ```bash
 cd /home/kmk/dev/anyka-dev
-rtk ./scripts/build_upgrade_bundle.sh /tmp/bundle-6afa26f4.tar
+rtk ./scripts/build_upgrade_bundle.sh /tmp/bundle-fleet.tar
 ```
 
 Expected: two log steps (`1/2 build ARM payloads`, `2/2 package bundle.tar`) and a
-final line naming `/tmp/bundle-6afa26f4.tar`. Several minutes; the WebUI npm build
+final line naming `/tmp/bundle-fleet.tar`. Several minutes; the WebUI npm build
 dominates.
 
 This is the **gate for the entire rollout**. PR CI never cross-builds ARM
@@ -126,12 +132,14 @@ about the camera target. If this fails, no camera is touched.
 **Step 4: Verify the version stamp**
 
 ```bash
-tar -xOf /tmp/bundle-6afa26f4.tar ./manifest.meta
+tar -xOf /tmp/bundle-fleet.tar ./manifest.meta
 cat /home/kmk/dev/anyka-dev/SD_card_contents/anyka_hack/onvif/.build-version
 ```
 
-Expected: `version=6afa26f4` and `requires_config_schema=1`; `.build-version`
-reading `6afa26f4`.
+Expected: `version=$STAMP` and `requires_config_schema=1`, with `.build-version`
+reading the same `$STAMP`. The two must agree — `build_bundle.sh` reads
+`.build-version` for the manifest precisely so the tar cannot claim a version the
+binary does not report.
 
 **STOP if the version is anything else.** Every gate downstream compares against
 this string.
@@ -142,7 +150,7 @@ This is the actual payload of the rollout, so check it explicitly rather than
 trusting the build.
 
 ```bash
-tar -tf /tmp/bundle-6afa26f4.tar | grep -E 'libplat_ao|sounds/'
+tar -tf /tmp/bundle-fleet.tar | grep -E 'libplat_ao|sounds/'
 ```
 
 Expected, all five:
@@ -162,7 +170,7 @@ bypassed.
 **Step 6: Confirm the size is sane**
 
 ```bash
-ls -lh /tmp/bundle-6afa26f4.tar
+ls -lh /tmp/bundle-fleet.tar
 ```
 
 Expected: roughly 19–20 MB. The device ceiling is 64 MB; over that gets HTTP 413.
@@ -467,10 +475,15 @@ bare `git commit` sweeps the whole tree. Always pass an explicit pathspec.
 git -C /home/kmk/dev/anyka-dev describe --always --dirty
 ```
 
-Expected: a new clean hash, **not** `6afa26f4`. This is fine and expected — the
-commit moved `HEAD`, but `/tmp/bundle-6afa26f4.tar` was already built and stamped
-from `6afa26f4`. Every gate compares against the stamp printed in Task 1 Step 4,
-not against `git describe` at gate time. Do not rebuild.
+Expected: a new clean hash, different from `$STAMP`. This is fine and expected —
+the commit moved `HEAD`, but `/tmp/bundle-fleet.tar` was already built and stamped
+from `$STAMP`. Every gate compares against `$STAMP` as recorded in Task 1, not
+against `git describe` at gate time.
+
+**Do not rebuild to "fix" the mismatch.** Rebuilding here would stamp the bundle
+with a hash whose only difference is this script commit, and would rewrite
+`SD_card_contents/*.bin` — which are tracked, making the tree dirty and costing
+you the clean stamp entirely.
 
 ---
 
@@ -498,7 +511,7 @@ survey — re-read the design's assumptions before continuing.
 ```bash
 cd /home/kmk/dev/anyka-dev
 ./scripts/upload_upgrade_bundle.sh --host 192.168.2.198 --user admin \
-  --pass-file <(printf %s "$CAMERA_PASS") /tmp/bundle-6afa26f4.tar
+  --pass-file <(printf %s "$CAMERA_PASS") /tmp/bundle-fleet.tar
 ```
 
 Expected: **HTTP 202**, nothing else counts as success.
@@ -540,7 +553,7 @@ All seven must hold.
 # 1. version identity
 printf 'user = "admin:%s"\n' "$CAMERA_PASS" \
   | curl -s --config - http://192.168.2.198/api/diagnostics | jq -r .firmware_version
-# expect: 6afa26f4   (the stamp from Task 1 Step 4)
+# expect: $STAMP   (the stamp recorded in Task 1 Step 1/4)
 
 # 2. active flipped, 3. trial cleared, 4. ring still 256 KB,
 # plus the audio payload actually landed in the new slot
@@ -693,7 +706,7 @@ through a fresh parse rather than assumed from the previous step's success.
 cd /home/kmk/dev/anyka-dev
 ./scripts/upload_upgrade_bundle.sh --host 192.168.30.146 \
   --jumphost root@192.168.3.137 --user admin \
-  --pass-file <(printf %s "$CAMERA_PASS") /tmp/bundle-6afa26f4.tar
+  --pass-file <(printf %s "$CAMERA_PASS") /tmp/bundle-fleet.tar
 ```
 
 Expected: **HTTP 202**. The script stages the credential in a netrc on the
@@ -721,7 +734,7 @@ ssh -o BatchMode=yes -o ExitOnForwardFailure=yes -f -N -L 15546:192.168.30.146:5
 printf 'user = "admin:%s"\n' "$CAMERA_PASS" \
   | ssh -o BatchMode=yes root@192.168.3.137 'cat > /tmp/curlrc; curl -s --config /tmp/curlrc http://192.168.30.146/api/diagnostics; rm -f /tmp/curlrc' \
   | jq -r .firmware_version
-# expect: 6afa26f4
+# expect: $STAMP
 
 # 2-4 + identity + config survival + audio payload landed
 uv run python3 scripts/debugging/cam_exec.py --host 127.0.0.1 --port 12446 \
@@ -819,7 +832,7 @@ check like everywhere else.
 2026-08-29: `sound=ADD audio_in=ENABLE`.
 
 Run every step of Task 5 with the substituted host and ports. The post-upgrade
-gate expects `active` = `a` and `firmware_version` = `6afa26f4`.
+gate expects `active` = `a` and `firmware_version` = `$STAMP`.
 
 **STOP the rollout if any check fails.**
 
@@ -917,7 +930,7 @@ printf 'user = "admin:%s"\n' "$CAMERA_PASS" \
   | ssh -o BatchMode=yes root@192.168.3.137 'cat > /tmp/curlrc; for ip in 192.168.30.121 192.168.30.146 192.168.30.127; do printf "%s " $ip; curl -s --config /tmp/curlrc http://$ip/api/diagnostics | jq -r .firmware_version; done; rm -f /tmp/curlrc'
 ```
 
-Expected: `6afa26f4` four times, with **no `-dirty` suffix anywhere**. That is the
+Expected: `$STAMP` four times, with **no `-dirty` suffix anywhere**. That is the
 first time the fleet has been on a reproducible build.
 
 **Step 2: Confirm audio capture is uniform**
