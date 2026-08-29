@@ -43,31 +43,13 @@ export async function playSound(event: string, signal?: AbortSignal): Promise<Pl
     signal,
   });
 
-  if (response.status === 409) {
-    const text = await response.text();
-    throw new Error(text || 'busy');
-  }
-
   if (!response.ok) {
+    // 409 carries {"status":"busy"}, which is what the /busy/i match keys on.
     const text = await response.text();
     throw new Error(text || `Play sound failed (${response.status})`);
   }
 
-  let payload: unknown;
-  try {
-    payload = await response.json();
-  } catch {
-    throw new Error('Invalid JSON in play sound response');
-  }
-
-  const status =
-    typeof payload === 'object' &&
-    payload !== null &&
-    'status' in payload &&
-    typeof (payload as { status: unknown }).status === 'string'
-      ? (payload as { status: string }).status
-      : undefined;
-
+  const { status } = (await response.json()) as { status?: string };
   if (status === 'accepted' || status === 'debounced') {
     return status;
   }
