@@ -233,15 +233,8 @@ else
 fi
 
 # ── Verify ───────────────────────────────────────────────────────────────────
-# Clips are committed artifacts: regenerating them here would make the payload
-# depend on whether the build host happens to have espeak-ng installed.
-# Regenerate deliberately with scripts/make_speech.py and commit the result.
-if [[ ! -f "${ANYKA_HACK}/onvif/sounds/boot.raw" ]]; then
-  log_error "Missing sound clips under ${ANYKA_HACK}/onvif/sounds/ (run scripts/make_speech.py)"
-  exit 1
-fi
-
 log_step "Verifying SD payload artifacts"
+anyka_require_sound_clips "${ANYKA_HACK}/onvif"
 require_arm_elf "${ANYKA_HACK}/onvif/onvif-rust.bin"
 require_arm_elf "${ANYKA_HACK}/vendor-daemon/vendor-daemon.bin"
 require_arm_elf "${ANYKA_HACK}/anyka-init.bin"

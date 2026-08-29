@@ -146,3 +146,24 @@ anyka_require_vendored_cargo() {
     exit 1
   fi
 }
+
+# anyka_require_sound_clips <onvif_dir> — exit 1 unless the committed event clips
+# exist under <onvif_dir>/sounds/. Filenames match [sound.events] in config.toml.
+# Clips are regenerated with scripts/make_speech.py (ElevenLabs + ffmpeg), never
+# during a normal SD/bundle build.
+anyka_require_sound_clips() {
+  local onvif_dir="$1"
+  local sounds_dir="${onvif_dir}/sounds"
+  local clip
+  local missing=()
+  for clip in boot.raw alert.raw ok.raw upgrade.raw; do
+    if [[ ! -f "${sounds_dir}/${clip}" ]]; then
+      missing+=("${clip}")
+    fi
+  done
+  if [[ ${#missing[@]} -ne 0 ]]; then
+    log_error "Missing sound clips under ${sounds_dir}/: ${missing[*]}"
+    log_info "Regenerate with: ELEVENLABS_API_KEY=… python3 scripts/make_speech.py"
+    exit 1
+  fi
+}
