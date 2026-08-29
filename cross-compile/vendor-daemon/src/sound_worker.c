@@ -2,8 +2,10 @@
 #include <stdio.h>
 #include <sys/stat.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <string.h>
 #include <time.h>
+#include <unistd.h>
 
 #include "sound.h"
 #include "log.h"
@@ -41,13 +43,20 @@ static struct sound_req current;
 
 static void spk_amp_enable(void)
 {
-    FILE *f = fopen(SPK_PA_SYSFS, "w");
-    if (f == NULL) {
+    /* open()+write() rather than stdio: O_WRONLY without O_CREAT makes it
+     * impossible to create a file here (fopen("w") implies O_CREAT 0666, which
+     * CodeQL flags), and a sysfs attribute wants exactly one write() -- stdio
+     * would let a later edit split the value across two syscalls, which the
+     * kernel handler parses independently. */
+    int fd = open(SPK_PA_SYSFS, O_WRONLY);
+    if (fd < 0) {
         log_warn("[sound] cannot open %s", SPK_PA_SYSFS);
         return;
     }
-    fputc('0', f);
-    fclose(f);
+    if (write(fd, "0", 1) != 1) {
+        log_warn("[sound] cannot enable amplifier via %s", SPK_PA_SYSFS);
+    }
+    close(fd);
 }
 
 static long elapsed_ms(const struct timespec *start)
@@ -72,6 +81,14 @@ static void *sound_thread(void *arg)
         }
     }
 
+    /* current.path arrives over IPC, so CodeQL flags it as uncontrolled input.
+     * It is constrained before reaching here: sound_parse_play_req() requires
+     * an absolute path, rejects any "/../" or trailing "/..", and requires the
+     * SOUND_PATH_PREFIX ("/mnt/anyka_hack/") prefix; the stat() above rejects
+     * anything that is not a regular file. Opened read-only, and the residual
+     * exposure -- a caller who already has the admin IPC socket can have any
+     * regular file under that prefix rendered as PCM -- is bounded by the
+     * prefix and accepted. */
     FILE *fp = fopen(current.path, "rb");
     if (fp == NULL) {
         log_warn("[sound] cannot open %s", current.path);
