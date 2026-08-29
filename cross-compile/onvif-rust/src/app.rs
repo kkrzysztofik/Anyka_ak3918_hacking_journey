@@ -1186,7 +1186,7 @@ impl Application {
             OnvifServer::with_app_state(server_config, app_state.clone())
                 .map_err(|e| StartupError::Network(e.to_string()))?
                 .with_diagnostics(Arc::clone(&diagnostics))
-                .with_sound(crate::diagnostics::sound::SoundApiState::new(sound_player)),
+                .with_sound(sound_player),
         );
 
         progress.complete_phase();
@@ -1340,9 +1340,6 @@ impl Application {
                     // block on it, which is what lets the device service answer while
                     // the video pipeline is still down.
                     let platform = Arc::new(p);
-                    let config_dir = std::path::Path::new(config_path)
-                        .parent()
-                        .unwrap_or(std::path::Path::new("/etc/onvif"));
                     let (sound_cfg, update_root) = {
                         let c = config_runtime.read();
                         (c.sound.clone(), c.update.root.clone())
@@ -1350,7 +1347,6 @@ impl Application {
                     let sound_enabled = sound_cfg.enabled;
                     let sound_player = crate::platform::sound::build_shared_player(
                         sound_cfg,
-                        config_dir,
                         platform.ipc_client(),
                     );
                     let boot_player = Arc::clone(&sound_player);

@@ -1,7 +1,5 @@
 //! `/api/sound` — list configured event clips and trigger playback.
 
-use std::sync::Arc;
-
 use axum::Extension;
 use axum::Json;
 use axum::http::StatusCode;
@@ -11,22 +9,6 @@ use serde::{Deserialize, Serialize};
 use crate::config::sound::SoundConfig;
 use crate::platform::PlatformResult;
 use crate::platform::sound::{SharedSoundPlayer, SoundPlayResult};
-
-/// Shared state for sound REST handlers.
-pub struct SoundApiState {
-    /// `None` on stub / non-Anyka builds.
-    player: Option<SharedSoundPlayer>,
-}
-
-impl SoundApiState {
-    pub fn empty() -> Self {
-        Self { player: None }
-    }
-
-    pub fn new(player: Option<SharedSoundPlayer>) -> Self {
-        Self { player }
-    }
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SoundStatusResponse {
@@ -66,45 +48,41 @@ fn status_from_config(cfg: &SoundConfig) -> SoundStatusResponse {
     }
 }
 
-fn http_status_for_play(result: PlatformResult<SoundPlayResult>) -> StatusCode {
+/// Status and body label for a play attempt. `Disabled`/`NoClip` carry no label:
+/// nothing was asked of the speaker, so there is no playback status to report.
+fn play_outcome(result: SoundPlayResult) -> (StatusCode, Option<&'static str>) {
     match result {
-        Ok(SoundPlayResult::Accepted | SoundPlayResult::Debounced) => StatusCode::OK,
-        Ok(SoundPlayResult::Busy) => StatusCode::CONFLICT,
-        Ok(SoundPlayResult::Disabled | SoundPlayResult::NoClip) => StatusCode::NOT_FOUND,
-        Err(_) => StatusCode::SERVICE_UNAVAILABLE,
-    }
-}
-
-fn play_status_label(result: SoundPlayResult) -> Option<&'static str> {
-    match result {
-        SoundPlayResult::Accepted => Some("accepted"),
-        SoundPlayResult::Busy => Some("busy"),
-        SoundPlayResult::Debounced => Some("debounced"),
-        SoundPlayResult::Disabled | SoundPlayResult::NoClip => None,
+        SoundPlayResult::Accepted => (StatusCode::OK, Some("accepted")),
+        SoundPlayResult::Debounced => (StatusCode::OK, Some("debounced")),
+        SoundPlayResult::Busy => (StatusCode::CONFLICT, Some("busy")),
+        SoundPlayResult::Disabled | SoundPlayResult::NoClip => (StatusCode::NOT_FOUND, None),
     }
 }
 
 fn play_result_response(result: PlatformResult<SoundPlayResult>) -> axum::response::Response {
-    match result {
-        Ok(play) => {
-            let status = http_status_for_play(Ok(play));
-            match play_status_label(play) {
-                Some(label) => (status, Json(PlaySoundResponse { status: label })).into_response(),
-                None => (status, "sound unavailable or unknown event").into_response(),
-            }
-        }
+    let play = match result {
+        Ok(play) => play,
         Err(e) => {
             tracing::warn!(error = %e, "sound play failed");
-            (StatusCode::SERVICE_UNAVAILABLE, "sound playback failed").into_response()
+            return (StatusCode::SERVICE_UNAVAILABLE, "sound playback failed").into_response();
         }
+    };
+    match play_outcome(play) {
+        (status, Some(label)) => {
+            (status, Json(PlaySoundResponse { status: label })).into_response()
+        }
+        (status, None) => (status, "sound unavailable or unknown event").into_response(),
     }
 }
 
 /// GET /api/sound
+///
+/// The player is `None` on stub / non-Anyka builds; report sound as off rather
+/// than failing, so the WebUI renders a disabled card instead of an error.
 pub async fn handle_get_sound(
-    Extension(state): Extension<Arc<SoundApiState>>,
+    Extension(player): Extension<Option<SharedSoundPlayer>>,
 ) -> impl IntoResponse {
-    match &state.player {
+    match player {
         None => Json(SoundStatusResponse {
             enabled: false,
             events: Vec::new(),
@@ -115,13 +93,13 @@ pub async fn handle_get_sound(
 
 /// POST /api/sound/play
 pub async fn handle_play_sound(
-    Extension(state): Extension<Arc<SoundApiState>>,
+    Extension(player): Extension<Option<SharedSoundPlayer>>,
     Json(body): Json<PlaySoundRequest>,
 ) -> impl IntoResponse {
     if body.event.trim().is_empty() {
         return (StatusCode::BAD_REQUEST, "event must not be empty").into_response();
     }
-    let Some(player) = &state.player else {
+    let Some(player) = player else {
         return (StatusCode::SERVICE_UNAVAILABLE, "sound player unavailable").into_response();
     };
     play_result_response(player.play(body.event.trim()))
@@ -175,57 +153,38 @@ mod tests {
     }
 
     #[test]
-    fn test_http_status_for_play_accepted_is_ok() {
+    fn test_play_outcome_maps_every_result_to_status_and_label() {
         assert_eq!(
-            http_status_for_play(Ok(SoundPlayResult::Accepted)),
-            StatusCode::OK
+            play_outcome(SoundPlayResult::Accepted),
+            (StatusCode::OK, Some("accepted"))
+        );
+        assert_eq!(
+            play_outcome(SoundPlayResult::Debounced),
+            (StatusCode::OK, Some("debounced"))
+        );
+        assert_eq!(
+            play_outcome(SoundPlayResult::Busy),
+            (StatusCode::CONFLICT, Some("busy"))
+        );
+        assert_eq!(
+            play_outcome(SoundPlayResult::Disabled),
+            (StatusCode::NOT_FOUND, None)
+        );
+        assert_eq!(
+            play_outcome(SoundPlayResult::NoClip),
+            (StatusCode::NOT_FOUND, None)
         );
     }
 
     #[test]
-    fn test_http_status_for_play_busy_is_conflict() {
-        assert_eq!(
-            http_status_for_play(Ok(SoundPlayResult::Busy)),
-            StatusCode::CONFLICT
-        );
-    }
-
-    #[test]
-    fn test_http_status_for_play_debounced_is_ok_with_debounced_label() {
-        assert_eq!(
-            http_status_for_play(Ok(SoundPlayResult::Debounced)),
-            StatusCode::OK
-        );
-        assert_eq!(
-            play_status_label(SoundPlayResult::Debounced),
-            Some("debounced")
-        );
-    }
-
-    #[test]
-    fn test_http_status_for_play_disabled_and_noclip_are_not_found() {
-        assert_eq!(
-            http_status_for_play(Ok(SoundPlayResult::Disabled)),
-            StatusCode::NOT_FOUND
-        );
-        assert_eq!(
-            http_status_for_play(Ok(SoundPlayResult::NoClip)),
-            StatusCode::NOT_FOUND
-        );
-    }
-
-    #[test]
-    fn test_http_status_for_play_err_is_service_unavailable() {
-        assert_eq!(
-            http_status_for_play(Err(PlatformError::HardwareFailure("boom".into()))),
-            StatusCode::SERVICE_UNAVAILABLE
-        );
+    fn test_play_result_response_maps_sink_error_to_503() {
+        let response = play_result_response(Err(PlatformError::HardwareFailure("boom".into())));
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
     }
 
     #[tokio::test]
     async fn test_get_sound_without_player_returns_disabled_empty() {
-        let state = Arc::new(SoundApiState::empty());
-        let response = handle_get_sound(Extension(state)).await.into_response();
+        let response = handle_get_sound(Extension(None)).await.into_response();
         assert_eq!(response.status(), StatusCode::OK);
         let body = axum::body::to_bytes(response.into_body(), usize::MAX)
             .await
@@ -237,9 +196,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_play_sound_without_player_returns_503() {
-        let state = Arc::new(SoundApiState::empty());
         let response = handle_play_sound(
-            Extension(state),
+            Extension(None),
             Json(PlaySoundRequest {
                 event: "boot_ready".into(),
             }),
@@ -251,9 +209,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_play_sound_empty_event_returns_400() {
-        let state = Arc::new(SoundApiState::empty());
         let response = handle_play_sound(
-            Extension(state),
+            Extension(None),
             Json(PlaySoundRequest { event: "  ".into() }),
         )
         .await

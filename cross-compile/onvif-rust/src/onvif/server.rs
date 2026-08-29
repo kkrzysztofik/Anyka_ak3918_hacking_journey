@@ -204,8 +204,8 @@ pub struct OnvifServer {
     rate_limiter: Arc<RateLimiter>,
     /// Optional diagnostics state. `None` disables the /api routes entirely.
     diagnostics: Option<Arc<crate::diagnostics::state::DiagnosticsState>>,
-    /// Sound REST state; defaults to empty (no player) until `with_sound` is called.
-    sound: Arc<crate::diagnostics::sound::SoundApiState>,
+    /// Event-audio player for the sound REST routes; `None` until `with_sound`.
+    sound: Option<crate::platform::sound::SharedSoundPlayer>,
 }
 
 /// Validate security configuration for TLS and authentication.
@@ -313,7 +313,7 @@ impl OnvifServer {
             memory_monitor,
             rate_limiter,
             diagnostics: None,
-            sound: Arc::new(crate::diagnostics::sound::SoundApiState::empty()),
+            sound: None,
         })
     }
 
@@ -390,7 +390,7 @@ impl OnvifServer {
             memory_monitor: Arc::clone(app_state.memory_monitor()),
             rate_limiter: Arc::clone(app_state.rate_limiter()),
             diagnostics: None,
-            sound: Arc::new(crate::diagnostics::sound::SoundApiState::empty()),
+            sound: None,
         })
     }
 
@@ -407,12 +407,12 @@ impl OnvifServer {
         self
     }
 
-    /// Attach sound REST state for `GET /api/sound` and `POST /api/sound/play`.
+    /// Attach the event-audio player for `GET /api/sound` and `POST /api/sound/play`.
     ///
-    /// Defaults to [`SoundApiState::empty`] (no player) when not called.
+    /// Without it the routes still answer, reporting sound as unavailable.
     #[must_use]
-    pub fn with_sound(mut self, sound: crate::diagnostics::sound::SoundApiState) -> Self {
-        self.sound = Arc::new(sound);
+    pub fn with_sound(mut self, player: Option<crate::platform::sound::SharedSoundPlayer>) -> Self {
+        self.sound = player;
         self
     }
 
@@ -696,7 +696,7 @@ impl OnvifServer {
                         self.config.update_root.clone(),
                     ),
                 )))
-                .layer(axum::Extension(Arc::clone(&self.sound)));
+                .layer(axum::Extension(self.sound.clone()));
             app = app.nest("/api", api);
         }
 
