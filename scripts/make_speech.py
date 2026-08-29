@@ -209,7 +209,15 @@ def apply_fade(pcm: bytes, rate: int = RATE, fade_ms: int = 15) -> bytes:
 
     out = bytearray(pcm)
     for i in range(fade):
-        for idx, env in ((i, i / fade), (samples - 1 - i, (fade - i) / fade)):
+        # Both ends are indexed *inward from the boundary*, so both take the
+        # same envelope: i == 0 is the boundary sample and must be silent,
+        # i == fade-1 is the innermost and must be ~unity.
+        #
+        # The original used (fade - i) / fade for the tail, which is inverted:
+        # it put full gain on the very last sample and near-silence just inside
+        # it, so the fade-out both failed to reach zero and ran backwards.
+        env = i / fade
+        for idx in (i, samples - 1 - i):
             offset = idx * 2
             sample = struct.unpack_from("<h", out, offset)[0]
             struct.pack_into("<h", out, offset, int(sample * env))

@@ -9,8 +9,16 @@ Supersedes decisions in: `2026-08-26-event-audio-playback-design.md`
 
 The branch shipped an in-daemon `libplat_ao` worker, then abandoned it for
 `system("/usr/bin/ak_adec_demo ...")` after TTS clips played silently while
-short tones worked. This document records the root cause of that silence,
-which is a four-line bug in our own send loop, and reverts the workaround.
+short tones worked. This document reverts that workaround and fixes the defects
+found in the worker.
+
+**The silence had a different cause than this document originally concluded.**
+It was `SPK_PA` polarity — an active-high amplifier *shutdown* pin that we were
+driving high before every clip. See the 2026-08-29 addendum. The send-loop,
+stereo and drain defects recorded below are real and independently confirmed
+against the vendored SDK, and the worker could not have played anything with
+them, but they are not what the original symptom was about. Sections written
+before that addendum are left as they stood, so the reasoning stays auditable.
 
 ## Root cause
 
@@ -72,7 +80,7 @@ not re-run:
 | Reference | `platform/libplat/demo/ao_demo/ak_ao_demo.c` | **new** — raw-PCM path, not ADEC |
 | Channel | Duplicate mono → stereo before send | **new** — the bug |
 | Drain | Poll `ak_ao_get_play_status()` to `FINISHED` | **new** |
-| Volume | `ak_ao_set_dac_volume`, range 0–12 | was 0–6 |
+| Volume | `ak_ao_set_dac_volume`, range 0–6 | unchanged |
 | Capture during play | Do not stop it | was permanent `push_stop_audio()` |
 | Format / queueing / handle | unchanged (s16le mono 8 kHz, drop-if-busy, per-play open) | — |
 
@@ -291,18 +299,21 @@ worked with them — but they were not what the original symptom was about.
 
 ## Risks
 
-1. **Only `.198` is verified.** `.127` (zt9101) unconfirmed; its amplifier may
-   differ in part or polarity. Measure before assuming.
-2. **Clip levels are hot.** Clips peak at 0.96–1.00 FS while `volume = 6` is DAC
-   max. Expect harshness; tune with limiting in `make_speech.py`.
-3. **The SD card's FAT is corrupting.** `.198` remounted read-only twice during
+1. **Only `.198` is verified.** `.127` (zt9101) unconfirmed, and its amplifier
+   may differ in part or in polarity — measure before assuming this fix
+   transfers. Dropping the rootfs binary dependency *reduces* the older form of
+   this risk, but the `SPK_PA` finding adds a new one.
+2. **Clip levels.** Resolved for the shipped set: compression plus EBU R128 puts
+   peaks at 0.78–0.80 against a −2 dBFS ceiling. Re-check after any regeneration,
+   since the peak ceiling binds before the loudness target on speech.
+3. **The SD card's FAT was corrupting.** `.198` remounted read-only twice during
    this work (`clusters badly computed`), which blocks the supervisor from
-   starting services. Needs `fsck`, unrelated to audio.
-2. **Capture contention may be real.** Removing `push_stop_audio()` is the
-   lazy correct default; the test in §4 decides.
-3. **Only `.198` is verified.** `.127` (zt9101) still unconfirmed — but this
-   revision *reduces* that risk by dropping the rootfs binary dependency.
-4. Speaker resonates the casing at high volume. Keep the default modest.
+   starting services. Repaired 2026-08-29; unrelated to audio.
+4. **Capture contention was never demonstrated.** `push_stop_audio()` is not
+   called from the sound path, and playback measurably does not disturb capture
+   (`[audio] push stopped` stayed at 0, `frames=300 drops=0` after a play).
+5. **The speaker resonates the casing at high volume.** `volume = 6` is DAC max;
+   lower it if the housing rattles.
 
 ## References
 
