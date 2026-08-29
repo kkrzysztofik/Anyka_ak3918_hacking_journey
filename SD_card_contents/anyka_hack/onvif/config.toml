@@ -572,4 +572,4 @@ debounce_secs = 30
 boot_ready = "boot.raw"
 network_lost = "alert.raw"
 network_up = "ok.raw"
-upgrade_result = "ok.raw"
+upgrade_result = "upgrade.raw"

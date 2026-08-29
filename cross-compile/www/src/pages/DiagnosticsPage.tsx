@@ -1037,7 +1037,7 @@ export default function DiagnosticsPage() {
   }
 
   return (
-    <div className="space-y-6 pb-8">
+    <div className="space-y-6">
       <div className="flex flex-col gap-2">
         <h1 className="text-2xl font-bold text-white" data-testid="diagnostics-title">
           Diagnostics & Statistics

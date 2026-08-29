@@ -234,6 +234,7 @@ fi
 
 # ── Verify ───────────────────────────────────────────────────────────────────
 log_step "Verifying SD payload artifacts"
+anyka_require_sound_clips "${ANYKA_HACK}/onvif"
 require_arm_elf "${ANYKA_HACK}/onvif/onvif-rust.bin"
 require_arm_elf "${ANYKA_HACK}/vendor-daemon/vendor-daemon.bin"
 require_arm_elf "${ANYKA_HACK}/anyka-init.bin"

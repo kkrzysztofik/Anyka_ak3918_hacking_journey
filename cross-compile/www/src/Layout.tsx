@@ -444,7 +444,7 @@ function Header() {
 export default function Layout() {
   return (
     <div
-      className="bg-dark-bg selection:bg-accent-red/30 flex h-screen font-sans"
+      className="bg-dark-bg selection:bg-accent-red/30 flex h-screen overflow-hidden font-sans"
       data-testid="layout-root"
     >
       <aside
@@ -454,10 +454,10 @@ export default function Layout() {
       >
         <SidebarContent />
       </aside>
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <Header />
         <main
-          className="flex-1 overflow-y-auto p-6 md:p-8"
+          className="min-h-0 flex-1 overflow-y-auto p-6 md:p-8"
           aria-label="Page content"
           data-testid="layout-main-content"
         >

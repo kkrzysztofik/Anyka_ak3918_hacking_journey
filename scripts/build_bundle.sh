@@ -39,6 +39,10 @@ cp -r "${SRC}/vendor-daemon"      "${STAGE}/"
 mkdir -p "${STAGE}/onvif"
 cp "${SRC}/onvif/onvif-rust.bin"  "${STAGE}/onvif/"
 cp -r "${SRC}/onvif/www"          "${STAGE}/onvif/"
+# Clips resolve beside the binary under slots/{a,b}/onvif/sounds/; omitting them
+# from the bundle leaves A/B upgrades with silent event audio.
+anyka_require_sound_clips "${SRC}/onvif"
+cp -r "${SRC}/onvif/sounds"       "${STAGE}/onvif/"
 cp "${SRC}/onvif/config.toml"     "${STAGE}/onvif/config.template.toml"
 mkdir -p "${STAGE}/snmp"
 cp "${SRC}/snmp/snmp-agent.bin"   "${STAGE}/snmp/"
