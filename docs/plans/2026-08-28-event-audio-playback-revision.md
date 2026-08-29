@@ -158,6 +158,17 @@ Verify only three files are in the commit.
 
 **Step 1: Restore the pre-workaround worker and header**
 
+> **Destructive.** Both commands overwrite the working-tree copies of these two
+> files without confirmation, and this repo is habitually left with uncommitted
+> work in the index. Back the current contents up first, and check nothing else
+> is pending on them:
+>
+> ```bash
+> git status --porcelain -- cross-compile/vendor-daemon/src/sound_worker.c \
+>                           cross-compile/vendor-daemon/include/ak_ao.h
+> cp cross-compile/vendor-daemon/src/sound_worker.c /tmp/sound_worker.c.bak
+> ```
+
 ```bash
 git checkout HEAD -- cross-compile/vendor-daemon/include/ak_ao.h
 git show HEAD:cross-compile/vendor-daemon/src/sound_worker.c > cross-compile/vendor-daemon/src/sound_worker.c
@@ -167,7 +178,13 @@ Read the restored file. It already has: the `lock`/`playing` mutex pattern, `ela
 
 **Step 2: Apply the six changes**
 
-1. **Keep `spk_pa_set()`** from the shell-out version — copy it across. It is a real discovery, orthogonal to the buffer bug:
+1. **~~Keep `spk_pa_set()`~~ — WRONG, and this instruction caused the silence.**
+   `SPK_PA` is the amplifier's **active-high shutdown** pin: writing `1` switches
+   the amp off (outputs 0 V), writing `0` enables it (outputs VDD/2). The pin is
+   low at boot and `ak_ao_enable_speaker()` never touches it, so the stock state
+   is already enabled and this code was pure harm. Implemented as
+   `spk_amp_enable()`, which only ever drives it low. The snippet below is kept
+   to show what was carried across; do not reuse it.
 
 ```c
 #define SPK_PA_SYSFS "/sys/user-gpio/SPK_PA"
@@ -469,20 +486,32 @@ Append measured numbers to the design doc's Risks section — specifically wheth
 
 **Step 1: Run everything**
 
+Each line returns to the repo root first: `cd` persists within a shell, so
+chaining these as written would resolve the second path relative to the first
+and fail. `$CARGO` comes from `setenv.sh` and points at the vendored toolchain —
+a bare `cargo` picks up whatever is on `PATH` and can silently invalidate the
+check (see `vendored-clippy-needs-path-prefix`).
+
 ```bash
-cd cross-compile/vendor-daemon && make test
-cd cross-compile/onvif-rust && cargo test --target x86_64-unknown-linux-gnu
-cd cross-compile/www && npx vitest run
+R=$(git rev-parse --show-toplevel)
+source "$R/setenv.sh"
+
+(cd "$R/cross-compile/vendor-daemon" && make test)
+(cd "$R/cross-compile/onvif-rust"    && $CARGO test --target x86_64-unknown-linux-gnu)
+(cd "$R/cross-compile/www"           && npx vitest run)
 ```
 
 Note: per prior experience, do **not** trust `rtk prettier --check` — run the raw binary and read `$?`.
 
 **Step 2: Lint**
 
-Clippy needs the vendored toolchain first on `PATH`:
+Clippy needs the vendored toolchain first on `PATH`, and must run from the crate
+directory:
 
 ```bash
-PATH="$PWD/toolchain/arm-anykav200-crosstool-ng/bin:$PATH" cargo clippy --target x86_64-unknown-linux-gnu -- -D warnings
+(cd "$R/cross-compile/onvif-rust" \
+  && PATH="$R/toolchain/arm-anykav200-crosstool-ng/bin:$PATH" \
+     cargo clippy --target x86_64-unknown-linux-gnu --all-targets -- -D warnings)
 ```
 
 **Step 3: Request code review**
