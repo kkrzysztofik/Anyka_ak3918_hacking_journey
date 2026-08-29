@@ -67,7 +67,11 @@ def set_audio_enabled(text):
         stripped = line.strip()
         if stripped.startswith("[") and stripped.endswith("]"):
             in_section = stripped == "[stream_profile_1]"
-        elif in_section and stripped.startswith("audio_enabled"):
+        elif in_section and stripped.split("=", 1)[0].strip() == "audio_enabled":
+            # Exact key match, not startswith: a prefix test would rewrite a
+            # sibling like `audio_enabled_extra` into `audio_enabled = true`,
+            # destroying its value -- and validate() could not tell, because the
+            # key it asserts on would then be trivially satisfied.
             if stripped != "audio_enabled = true":
                 line, changed = "audio_enabled = true\n", True
         out.append(line)
@@ -108,6 +112,17 @@ def self_test():
 
     again, changed = set_audio_enabled(edited)
     assert not changed and again == edited, "must be idempotent"
+
+    # A sibling key that merely starts with "audio_enabled" must survive
+    # untouched. A startswith() test silently rewrites it to
+    # `audio_enabled = true` and destroys its value, and validate() cannot
+    # catch that -- the key it asserts on ends up trivially satisfied.
+    sibling = '[stream_profile_1]\naudio_enabled_extra = 5\naudio_enabled = false\n'
+    out, changed = set_audio_enabled(sibling)
+    assert changed
+    parsed = tomllib.loads(out)
+    assert parsed["stream_profile_1"]["audio_enabled_extra"] == 5
+    assert parsed["stream_profile_1"]["audio_enabled"] is True
 
     withsound, changed = add_sound(base)
     assert changed
@@ -168,9 +183,12 @@ def main():
         print("ANYKA_FTP_PASS is not set", file=sys.stderr)
         return 2
 
+    # login() inside the try: FTP() has already opened the control connection,
+    # so an auth failure or a dropped link mid-login would otherwise skip the
+    # finally and leak the socket for the life of the process.
     ftp = FTP(args.host, timeout=30)
-    ftp.login(args.user, password)
     try:
+        ftp.login(args.user, password)
         original = get(ftp, CONFIG_PATH)
         text = original.decode()
 
@@ -193,7 +211,21 @@ def main():
 
         if sound_changed or audio_changed:
             put(ftp, BACKUP_PATH, original)
-            put(ftp, CONFIG_PATH, text.encode())
+            try:
+                put(ftp, CONFIG_PATH, text.encode())
+            except Exception:
+                # The backup above is already written and readback-verified, so
+                # recovery is always possible -- but only if whoever is watching
+                # knows before something reboots the camera into a config that
+                # may be half-written. A bare traceback does not say that.
+                print(
+                    f"\n!!! {args.host}: config.toml WRITE FAILED and may be "
+                    f"truncated on the device.\n"
+                    f"!!! DO NOT REBOOT THIS CAMERA.\n"
+                    f"!!! Restore it by hand from {BACKUP_PATH}, then verify "
+                    f"before any reboot or upgrade.\n",
+                    file=sys.stderr)
+                raise
             print(f"{args.host}: config.toml written and verified "
                   f"(backup at {BACKUP_PATH})")
 
