@@ -102,12 +102,19 @@ As of 2026-08-29 it is `b2518aca`. Every gate below compares against `$STAMP`,
 never against a hash written in this document.
 
 **STOP if it prints any `-dirty` suffix.** The entire fleet already runs `-dirty`
-versions, so a dirty stamp defeats every verification gate downstream. If the
-build has already run once in this checkout, reset the artifacts it rewrites:
+versions, so a dirty stamp defeats every verification gate downstream.
 
-```bash
-git -C /home/kmk/dev/anyka-dev checkout -- SD_card_contents/
-```
+**Do NOT run `git checkout -- SD_card_contents/` to "clean up" first.** That was
+the old advice and it never worked. The build used to stamp itself `-dirty` even
+from a pristine checkout, because `build_sd_contents.sh` installs binaries over
+tracked paths before `onvif-rust` computes its version. Fixed on 2026-08-29 in
+`build_upgrade_bundle.sh`, which now captures the stamp once up front and ignores
+build outputs under `SD_card_contents/` when testing for dirt. Modified `.bin`
+files there are expected and no longer affect the stamp; repeated builds in one
+checkout stamp identically.
+
+The build logs a `Version: <stamp>` line near the start. That is `$STAMP`, and it
+must match this command's output.
 
 **Step 2: Confirm the gitignored tower-http patch exists**
 

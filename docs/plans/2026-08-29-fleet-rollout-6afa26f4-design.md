@@ -73,11 +73,34 @@ amplifier will not enable), `bc316423`/`69a9f84b` (clips regenerated with the
 corrected fade). Whether any of these are already in the deployed `-dirty` builds
 is **not knowable** — which is itself the argument below.
 
-**Version hygiene.** Every camera runs a `-dirty` build whose contents are not
-recoverable from git — the paragraph above had to be established by measuring a
-file size on the device. `6afa26f4` is built from a clean tree and is
-reproducible, which is a precondition for every future gate: comparing
-`firmware_version` against an expected stamp is meaningless while both sides read
+**Version hygiene — and the build bug behind it.** Every camera runs a `-dirty`
+build whose contents are not recoverable from git; the paragraph above had to be
+established by measuring a file size on the device.
+
+Found while executing this plan: **the fleet was never going to escape `-dirty`,
+because the build stamped itself that way from a pristine checkout.**
+`build_sd_contents.sh` installs freshly compiled binaries over tracked paths under
+`SD_card_contents/`, and `onvif-rust/scripts/build.sh` computes
+`ANYKA_BUILD_VERSION` with `git describe --dirty` *partway through* that pipeline.
+The vendor-daemon stage runs first and its output is not byte-reproducible, so the
+tree is already dirty by the time the stamp is taken. The first build attempt in
+this rollout confirmed it: tree verified clean at start, artifact stamped
+`e86ce577-dirty`.
+
+This had been diagnosed for months as a stale working tree, and the documented
+remedy — `git checkout -- SD_card_contents/` before building, recorded in the
+2026-08-23 rollout plan — could never have worked. It resets the tree so the build
+can dirty it again.
+
+Fixed in `scripts/build_upgrade_bundle.sh`: capture `ANYKA_BUILD_VERSION` once
+before any stage runs, and exclude `SD_card_contents/` from the dirty test, since
+the stamp describes the source rather than the outputs. `build.rs` and
+`onvif-rust/scripts/build.sh` already honoured the override, so nothing else
+changed. Repeated builds in one checkout now stamp identically, and the reset
+ritual is gone.
+
+A reproducible stamp is a precondition for every gate in this plan: comparing
+`firmware_version` against an expected value is meaningless while both sides read
 `-dirty`.
 
 **Three config edits** that no bundle can perform (see Decision 2).
