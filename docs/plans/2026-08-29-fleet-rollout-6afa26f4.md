@@ -42,9 +42,15 @@ uv run python3 scripts/debugging/cam_exec.py --host 192.168.2.198 'CMD'
 uv run python3 scripts/debugging/cam_exec.py --host 127.0.0.1 --port 124NN 'CMD'
 ```
 
-`.121`'s telnet is unreliable — it times out roughly half the time. **Retry, do
-not conclude the camera is down.** Its HTTP and FTP are healthy. Prefer HTTP/FTP
-for anything that has an HTTP/FTP equivalent.
+`.121` was found on 2026-08-29 dropping 40–60% of packets, which looked like
+"flaky telnet". It was a degraded wifi association: a reboot took it from
+-82 dBm / 28-70 to **-44 dBm / 66-70 with 0% loss**, making it the best-signal
+camera in the fleet. It has been rebooted and is healthy as of this plan.
+
+**Re-measure before trusting it** (Task 6 Difference 1) — the association degraded
+over 2 d 6 h of uptime, so it can drift back. If any camera starts timing out
+across several protocols at once, check `iwconfig wlan0` before suspecting the
+service or the tooling.
 
 HTTP against a `192.168.30.x` camera must originate on the jumphost — the dev box
 has no route:
