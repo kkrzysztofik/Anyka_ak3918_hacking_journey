@@ -95,11 +95,12 @@ git -C /home/kmk/dev/anyka-dev describe --always --dirty
 Expected: the first command prints nothing (untracked files are fine); the second
 prints a clean hash with **no `-dirty` suffix**.
 
-**Record that hash — it is `$STAMP` for the rest of this plan.** It is not
-necessarily `6afa26f4`: the design and plan commits moved `HEAD`, and doc-only
-commits change no binaries, so building from the current clean `HEAD` is correct.
-As of 2026-08-29 it is `b2518aca`. Every gate below compares against `$STAMP`,
-never against a hash written in this document.
+**Record that hash — it is `$STAMP` for the rest of this plan.** It will not be
+`6afa26f4`: the design, plan and fix commits moved `HEAD` well past it, and
+doc-only commits change no binaries, so building from the current clean `HEAD` is
+correct. Every gate below compares against `$STAMP` as recorded here at build
+time — never against a hash written into this document, which goes stale on the
+next commit.
 
 **STOP if it prints any `-dirty` suffix.** The entire fleet already runs `-dirty`
 versions, so a dirty stamp defeats every verification gate downstream.
@@ -186,7 +187,10 @@ bypassed.
 ls -lh /tmp/bundle-fleet.tar
 ```
 
-Expected: roughly 19–20 MB. The device ceiling is 64 MB; over that gets HTTP 413.
+Expected: roughly **21 MB** (measured 2026-08-29). The device ceiling is 64 MB;
+over that gets HTTP 413. Treat anything under ~15 MB or over ~30 MB as suspicious
+and inspect `tar -tf` before uploading — a wildly different size means the payload
+set changed.
 
 ---
 
