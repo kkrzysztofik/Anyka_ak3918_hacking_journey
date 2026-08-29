@@ -46,20 +46,37 @@ Memory headroom is adequate: `.146` reports 36540 KB total / 33544 KB used, but
 
 ## What the delta contains
 
-`a1660798..HEAD` is 38 commits. Two things justify the rollout:
+`a1660798..HEAD` is 38 commits.
 
-**The `/main` keyframe fix.** `6b713d50` sizes ring slots for real keyframes
-(`VD_SHM_SLOT_SIZE` 128 KB → 256 KB) and `6da17401` gates it behind
-`VD_SHM_VERSION` 3 → 4. This is the root cause behind `/main` emitting one IDR and
-going quiet: 184 KB IDRs exceeded the 131008-byte slot and `push.c` dropped them
-with no log. It is the reason recording coverage sits near 40%.
+**The `/main` keyframe fix is already in the field — it is NOT what this rollout
+delivers.** `6b713d50` (`VD_SHM_SLOT_SIZE` 128 KB → 256 KB) and `6da17401`
+(`VD_SHM_VERSION` 3 → 4) are not ancestors of `a1660798`, but the deployed
+`-dirty` builds carried them in the working tree before they were committed.
+Measured 2026-08-29: `/tmp/vendor-frame-ring.shm` is **2097216 bytes** on `.198`,
+`.146` and `.127` — exactly `VD_SHM_HEADER_SIZE + 8 × VD_SHM_SLOT_SIZE` for the
+256 KB slot, against 1048640 for the old 128 KB one. (`.121` unverified; its
+telnet is unreliable. Confirm during its task.)
 
-**Working event audio.** `acf8472f` (SPK_PA is active-high *shutdown*, not enable),
-`bcf6b1ac` (duplicate mono to stereo before `ak_ao_send_frame`), `ffdcac4d`
-(`libplat_ao.so` into the vendor-daemon payload), `2a925f99`/`ac1ab1a9` (clips
-ship in bundles, with a build-time guard on the full set).
+What the rollout actually delivers:
 
-The rest is dependabot bumps and docs.
+**The audio playback stack**, which is genuinely absent. On `.146` and `.127` the
+active slot has no `vendor-daemon/lib/libplat_ao.so` and no `onvif/sounds/`
+directory at all. Ships: `ffdcac4d` (the library), `2a925f99`/`ac1ab1a9` (clips in
+the bundle plus a build-time guard on the full set), `acf8472f` (SPK_PA is
+active-high *shutdown*, not enable), `bcf6b1ac` (mono → stereo before
+`ak_ao_send_frame`), `57c9060d` (abort when the amplifier will not enable),
+`bc316423`/`69a9f84b` (clips regenerated with the corrected fade).
+
+**Version hygiene.** Every camera runs a `-dirty` build whose contents are not
+recoverable from git — the paragraph above had to be established by measuring a
+file size on the device. `6afa26f4` is built from a clean tree and is
+reproducible, which is a precondition for every future gate: comparing
+`firmware_version` against an expected stamp is meaningless while both sides read
+`-dirty`.
+
+**Three config edits** that no bundle can perform (see Decision 2).
+
+The remainder is dependabot bumps, CodeQL fixes, WebUI changes and docs.
 
 ## Why the protocol bump is safe here
 
@@ -76,8 +93,9 @@ version-coherent.
 `supervisor_loop.rs:82` rewrites `LD_LIBRARY_PATH` entry-by-entry into the active
 slot, so the absolute path in `anyka.toml` resolves against `slots/<active>/`.
 
-Ring memory grows from 8 × 128 KB to 8 × 256 KB — about 1 MB more, against ~21 MB
-reclaimable.
+Ring memory does not change: the deployed builds already allocate 8 × 256 KB, as
+the 2097216-byte shm file shows. There is no new memory cost, and ~21 MB is
+reclaimable regardless.
 
 ## Decision 1 — version stamp
 
@@ -192,27 +210,45 @@ execution time.
 
 `push.c:348` drops oversized frames **silently, with no log line**. A running
 daemon, an open socket, and a healthy `/api/diagnostics` are therefore all
-compatible with the bug still being present. The gate must observe the stream.
+compatible with a broken video path. The gate must observe the stream and the
+ring directly.
 
-Per camera, all five must hold:
+Per camera, all seven must hold:
 
 1. `/api/diagnostics.firmware_version` equals the built stamp
 2. `active` flipped `b` → `a`, and no `state/trial-*` remains
 3. ports 80, 554, 8080 listening
-4. **`/main` sustains keyframes** — over a 20 s sample, count frames with
-   `key_frame=1`; at a ~2 s GOP expect roughly 10. **A single keyframe is a
-   failure, not a pass** — one-IDR-then-silence is the precise signature of the
-   bug being fixed.
-5. `/live/main.flv` returns a non-zero byte count
-6. **`/main` carries an audio track** — `ffprobe` reports a second stream,
+4. **The ring is still 256 KB per slot** — `ls -l /tmp/vendor-frame-ring.shm`
+   reads exactly `2097216`. This is a **regression** check, not a proof of the
+   fix: the fleet already has v4, and shipping a build that silently reverted to
+   `1048640` would reintroduce night-time IDR drops. One `ls`, unambiguous.
+5. **`/main` sustains keyframes** — over a 20 s sample, count frames with
+   `key_frame=1`; require **≥ 3**. Calibrated against `.198` on 2026-08-29:
+   202 frames / 5 keyframes in 20 s. A single keyframe is a failure. Note the
+   limit honestly — daytime IDRs fit inside even a 128 KB slot, so this gate
+   catches a total-failure regression, not a subtle one.
+6. `/live/main.flv` returns a non-zero byte count
+7. **`/main` carries an audio track** — `ffprobe` reports a second stream,
    `audio`, 8000 Hz, matching `.198`'s `stream,1,aac,audio,8000`. On `.121` and
    `.146` this is the proof that Edit B took; on `.198` and `.127` it is a
    regression check that the upgrade did not lose the track.
+
+For the three jumphost cameras, `ffprobe` runs **locally through an SSH port
+forward of 554**, not on the jumphost — which has no ffmpeg. RTSP interleaved over
+TCP carries its media on the control connection, so a single forwarded port is
+enough; this needs no changes to the jumphost. Verified against `.146` on
+2026-08-29. Use a per-camera local port (`15521`/`15546`/`15527`) for the same
+reason the telnet ports are per-camera.
 
 Once, on `.198`: `POST /api/sound/play` returns success. `.198` is physically
 next to the operator and reboots first, so hearing it announce itself proves the
 whole audio chain — IPC verb, AO worker, amplifier polarity, clip decode — in a
 way no remote check can.
+
+For the remote three, the reachable proxy is structural rather than audible:
+`slots/<active>/vendor-daemon/lib/libplat_ao.so` and
+`slots/<active>/onvif/sounds/*.raw` must exist after the upgrade — both are absent
+today — and `POST /api/sound/play` must return success.
 
 ## Order
 
@@ -237,7 +273,8 @@ Roughly 6 minutes per camera, dominated by the ~150 s apply-and-reboot window.
 | HTTP 413 | Over the 64 MB ceiling | Rebuild; check nothing dragged top-level `lib/` in |
 | `File exists (os error 17)` in the device log | Applier could not replace the inactive slot | Re-read `active`, `busybox rm -rf` the *other* slot, re-upload |
 | Camera returns on the OLD version | Trial failed, self-reverted | **Halt the rollout.** Read `/mnt/logs/anyka-init.log` for the failing port. Do not re-upload the same tar |
-| `/main` yields exactly one keyframe | SHM v4 not actually in effect | Confirm both binaries came from this bundle; check `hdr->version` |
+| `/main` yields exactly one keyframe, or shm file reads `1048640` | Build regressed to 128 KB slots | Halt. The bundle was built from the wrong tree — do not roll it further |
+| Cameras still silent, `sounds/` absent in the new slot | Clips missing from the bundle | `anyka_require_sound_clips` should have failed the build; check the tar contents before re-uploading |
 | Cameras silent after upgrade | `[sound]` edit lost or rejected | `grep -c '^\[sound\]' config.toml` on the device; re-run the FTP round-trip |
 | HTTP dead, telnet alive | `onvif-rust` down | FTP the bundle to `/mnt/anyka_hack/spool/bundle.tar`, then `touch spool/bundle.trigger` **last** |
 | No telnet, no HTTP, no ARP | Both slots unusable | The 240 s deadman in `config.sh` restores the gergehack boot path. Power-cycle; then SD card |
