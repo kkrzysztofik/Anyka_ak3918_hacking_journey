@@ -257,12 +257,45 @@ each. The first failed gate halts the entire rollout.
 
 - **`.198` first**: direct reach, vfat, physically accessible, and audible.
 - **`.146` second**: healthiest of the three remote cameras.
-- **`.121` third**: telnet is failing today; all of its work goes over FTP and
-  HTTP, with telnet used only if a gate needs it.
+- **`.121` third**, after a link pre-flight. See below.
 - **`.127` last**: the most fragile history — it has gone dark and needed physical
   access before. If it surprises us, the rest of the fleet is already done.
 
 Roughly 6 minutes per camera, dominated by the ~150 s apply-and-reboot window.
+
+## Precondition — check the radio link before uploading
+
+Found during planning on 2026-08-29, and the reason `.121` is not simply "the
+camera with flaky telnet":
+
+| Camera | Signal before | after reboot |
+|---|---|---|
+| .198 | -52 dBm, 58/70 | — |
+| .146 | -65 dBm, 45/70 | — |
+| .127 | n/a (zt9101), 100/100 | — |
+| .121 | **-82 dBm, 28/70** | **-44 dBm, 66/70** |
+
+At -82 dBm `.121` was dropping 40–60% of packets across ping, HTTP and FTP; an FTP
+connection failed with `OSError: [Errno 113] No route to host` minutes after an
+identical one succeeded, while ARP held the MAC as `REACHABLE` throughout. A
+reboot restored it to 0% loss over 20 pings and made it the **best**-signal camera
+in the fleet — a 38 dB swing. The association had degraded over 2 d 6 h of uptime;
+placement and hardware were never implicated.
+
+So: **measure `iwconfig wlan0` before uploading to any camera, and reboot any
+camera worse than about -70 dBm before proceeding.** Pushing 19 MB over a degraded
+link risks a dead `PUT /api/update`, which strands a partial `bundle.tar.part` in
+the spool and turns every retry into HTTP 409.
+
+Two traps in doing this:
+
+- **Verify a reboot by `uptime`, never by "HTTP came back".** A flapping link
+  produces the identical `000` → `200` transition. The first reboot attempt during
+  planning appeared to succeed by that measure and had not run at all — uptime
+  still read 2 d 6 h.
+- **Rebooting needs telnet.** `handle_system_reboot` returns `ActionNotSupported`
+  (`onvif/device/ops/system.rs:251`), so there is no HTTP path, and telnet is
+  exactly what a bad link breaks. Expect to retry several times.
 
 ## Failure handling
 
@@ -276,6 +309,8 @@ Roughly 6 minutes per camera, dominated by the ~150 s apply-and-reboot window.
 | `/main` yields exactly one keyframe, or shm file reads `1048640` | Build regressed to 128 KB slots | Halt. The bundle was built from the wrong tree — do not roll it further |
 | Cameras still silent, `sounds/` absent in the new slot | Clips missing from the bundle | `anyka_require_sound_clips` should have failed the build; check the tar contents before re-uploading |
 | Cameras silent after upgrade | `[sound]` edit lost or rejected | `grep -c '^\[sound\]' config.toml` on the device; re-run the FTP round-trip |
+| Upload dies mid-transfer, retries give 409 | Degraded radio link stranded a `bundle.tar.part` | Delete the `.part` file, reboot the camera, confirm signal better than -70 dBm, retry. **Never delete `bundle.trigger`** if present — an apply is queued |
+| Intermittent `EHOSTUNREACH` / timeouts on one camera | Degraded wifi association, not a service fault | `iwconfig wlan0`; reboot and re-measure. Confirm by `uptime`, not by HTTP returning |
 | HTTP dead, telnet alive | `onvif-rust` down | FTP the bundle to `/mnt/anyka_hack/spool/bundle.tar`, then `touch spool/bundle.trigger` **last** |
 | No telnet, no HTTP, no ARP | Both slots unusable | The 240 s deadman in `config.sh` restores the gergehack boot path. Power-cycle; then SD card |
 
