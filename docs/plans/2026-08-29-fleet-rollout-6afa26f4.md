@@ -63,11 +63,16 @@ ssh -o BatchMode=yes root@192.168.3.137 'curl -s ... http://192.168.30.NNN/...'
 because the jumphost has no ffmpeg. RTSP interleaved over TCP carries media on the
 control connection, so one forwarded port suffices.
 
-**Credentials.** Export before starting:
+**Credentials.** The Administrator (HTTP `PUT /api/update`) and root (FTP
+config edits) passwords are **not recorded in this document**: the values used
+by earlier rollouts were committed to this repository, and both are to be
+treated as permanently compromised. The current values live in the operator's
+secret store; export them from there before starting — never type them into a
+script, a log, or this file:
 
 ```bash
-export CAMERA_PASS='admin'        # Administrator, for PUT /api/update
-export ANYKA_FTP_PASS='www123'    # root, for config edits
+export CAMERA_PASS='<Administrator password from the secret store>'
+export ANYKA_FTP_PASS='<root FTP password from the secret store>'
 ```
 
 `CAMERA_PASS` is never passed in argv: uploads read it from a `--pass-file`
@@ -75,7 +80,11 @@ process substitution, and `curl` reads it from a `--config` document on stdin.
 `ANYKA_FTP_PASS` is read from the environment by the config script.
 `ffprobe` has no credential-file mechanism, so its RTSP URL necessarily carries
 the password in argv — run those checks only on a host whose process list you
-trust.
+trust. **Both values are rotated on every camera in the closeout (Task 9,
+Step 4)**, because the old values remain in this plan's git history. And plain
+text FTP/HTTP management is allowed on this isolated, trusted segment only —
+never on production or untrusted networks until an authenticated, encrypted
+camera-facing path exists (see the design's security-boundary note).
 
 ---
 
@@ -725,7 +734,7 @@ rather than the clock merely surviving a warm reboot.
 | HTTP 409 on upload | Spool busy | `ls -la /mnt/anyka_hack/spool` — remove a stale `bundle.tar.part`; if `bundle.trigger` exists an apply is queued, wait it out |
 | HTTP 401 | Credentials | Check `CAMERA_PASS`; the account must be Administrator |
 | HTTP 413 | Over the 64 MB ceiling | Rebuild; check nothing dragged top-level `lib/` in |
-| `File exists (os error 17)` in the device log | Applier could not replace the inactive slot | Re-read `active`, then: `cd /mnt/anyka_hack && act=$(cat active) && case "$act" in a\|b) ;; *) echo "REFUSING: active=[$act]"; exit 1;; esac && cd slots && for e in *; do [ "$e" = "$act" ] \|\| busybox rm -rf "$e"; done && sync && ls` — derives the target from `active` at execution time so it cannot delete the running slot. Re-upload |
+| `File exists (os error 17)` in the device log | Applier could not replace the inactive slot | **Approval-gated destructive recovery.** First, non-destructively: `cat /mnt/anyka_hack/active && ls -la /mnt/anyka_hack/slots`. State exactly which slot directory will be deleted and obtain explicit confirmation. Only then: `cd /mnt/anyka_hack && act=$(cat active) && case "$act" in a\|b) ;; *) echo "REFUSING: active=[$act]"; exit 1;; esac && cd slots && for e in *; do [ "$e" = "$act" ] \|\| busybox rm -rf "$e"; done && sync && ls` — it derives the target from `active` at execution time so it cannot delete the running slot, but the deletion is irreversible from the device. Re-upload afterward |
 | `readback mismatch` from the config script | FTP wrote a truncated or corrupted file | **Do not reboot.** Re-run the script; if it repeats, restore `config.toml.pre-6afa26f4` and stop |
 | Camera returns on the OLD version | Trial failed, self-reverted | **Halt the rollout.** Read `/mnt/logs/anyka-init.log` for the failing port. Do not re-upload the same tar |
 | Camera up but silent, `sounds/` absent in the new slot | Clips missing from the bundle | Re-check Task 1 Step 5; `anyka_require_sound_clips` should have caught it |
@@ -769,17 +778,44 @@ Expected: `video audio` for all four.
 
 **Step 3: Clean up the jumphost and close the tunnels**
 
+The downloaded configs sat in `/tmp` and contain live camera settings —
+remove them. **Approval-gated:** these are this rollout's own staged files on
+the jumphost; confirm the remaining work is done with them, state what will
+be deleted, then run:
+
 ```bash
 ssh -o BatchMode=yes root@192.168.3.137 'rm -rf /tmp/anyka-cfg /tmp/c1*.toml /tmp/a1*.toml /tmp/cfg*.toml'
+```
+
+Then close the tunnels — stale forwards are a documented foot-gun for the
+*next* session:
+
+```bash
 pkill -f 'L 124[0-9][0-9]:192.168.30' || true
 pkill -f 'L 155[0-9][0-9]:192.168.30' || true
 ```
 
-The staged script carried no credential (it reads `ANYKA_FTP_PASS` from the
-environment), but the downloaded configs did sit in `/tmp` — remove them. Stale
-forwards are a documented foot-gun for the *next* session.
+**Step 4: Rotate the camera credentials**
 
-**Step 4: Record the outcome**
+The Administrator and root FTP passwords used in this rollout appear in this
+plan's git history (this revision removes them from the text going forward; it
+cannot rewrite history) and in the 2026-08-23 rollout plan. Treat both as
+permanently compromised and change them on all four cameras now, while the
+fleet is healthy and reachable:
+
+- **Administrator (HTTP/ONVIF)** — `SetUser` on the ONVIF Device Service
+  (Administrator-level; `cross-compile/onvif-rust/src/onvif/device/ops/users.rs`),
+  or the equivalent in the WebUI.
+- **root (FTP)** — check `GetUsers` first: if the FTP root login is served
+  from the same user store, the same `SetUser` covers it; if it is a
+  device-level password, change it on the device.
+- Verify each rotation immediately, per camera, before moving on: one
+  successful login with the new password **and** one rejected login with the
+  old one.
+- Store the new values in the secret store and re-export `CAMERA_PASS` /
+  `ANYKA_FTP_PASS` from there — never in a script, a log, or a document.
+
+**Step 5: Record the outcome**
 
 Append a "Rollout log" section to
 `docs/plans/2026-08-29-fleet-rollout-6afa26f4-design.md`: per camera, the old

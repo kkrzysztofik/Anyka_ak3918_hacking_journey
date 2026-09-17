@@ -93,8 +93,8 @@ remedy — `git checkout -- SD_card_contents/` before building, recorded in the
 can dirty it again.
 
 Fixed in `scripts/build_upgrade_bundle.sh`: capture `ANYKA_BUILD_VERSION` once
-before any stage runs, and exclude `SD_card_contents/` from the dirty test, since
-the stamp describes the source rather than the outputs. `build.rs` and
+before any stage runs, and exclude the build's own output files from the dirty
+test, since the stamp describes the source rather than the outputs. `build.rs` and
 `onvif-rust/scripts/build.sh` already honoured the override, so nothing else
 changed. Repeated builds in one checkout now stamp identically, and the reset
 ritual is gone.
@@ -128,10 +128,19 @@ reclaimable regardless.
 
 ## Decision 1 — version stamp
 
-Build once from a clean tree. `SD_card_contents/*.bin` and `onvif/.build-version`
-are tracked files that the build itself rewrites, so a second build in the same
-checkout stamps `-dirty`; that is how the entire fleet came to run `-dirty`
-versions. Run `git checkout -- SD_card_contents/` before building.
+Build from any tree; the stamp is captured once, before any build stage runs,
+and the dirty test excludes exactly the build's own output files (the
+installed `*.bin` files, `onvif/.build-version`, and the SDK lib copies under
+`vendor-daemon/lib/`). Earlier versions of this plan said "build once from a
+clean tree, then run `git checkout -- SD_card_contents/`" — that ritual (from
+the 2026-08-23 plan) could never have worked: the same build that stamps a
+clean tree rewrites those tracked files, so the next build stamps `-dirty`
+anyway. That is how the entire fleet came to run `-dirty` versions.
+
+The exclusion list is deliberately narrow: any *other* tracked file dirtied in
+the tree — source code, or payload inputs such as `onvif/onvif-rust` or
+`snmp/snmp-agent` — still stamps `-dirty`, so a hand-edited payload cannot
+masquerade as a clean git build.
 
 This matters beyond tidiness: every downstream gate compares
 `/api/diagnostics.firmware_version` against the built stamp, and that comparison
@@ -149,7 +158,8 @@ The 2026-08-23 rollout made such edits with `busybox sed -i "75s|...|"` over
 telnet, guarded by three separate "STOP if line 75 is not X" checks. Replace that
 with a round-trip:
 
-1. `curl` the live `config.toml` down over FTP (`root:www123`)
+1. download the live `config.toml` over FTP (root's password comes from the
+   environment, never from this document)
 2. append `[sound]` and `[sound.events]` locally
 3. validate the result with `tomllib`
 4. `curl -T` it back
@@ -163,6 +173,15 @@ currently failing on `.121`; it has no line-number coupling, so a shifted file
 cannot cause a wrong-line write; and a malformed `config.toml` stops `onvif-rust`
 from starting, which fails the trial and triggers an automatic revert — a parse at
 a trust boundary earns a real validation step, not a hope.
+
+**Security boundary.** Both this FTP transfer and the HTTP bundle uploads run
+in the clear. That is acceptable only because the fleet sits on an isolated,
+explicitly trusted segment (`192.168.2.0/24` and `192.168.30.0/24`) with no
+path to untrusted networks. Plain-text camera management is allowed on that
+segment alone; it is prohibited on production or untrusted networks until an
+authenticated, encrypted camera-facing path exists, and it does not relax the
+production TLS requirement for ONVIF (WS-Security over TLS) anywhere else in
+the project.
 
 Appending a new top-level table at EOF is positionally unambiguous in TOML.
 `.146`'s file ends inside an OSD table, and `[sound]` closes it correctly.
@@ -231,9 +250,12 @@ That bug was fixed in code on 2026-08-13. All four cameras run `a1660798`
 `slots/{a,b}`. The step is no longer load-bearing and is dropped — one fewer
 destructive command per camera.
 
-It remains in the failure table: an upload failing with `File exists (os error 17)`
-is diagnosed and fixed by exactly that `rm -rf`, derived from `active` at
-execution time.
+It remains in the failure table, but only as an approval-gated last resort: an
+upload failing with `File exists (os error 17)` is first diagnosed with
+non-destructive inspection (`active`, a `slots/` listing, the device log), and
+the destructive slot deletion runs only after the operator confirms exactly
+which directory will be removed. The command derives its target from `active`
+at execution time, so it cannot delete the running slot.
 
 ## Decision 4 — the verification gate
 
@@ -335,7 +357,7 @@ Two traps in doing this:
 | HTTP 409 on upload | Spool busy | `ls -la /mnt/anyka_hack/spool`; clear a stale `bundle.tar.part`. If `bundle.trigger` exists an apply is queued — wait it out |
 | HTTP 401 | Credentials | `CAMERA_PASS`; the account must be Administrator |
 | HTTP 413 | Over the 64 MB ceiling | Rebuild; check nothing dragged top-level `lib/` in |
-| `File exists (os error 17)` in the device log | Applier could not replace the inactive slot | Re-read `active`, `busybox rm -rf` the *other* slot, re-upload |
+| `File exists (os error 17)` in the device log | Applier could not replace the inactive slot | **Approval-gated.** Inspect non-destructively first (`active`, `slots/`), state exactly which slot will be deleted, get explicit confirmation, then run the guarded `busybox rm -rf` loop from the plan (Task 8) and re-upload |
 | Camera returns on the OLD version | Trial failed, self-reverted | **Halt the rollout.** Read `/mnt/logs/anyka-init.log` for the failing port. Do not re-upload the same tar |
 | `/main` yields exactly one keyframe, or shm file reads `1048640` | Build regressed to 128 KB slots | Halt. The bundle was built from the wrong tree — do not roll it further |
 | Cameras still silent, `sounds/` absent in the new slot | Clips missing from the bundle | `anyka_require_sound_clips` should have failed the build; check the tar contents before re-uploading |
