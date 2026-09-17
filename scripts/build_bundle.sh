@@ -39,8 +39,12 @@ fi
 # string whatsoever, and .198 was found in the field serving
 # firmware_version=b38f8032-dirty from a slot whose manifest.meta said
 # a1660798-dirty. Every downstream gate compares the two, so catch it here.
-if ! grep -aqF -- "${VERSION}" "${SRC}/onvif/onvif-rust.bin"; then
-  log_error "onvif-rust.bin does not contain the version string '${VERSION}'"
+# Match the *whole* embedded string, not a substring: an unbounded search lets
+# manifest "H" pass against a stale binary embedding "H-dirty" (prefix match),
+# which is exactly the mislabel this gate exists to catch. The version is a
+# standalone NUL-terminated string in .rodata, so `strings` splits it out whole.
+if ! strings -a "${SRC}/onvif/onvif-rust.bin" | grep -Fxq -- "${VERSION}"; then
+  log_error "onvif-rust.bin does not embed the exact version string '${VERSION}'"
   log_error "the binary was not recompiled for this stamp; the bundle would be mislabelled"
   log_info  "force a rebuild with:"
   log_info  "  touch cross-compile/onvif-rust/src/lib.rs && ./scripts/build_sd_contents.sh"
