@@ -5,9 +5,8 @@
 #
 # Usage:
 #   ./scripts/build_upgrade_bundle.sh
-#   ./scripts/build_upgrade_bundle.sh --skip-www
 #   ./scripts/build_upgrade_bundle.sh --debug /tmp/bundle.tar
-#   ./scripts/build_upgrade_bundle.sh --skip-vendor --skip-www bundle.tar
+#   ./scripts/build_upgrade_bundle.sh --skip-vendor bundle.tar
 
 set -euo pipefail
 
@@ -26,7 +25,6 @@ Cross-compile anyka-init / vendor-daemon / onvif-rust (+ WebUI), assemble into
 SD_card_contents/anyka_hack/, then package a versioned upgrade bundle.tar.
 
 Options (forwarded to build_sd_contents.sh):
-  --skip-www      Skip npm WebUI build
   --skip-vendor   Skip vendor-daemon build/install
   --debug         Build debug binaries
   -h, --help      Show this help
@@ -36,7 +34,6 @@ Arguments:
 
 Examples:
   ./scripts/build_upgrade_bundle.sh
-  ./scripts/build_upgrade_bundle.sh --skip-www /tmp/cam-bundle.tar
   ./scripts/build_upgrade_bundle.sh --debug
 
 Next step:
@@ -46,7 +43,13 @@ EOF
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --skip-www | --skip-vendor | --debug)
+    --skip-www)
+      log_error "--skip-www is not supported for upgrade bundles"
+      log_error "build_upgrade_bundle.sh stamps the bundle from current sources and must rebuild the WebUI to avoid packaging stale assets"
+      log_info  "use ./scripts/build_sd_contents.sh --skip-www only for local payload iteration, not release bundle packaging"
+      exit 1
+      ;;
+    --skip-vendor | --debug)
       SD_FLAGS+=("$1")
       shift
       ;;
