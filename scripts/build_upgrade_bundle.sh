@@ -84,13 +84,23 @@ OUT="${OUT:-${ANYKA_REPO_ROOT}/bundle.tar}"
 # That is why the whole camera fleet ran -dirty versions; it was never a stale
 # working tree.
 #
-# The stamp describes the *source*, so build outputs under SD_card_contents/ are
-# excluded from the dirty test. That also makes repeated builds in one checkout
-# stamp identically, instead of requiring a `git checkout -- SD_card_contents/`
+# The stamp describes the *source*, so the build's own output files are
+# excluded from the dirty test -- but only those files. Excluding all of
+# SD_card_contents/ used to let a dirty Factory/config.sh (or any other
+# tracked payload input) stamp as clean while the bundle carried the
+# uncommitted bytes. That also makes repeated builds in one checkout stamp
+# identically, instead of requiring a `git checkout -- SD_card_contents/`
 # ritual between them.
 if [[ -z "${ANYKA_BUILD_VERSION:-}" ]]; then
   ANYKA_BUILD_VERSION="$(git -C "${ANYKA_REPO_ROOT}" describe --tags --always)"
-  if [[ -n "$(git -C "${ANYKA_REPO_ROOT}" status --porcelain -- ':!SD_card_contents' | grep -v '^??' || true)" ]]; then
+  if [[ -n "$(git -C "${ANYKA_REPO_ROOT}" status --porcelain \
+      -- ':!SD_card_contents/anyka_hack/anyka-init.bin' \
+         ':!SD_card_contents/anyka_hack/onvif/onvif-rust.bin' \
+         ':!SD_card_contents/anyka_hack/onvif/.build-version' \
+         ':!SD_card_contents/anyka_hack/snmp/snmp-agent.bin' \
+         ':!SD_card_contents/anyka_hack/vendor-daemon/vendor-daemon.bin' \
+         ':!SD_card_contents/anyka_hack/vendor-daemon/lib/' \
+     | grep -v '^??' || true)" ]]; then
     ANYKA_BUILD_VERSION="${ANYKA_BUILD_VERSION}-dirty"
   fi
 fi
