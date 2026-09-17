@@ -38,4 +38,14 @@ export default tseslint.config(
       ...prettier.rules,
     },
   },
+  {
+    files: ['src/components/ui/**/*.{ts,tsx}'],
+    rules: {
+      // Vendored shadcn/ui: several files alias-export radix primitives
+      // (e.g. `const Select = Primitive.Select`), which this rule cannot
+      // verify as components. Fast-refresh granularity in a vendored UI
+      // library is a non-goal, so the rule is scoped off here only.
+      'react-refresh/only-export-components': 'off',
+    },
+  },
 );
