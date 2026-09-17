@@ -13,6 +13,7 @@ Stdlib only: it has to run on the jumphost, which has python3 and nothing else.
 """
 
 import argparse
+import contextlib
 import difflib
 import hashlib
 import io
@@ -20,6 +21,7 @@ import os
 import sys
 import tomllib
 from ftplib import FTP, error_perm
+from typing import Any
 
 CONFIG_PATH = "/mnt/anyka_hack/onvif/config.toml"
 BACKUP_PATH = "/mnt/anyka_hack/onvif/config.toml.pre-6afa26f4"
@@ -40,9 +42,20 @@ upgrade_result = "upgrade.raw"
 """
 
 EXPECTED_EVENTS = {"boot_ready", "network_lost", "network_up", "upgrade_result"}
+# Fleet-standard clip names an existing [sound] table must point at. The
+# bundle ships the clips beside the binary under sounds/, so anything else
+# plays silence while every status check reports success. (volume and
+# debounce_secs are tuning, not playback requirements -- deliberately not
+# asserted.)
+EXPECTED_CLIP_NAMES = {
+    "boot_ready": "boot.raw",
+    "network_lost": "alert.raw",
+    "network_up": "ok.raw",
+    "upgrade_result": "upgrade.raw",
+}
 
 
-def add_sound(text):
+def add_sound(text: str) -> tuple[str, bool]:
     """Append the [sound] tables unless a [sound] table already parses out.
 
     Appending a new top-level table at EOF is positionally unambiguous in TOML,
@@ -55,14 +68,15 @@ def add_sound(text):
     return text + SOUND_BLOCK, True
 
 
-def set_audio_enabled(text):
+def set_audio_enabled(text: str) -> tuple[str, bool]:
     """Set audio_enabled = true inside [stream_profile_1] only.
 
     Textual, not parse-and-reserialise: tomllib is read-only, and any writer
     would reflow the file and destroy its comments. Correctness comes from
     validate() re-parsing the result, not from this function being clever.
     """
-    out, changed, in_section = [], False, False
+    out: list[str] = []
+    changed, in_section = False, False
     for line in text.splitlines(keepends=True):
         stripped = line.strip()
         if stripped.startswith("[") and stripped.endswith("]"):
@@ -78,24 +92,40 @@ def set_audio_enabled(text):
     return "".join(out), changed
 
 
-def validate(text):
+def validate(text: str) -> dict[str, Any]:
     """Parse the edited file and assert the edits landed where intended.
 
-    Read-only parsing proves both that the file is still valid TOML and that the
-    keys hold the intended values -- which is the entire risk, since a config
-    onvif-rust cannot parse costs a reboot and an automatic revert.
+    Read-only parsing proves both that the file is still valid TOML and that
+    the keys hold the intended values -- which is the entire risk, since a
+    config onvif-rust cannot parse costs a reboot and an automatic revert.
+
+    An *existing* [sound] table is held to the fleet standard too: the tool
+    reports "no change" only when the camera will actually play the shipped
+    clips. A parseable-but-wrong table (different clip_dir or event files)
+    is the silent-camera failure mode, so it stops the run with a targeted
+    error instead of being skipped.
     """
     cfg = tomllib.loads(text)
     if cfg["stream_profile_1"]["audio_enabled"] is not True:
         raise ValueError("stream_profile_1.audio_enabled is not true")
-    if cfg["sound"]["enabled"] is not True:
+    snd = cfg["sound"]
+    if snd["enabled"] is not True:
         raise ValueError("sound.enabled is not true")
-    if set(cfg["sound"]["events"]) != EXPECTED_EVENTS:
-        raise ValueError(f"sound.events keys are {set(cfg['sound']['events'])}")
+    if snd.get("clip_dir") != "sounds":
+        raise ValueError(
+            f"sound.clip_dir is {snd.get('clip_dir')!r}; the bundle ships the "
+            f"clips under 'sounds', so this table would play silence. Fix it "
+            f"by hand -- this tool does not rewrite an existing table")
+    if set(snd["events"]) != EXPECTED_EVENTS:
+        raise ValueError(f"sound.events keys are {set(snd['events'])}")
+    for key, want in EXPECTED_CLIP_NAMES.items():
+        if snd["events"][key] != want:
+            raise ValueError(
+                f"sound.events.{key} is {snd['events'][key]!r}, expected {want!r}")
     return cfg
 
 
-def self_test():
+def self_test() -> None:
     """Runnable check for the two non-trivial edits. No network, no fixtures."""
     base = (
         '[stream_profile_1]\nname = "Profile1"\naudio_enabled = false\n'
@@ -130,7 +160,24 @@ def self_test():
     again, changed = add_sound(withsound)
     assert not changed and again == withsound, "must be idempotent"
 
-    validate(withsound.replace("audio_enabled = false", "audio_enabled = true", 1))
+    # An existing [sound] that parses but deviates from the fleet standard
+    # must be rejected, not skipped as "no change" -- that is exactly the
+    # silent-camera failure mode this tool exists to surface.
+    fleet = withsound.replace("audio_enabled = false", "audio_enabled = true", 1)
+    try:
+        validate(fleet.replace('clip_dir = "sounds"', 'clip_dir = "soundz"'))
+    except ValueError as e:
+        assert "clip_dir" in str(e)
+    else:
+        raise AssertionError("validate() must reject a wrong clip_dir")
+    try:
+        validate(fleet.replace('upgrade_result = "upgrade.raw"',
+                               'upgrade_result = "nope.raw"'))
+    except ValueError as e:
+        assert "upgrade_result" in str(e)
+    else:
+        raise AssertionError("validate() must reject a wrong event clip")
+    validate(fleet)
 
     try:
         validate(base)
@@ -142,13 +189,14 @@ def self_test():
     print("self-test OK")
 
 
-def get(ftp, path):
+def get(ftp: FTP, path: str) -> bytes:
+    """Fetch one file over FTP and return its raw bytes."""
     buf = io.BytesIO()
     ftp.retrbinary("RETR " + path, buf.write)
     return buf.getvalue()
 
 
-def put(ftp, path, payload):
+def put(ftp: FTP, path: str, payload: bytes) -> None:
     """Upload, then read back and compare digests.
 
     Not paranoia: these cameras have silently written NUL bytes on exFAT before,
@@ -158,11 +206,12 @@ def put(ftp, path, payload):
     ftp.storbinary("STOR " + path, io.BytesIO(payload))
     back = get(ftp, path)
     if hashlib.sha256(back).hexdigest() != hashlib.sha256(payload).hexdigest():
-        raise IOError(f"readback mismatch on {path}: wrote {len(payload)} B, "
+        raise OSError(f"readback mismatch on {path}: wrote {len(payload)} B, "
                       f"read {len(back)} B")
 
 
-def main():
+def main() -> int:
+    """Apply the config edits to one camera over FTP and verify by readback."""
     ap = argparse.ArgumentParser()
     ap.add_argument("host", nargs="?", help="omit only with --self-test")
     ap.add_argument("--user", default="root")
@@ -245,7 +294,14 @@ def main():
                     put(ftp, SNMP_PATH, fh.read())
                 print(f"{args.host}: snmp.toml written and verified")
     finally:
-        ftp.quit()
+        # Best effort: if the camera dropped the control connection, quit()
+        # raises -- and an exception in a finally block masks the one being
+        # handled (or turns a clean success into a failure). There is nothing
+        # left to do to a dead control socket, so the failure is swallowed
+        # deliberately (and not logged: the run's outcome was already
+        # reported above, and the process exits here).
+        with contextlib.suppress(Exception):
+            ftp.quit()
     return 0
 
 
