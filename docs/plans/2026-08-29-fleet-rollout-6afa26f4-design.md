@@ -140,7 +140,13 @@ anyway. That is how the entire fleet came to run `-dirty` versions.
 The exclusion list is deliberately narrow: any *other* tracked file dirtied in
 the tree — source code, or payload inputs such as `onvif/onvif-rust` or
 `snmp/snmp-agent` — still stamps `-dirty`, so a hand-edited payload cannot
-masquerade as a clean git build.
+masquerade as a clean git build. The same holds for untracked files: the
+dirty test counts an untracked entry when it sits under a directory the
+bundle copies wholesale (`vendor-daemon/`, `onvif/sounds/`), because
+`cp -r` would otherwise ship bytes that are not in git under a clean stamp.
+Generated outputs — the installed binaries, `vendor-daemon/lib/`, and the
+gitignored `onvif/www/` — stay excluded, as do untracked files that never
+enter the bundle.
 
 This matters beyond tidiness: every downstream gate compares
 `/api/diagnostics.firmware_version` against the built stamp, and that comparison

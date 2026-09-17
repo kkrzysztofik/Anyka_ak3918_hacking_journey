@@ -94,6 +94,16 @@ OUT="${OUT:-${ANYKA_REPO_ROOT}/bundle.tar}"
 # uncommitted bytes. That also makes repeated builds in one checkout stamp
 # identically, instead of requiring a `git checkout -- SD_card_contents/`
 # ritual between them.
+#
+# Untracked files count too, but only where they ship: build_bundle.sh
+# `cp -r`s vendor-daemon/ and onvif/sounds/ wholesale, so an untracked file
+# dropped into either would ride into bundle.tar while the tree stamped
+# clean. Untracked entries therefore dirty the stamp when (and only when)
+# they sit under those two recursive archive paths, minus the generated
+# vendor-daemon/lib/ (SDK copies; a toolchain change is a deliberate
+# separate push). onvif/www/ is gitignored build output and never appears
+# in `git status` at all; untracked files elsewhere in the repo never enter
+# the bundle.
 if [[ -z "${ANYKA_BUILD_VERSION:-}" ]]; then
   ANYKA_BUILD_VERSION="$(git -C "${ANYKA_REPO_ROOT}" describe --tags --always)"
   if [[ -n "$(git -C "${ANYKA_REPO_ROOT}" status --porcelain \
@@ -103,7 +113,21 @@ if [[ -z "${ANYKA_BUILD_VERSION:-}" ]]; then
          ':!SD_card_contents/anyka_hack/snmp/snmp-agent.bin' \
          ':!SD_card_contents/anyka_hack/vendor-daemon/vendor-daemon.bin' \
          ':!SD_card_contents/anyka_hack/vendor-daemon/lib/' \
-     | grep -v '^??' || true)" ]]; then
+     | awk '
+          # Tracked changes (any line not starting with "??") always count.
+          # Untracked lines count only if they ride into bundle.tar via the
+          # wholesale cp -r of vendor-daemon/ or onvif/sounds/ -- but not the
+          # generated vendor-daemon/lib/ (SDK copies; a toolchain change is a
+          # deliberate separate push). onvif/www/ is gitignored and never
+          # appears in `git status` at all.
+          {
+            if (substr($0, 1, 2) != "??" ||
+                index($0, "?? SD_card_contents/anyka_hack/onvif/sounds/") == 1 ||
+                (index($0, "?? SD_card_contents/anyka_hack/vendor-daemon/") == 1 &&
+                 index($0, "?? SD_card_contents/anyka_hack/vendor-daemon/lib/") != 1))
+              print
+          }' \
+     || true)" ]]; then
     ANYKA_BUILD_VERSION="${ANYKA_BUILD_VERSION}-dirty"
   fi
 fi
