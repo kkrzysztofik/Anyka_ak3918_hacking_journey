@@ -1,6 +1,6 @@
 ---
 name: anyka-embedded-build
-description: Use when building, cross-compiling, linting, testing, or deploying Anyka ARM binaries for the AK3918 camera (ARM target, x86_64 host checks, SD card deployment, armv5te, uclibc, setenv toolchain).
+description: Use when building, cross-compiling, linting, or testing Anyka ARM binaries for the AK3918 camera (ARM target, x86_64 host checks, armv5te, uclibc, setenv vendored toolchain, pre-commit quality gates). For getting a build onto a camera, use anyka-firmware-upgrade instead.
 version: 2.0.0
 ---
 

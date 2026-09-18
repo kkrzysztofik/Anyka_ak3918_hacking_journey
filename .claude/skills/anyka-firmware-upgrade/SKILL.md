@@ -18,6 +18,41 @@ Canonical design: `docs/plans/2026-08-12-firmware-upgrade-path-design.md` (PR #7
 
 Do **not** use legacy `scripts/deploy_onvif.sh` (per-binary FTP) for this path.
 
+## Which path do I need?
+
+This skill is the single entry point for getting code onto a camera.
+
+| I want to… | Path |
+|---|---|
+| Ship a versioned change to a running camera | `build_upgrade_bundle.sh` → `upload_upgrade_bundle.sh` — A/B, auto-rollback. **The default.** |
+| Set up a fresh camera, or change `lib/` or Factory | `build_sd_contents.sh` → `copy_sd_contents.sh` — see *Full SD payload* below |
+| Move a flat camera onto slots (once per camera) | `scripts/migrate_to_slots.sh` |
+| Iterate on one binary while debugging | `scripts/deploy_onvif.sh` + `scripts/run_onvif.sh` — dev only, never for upgrades |
+
+There is no SSH on the camera: every path is FTP, a mounted SD card, or
+`PUT /api/update`. The old `anyka-embedded-build/scripts/deploy.sh` was
+ssh/scp-based, never worked, and has been removed.
+
+## Full SD payload
+
+Use when a bundle cannot carry what you need — a fresh camera, a toolchain bump
+that changes `lib/`, or a change under `Factory/`. Build and copy are separate
+steps:
+
+```bash
+./scripts/build_sd_contents.sh            # assemble SD_card_contents/ only
+#   --skip-www   skip the WebUI build (local iteration only)
+#   --debug      debug binaries
+
+./scripts/copy_sd_contents.sh --sd /path/to/mount   # mounted SD card
+./scripts/copy_sd_contents.sh --ftp 192.168.2.198   # over FTP to /mnt/anyka_hack + /mnt/Factory
+```
+
+Unlike a bundle this ships `lib/` (31 MB of uClibc) and the Factory tree, and it
+is **not** covered by `manifest.sha256` or the trial/rollback machinery. When
+pushing with `tar | nc` instead, verify every file against an md5 manifest
+afterwards — silent NUL-byte writes on exFAT are a known failure.
+
 ## Quick commands
 
 ```bash
@@ -131,6 +166,7 @@ scripts/debugging/cam_exec.py --host <ip> 'ls -la /mnt/anyka_hack/slots /mnt/any
 - Put `lib/` or live device config into the bundle
 - Use per-binary `deploy_onvif.sh` for A/B upgrades
 - Re-upload while `spool/bundle.trigger` or `bundle.tar.part` exists (409)
+- Reach for ssh/scp — the camera runs no sshd; use FTP, SD card, or `PUT /api/update`
 
 ## Additional resources
 
