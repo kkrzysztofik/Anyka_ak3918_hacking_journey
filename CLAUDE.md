@@ -27,27 +27,38 @@ Use the appropriate project skill or subagent before doing complex work.
 
 ### Prefer these skills first
 
+Project skills live in `.claude/skills/` and are the single source of truth for
+every agent host — Claude Code and opencode read that directory natively, pi is
+pointed at it by `.pi/settings.json`. Add a skill once and all three see it.
+
 - Rust implementation: `sc:implement`
 - ONVIF service work: `onvif-service-impl`
 - Rust testing: `anyka-rust-testing`
 - RTSP/RTP streaming: `rtsp-rtp-streaming`
+- vendor-daemon C / IPC work: `vendor-daemon-ipc`
 - WebUI component work: `camera-webui-components`
 - WebUI testing: `anyka-webui-testing`
-- Cross-compilation and deploy: `anyka-embedded-build`
+- Cross-compilation and builds: `anyka-embedded-build`
+- Deploying to a camera: `anyka-firmware-upgrade`
+- On-device debugging and coredumps: `anyka-remote-debugging`
+- Protocol conformance and performance runs: `anyka-validation`
 - Follow the Skill & Complexity Policy in `AGENTS.md`: superpowers process skills auto-trigger on task type; ponytail (full) is the default for code and plans.
 
-### Prefer these subagents when delegation helps
+### Subagents
 
-- Rust-heavy implementation: `rust-engineer`
-- TypeScript/WebUI work: `typescript-pro`
-- Embedded or hardware-facing work: `embedded-systems`
-- Architecture review: `system-architect` or `backend-architect`
-- Performance work: `performance-engineer`
-- Refactoring: `refactoring-specialist`
-- Debugging: `debugger`
-- Broad codebase exploration: `explore`
-- Security review: `security-engineer`
-- Testing automation: `test-automator`
+This repo defines no Claude Code subagents; `.claude/agents/` is intentionally
+absent. The per-language "coder" and "qa-engineer" agents were removed because
+the skills above already carried their content.
+
+Consensus code review lives in **opencode**, at `.opencode/agents/`:
+`reviewer-consensus` dispatches `reviewer-architecture` (gpt-5.4),
+`reviewer-testing` (gemini-3.1-pro), `reviewer-security` (opus-4-6) and
+`reviewer-memory` (sonnet-4-5). The value is four genuinely different models
+disagreeing, so run it from opencode — a Claude-only run is not a consensus.
+
+For delegation inside Claude Code, use the installed plugin agents
+(`rust-engineer`, `typescript-pro`, `embedded-systems`, `performance-engineer`,
+`explore`, …) or the superpowers process skills.
 
 ## Non-Negotiable Reminders
 

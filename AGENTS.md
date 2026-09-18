@@ -188,7 +188,31 @@ A plan has an end date; reference does not. See `docs/README.md` for the index.
 
 ## Codex Instruction Mapping (from `.github/`)
 
-This repo also contains GitHub Copilot configuration under `.github/` (instructions and prompts; Copilot agent profiles under `.github/agents/` were removed in favor of the `.opencode/agents/` + `.claude/agents/` sets). Codex uses `AGENTS.md` for instruction scoping.
+This repo also contains GitHub Copilot configuration under `.github/` (instructions and prompts; Copilot agent profiles under `.github/agents/` were removed). Codex uses `AGENTS.md` for instruction scoping.
+
+## Shared Agent Configuration
+
+`.claude/skills/` is the single source of truth for every agent host:
+
+| Host | How it finds the skills |
+|---|---|
+| Claude Code | native |
+| opencode | native — scans project `.claude/skills/`, walking up to the git worktree root |
+| pi | `.pi/settings.json` → `{"skills": ["../.claude/skills"]}` |
+
+Add or edit a skill there once; do not create per-host copies. `.opencode/skills/`
+was deleted because it held symlinks committed as text that resolved to nothing.
+`scripts/ci/check_agent_config.py` asserts the skill count and catches that
+failure mode again — run it after touching any agent configuration.
+
+**pi requires project trust.** It loads no project-local resources until the
+project is trusted in `~/.pi/agent/trust.json`. `--approve` grants it for a
+single run only; accept the prompt once interactively to make it stick.
+
+Agents do not share: opencode reads only `.opencode/agent(s)/`, never
+`.claude/agents/`, and the two frontmatter formats are incompatible.
+`.claude/agents/` is intentionally absent. `.opencode/agents/` holds the five
+consensus reviewers, whose point is the four distinct models behind them.
 
 Codex-equivalent scoped instruction files:
 
