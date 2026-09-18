@@ -44,7 +44,9 @@ impl LocalTimer {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default();
-        let secs = now.as_secs() as i64; // time_t
+        // time_t is 64-bit on host glibc but 32-bit on the camera's uclibc;
+        // the mask keeps the cast lossless on the 32-bit target.
+        let secs: libc::time_t = (now.as_secs() & 0x7FFF_FFFF) as libc::time_t;
         let mut zeroed: libc::tm = unsafe { std::mem::zeroed() };
         // glibc caches the parsed zone and does not re-read a changed TZ env
         // var on its own (verified on glibc 2.43); tzset() forces the reparse.

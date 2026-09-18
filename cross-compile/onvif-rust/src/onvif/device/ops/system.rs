@@ -294,16 +294,14 @@ pub fn handle_set_system_date_and_time(
                     OnvifError::invalid_arg("ter:InvalidArgVal", "utc_date_time out of range")
                 })?,
             );
-            let ts = libc::timespec {
-                tv_sec: Utc
-                    .from_local_datetime(&naive)
-                    .single()
-                    .ok_or_else(|| {
-                        OnvifError::invalid_arg("ter:InvalidArgVal", "utc_date_time out of range")
-                    })?
-                    .timestamp(),
-                tv_nsec: 0,
-            };
+            let dt = Utc.from_local_datetime(&naive).single().ok_or_else(|| {
+                OnvifError::invalid_arg("ter:InvalidArgVal", "utc_date_time out of range")
+            })?;
+            // uclibc's time_t is 32-bit on the camera (1901..=2038, which
+            // covers the camera's lifetime); host glibc is 64-bit. The u64
+            // intermediate keeps the final cast a real type change on both.
+            let tv_sec: libc::time_t = (dt.timestamp() as u64 & 0x7FFF_FFFF) as libc::time_t;
+            let ts = libc::timespec { tv_sec, tv_nsec: 0 };
             // SAFETY: clock_settime(2) reads our own stack timespec; EINVAL/EPERM
             // are returned, not trapped.
             let rc = unsafe { libc::clock_settime(libc::CLOCK_REALTIME, &ts) };
@@ -723,8 +721,6 @@ mod tests {
     // ========================================================================
     // SetSystemDateAndTime Tests
     // ========================================================================
-
-    use chrono::TimeZone as _;
 
     /// Ntp-type request: host-safe (no clock step, marker removal is a
     /// NotFound no-op) while still exercising the full TZ persist/apply path.
