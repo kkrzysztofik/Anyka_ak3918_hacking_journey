@@ -232,15 +232,19 @@ pub fn system_setup(
     baseline_wifi: &WifiCfg,
     overlay_path: &std::path::Path,
 ) -> SupplicantOwnership {
-    // The supervisor's own zone is cosmetic: `Sys::spawn` clears the child env
-    // and re-adds TZ from the onvif config (`SpawnSpec.tz`), which is the
-    // source of truth. Keep this for the supervisor's own libc time
-    // formatting.
+    // The supervisor's own zone: the onvif config is the source of truth (it
+    // is what ONVIF/WebUI write); the anyka-init `[time].timezone` is the
+    // fallback for a camera whose onvif payload is not deployed yet.
+    let update_root = std::path::Path::new(&cfg.update.root);
+    let supervisor_tz = resolve_timezone(update_root, &crate::update::Slots::new(&cfg.update.root))
+        .unwrap_or_else(|| cfg.time.timezone.clone());
+    // Affects this process only. `Sys::spawn` clears the child env and re-adds
+    // TZ from the onvif config (`SpawnSpec.tz`).
     //
     // SAFETY: set_var is not thread-safe, and P2 runs before any thread is
     // started. Do not move this call after P3.
-    unsafe { std::env::set_var("TZ", &cfg.time.timezone) };
-    tracing::info!(tz = %cfg.time.timezone, "timezone set (supervisor process only)");
+    unsafe { std::env::set_var("TZ", &supervisor_tz) };
+    tracing::info!(tz = %supervisor_tz, "timezone set (supervisor process only)");
 
     if let Some(module) = &cfg.system.sensor_module {
         match sys.insmod(module) {
