@@ -189,8 +189,12 @@ pub fn handle_get_service_capabilities(
 
 /// Handle GetSystemDateAndTime request.
 ///
-/// Returns current system date and time in UTC and local timezone.
+/// Returns current system date and time in UTC and the configured local zone.
+///
+/// The config read is safe here: this handler never logs while holding the
+/// guard, unlike the OSD path that must use the `time::tz` cell exclusively.
 pub fn handle_get_system_date_and_time(
+    config: &Arc<ConfigRuntime>,
     _request: GetSystemDateAndTime,
 ) -> OnvifResult<GetSystemDateAndTimeResponse> {
     tracing::debug!("GetSystemDateAndTime request");
@@ -210,15 +214,27 @@ pub fn handle_get_system_date_and_time(
         },
     };
 
-    // For simplicity, local time is same as UTC (no timezone offset)
-    let local_date_time = utc_date_time.clone();
+    let tz = crate::time::tz::current();
+    let local_now = tz.convert(now);
+    let local_date_time = DateTime {
+        time: Time {
+            hour: local_now.hour() as i32,
+            minute: local_now.minute() as i32,
+            second: local_now.second() as i32,
+        },
+        date: Date {
+            year: local_now.year(),
+            month: local_now.month() as i32,
+            day: local_now.day() as i32,
+        },
+    };
 
     Ok(GetSystemDateAndTimeResponse {
         system_date_and_time: SystemDateTime {
             date_time_type: SetDateTimeType::Manual,
-            daylight_savings: false,
+            daylight_savings: tz.is_dst(now),
             time_zone: Some(TimeZone {
-                tz: "UTC".to_string(),
+                tz: config.read().time.timezone.clone(),
             }),
             utc_date_time: Some(utc_date_time),
             local_date_time: Some(local_date_time),
@@ -566,8 +582,9 @@ mod tests {
 
     #[test]
     fn test_get_system_date_and_time() {
-        let response = handle_get_system_date_and_time(GetSystemDateAndTime {}).unwrap();
-
+        let response =
+            handle_get_system_date_and_time(&create_test_config(), GetSystemDateAndTime {})
+                .unwrap();
         let sdt = &response.system_date_and_time;
 
         // Should have UTC time
@@ -587,6 +604,24 @@ mod tests {
 
         // Should have timezone
         assert!(sdt.time_zone.is_some());
+    }
+
+    #[test]
+    fn test_get_system_date_and_time_reports_the_configured_zone() {
+        let _lock = crate::time::tz::test_lock();
+        let config = create_test_config();
+        config.write().time.timezone = "CET-1CEST,M3.5.0,M10.5.0/3".to_string();
+        crate::time::tz::set_current(
+            crate::time::tz::parse("CET-1CEST,M3.5.0,M10.5.0/3").unwrap(),
+        );
+        let r =
+            handle_get_system_date_and_time(&config, GetSystemDateAndTime {}).unwrap();
+        let sdt = r.system_date_and_time;
+        assert_ne!(sdt.time_zone.as_ref().unwrap().tz, "UTC");
+        let utc = sdt.utc_date_time.unwrap();
+        let local = sdt.local_date_time.unwrap();
+        assert_ne!(utc.time.hour, local.time.hour, "local still equals UTC");
+        crate::time::tz::set_current(crate::time::tz::PosixTz::utc());
     }
 
     // ========================================================================

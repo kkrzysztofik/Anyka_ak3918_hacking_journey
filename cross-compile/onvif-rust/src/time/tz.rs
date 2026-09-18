@@ -107,6 +107,11 @@ impl PosixTz {
     pub fn convert(&self, when: DateTime<Utc>) -> DateTime<FixedOffset> {
         when.with_timezone(&self.offset_at(when))
     }
+
+    /// Is DST in force at `when`?
+    pub fn is_dst(&self, when: DateTime<Utc>) -> bool {
+        self.offset_at(when) != self.std
+    }
 }
 
 /// The UTC instant a rule fires in `year`, given the offset in force just before it.

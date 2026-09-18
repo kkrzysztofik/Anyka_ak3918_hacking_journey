@@ -157,7 +157,7 @@ impl DeviceService {
         &self,
         request: GetSystemDateAndTime,
     ) -> Result<GetSystemDateAndTimeResponse, OnvifError> {
-        system_ops::handle_get_system_date_and_time(request)
+        system_ops::handle_get_system_date_and_time(&self.store.config, request)
     }
 
     /// Handle GetHostname request.
@@ -416,7 +416,7 @@ impl ServiceHandler for DeviceService {
 
             // System Date/Time Operations
             "GetSystemDateAndTime" => dispatch_sync(body_xml, |request: GetSystemDateAndTime| {
-                system_ops::handle_get_system_date_and_time(request)
+                system_ops::handle_get_system_date_and_time(&config, request)
             }),
 
             "SetSystemDateAndTime" => dispatch_sync(body_xml, |request: SetSystemDateAndTime| {
