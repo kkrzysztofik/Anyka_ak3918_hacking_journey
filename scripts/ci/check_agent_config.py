@@ -1,0 +1,125 @@
+#!/usr/bin/env python3
+"""Guard the shared agent configuration.
+
+`.claude/skills/` is the single source of truth for every agent host used on
+this repo: Claude Code and opencode read it natively, pi is pointed at it by
+`.pi/settings.json`.
+
+Two failure modes this catches, both silent in every host:
+
+1. Skill discovery dropping to zero. A host that finds no skills prints no
+   error, it just stops offering them. Assert a count, never an error string.
+2. Symlinks committed as regular files. Git stores a symlink as mode 120000; a
+   checkout without symlink support writes mode 100644 with the target as the
+   file's content. That is what killed `.opencode/skills/` for two months.
+"""
+
+import sys
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+SKILLS_DIR = REPO_ROOT / ".claude" / "skills"
+PI_SETTINGS = REPO_ROOT / ".pi" / "settings.json"
+
+MIN_SKILLS = 11
+
+# A stub is short, single-line, and looks like a path. Real prose is not.
+STUB_MAX_BYTES = 256
+
+# Minified sourcemaps match the stub signature exactly: one line, slashes, no
+# spaces. They are also untracked, so they can never carry a committed stub.
+EXCLUDE_DIRS = frozenset({"node_modules", ".git"})
+
+
+def _frontmatter(text):
+    """Return the frontmatter block as a flat dict."""
+    if not text.startswith("---"):
+        return {}
+    _, _, rest = text.partition("---")
+    block, _, _ = rest.partition("---")
+    fields = {}
+    for line in block.splitlines():
+        key, sep, value = line.partition(":")
+        if sep:
+            fields[key.strip()] = value.strip()
+    return fields
+
+
+def load_skills(skills_dir):
+    """Map skill name -> description, validating each SKILL.md."""
+    skills = {}
+    for entry in sorted(skills_dir.iterdir()):
+        if not entry.is_dir():
+            continue
+        manifest = entry / "SKILL.md"
+        if not manifest.is_file():
+            raise ValueError(f"{entry} has no SKILL.md")
+        fields = _frontmatter(manifest.read_text(encoding="utf-8"))
+        name = fields.get("name")
+        description = fields.get("description")
+        if not description:
+            raise ValueError(f"{manifest} has no description; hosts filter it out")
+        if name != entry.name:
+            raise ValueError(f"{manifest} name '{name}' != directory '{entry.name}'")
+        skills[name] = description
+    return skills
+
+
+def find_stub_symlinks(root):
+    """Find regular files whose entire content is a filesystem path."""
+    stubs = []
+    for path in sorted(root.rglob("*")):
+        if EXCLUDE_DIRS.intersection(path.parts):
+            continue
+        if path.is_symlink() or not path.is_file():
+            continue
+        if path.stat().st_size > STUB_MAX_BYTES:
+            continue
+        try:
+            text = path.read_text(encoding="utf-8").strip()
+        except (UnicodeDecodeError, OSError):
+            continue
+        if not text or "\n" in text:
+            continue
+        if "/" in text and " " not in text:
+            stubs.append(path)
+    return stubs
+
+
+def main():
+    errors = []
+
+    try:
+        skills = load_skills(SKILLS_DIR)
+    except ValueError as exc:
+        print(f"FAIL: {exc}")
+        return 1
+
+    if len(skills) < MIN_SKILLS:
+        errors.append(
+            f"expected >= {MIN_SKILLS} skills in {SKILLS_DIR}, found {len(skills)}"
+        )
+
+    for name in (".claude", ".opencode", ".pi"):
+        directory = REPO_ROOT / name
+        if not directory.is_dir():
+            continue
+        for stub in find_stub_symlinks(directory):
+            errors.append(f"{stub} looks like a symlink committed as text")
+
+    if not PI_SETTINGS.is_file():
+        errors.append(f"{PI_SETTINGS} is missing; pi will not see project skills")
+    elif not (PI_SETTINGS.parent / ".." / ".claude" / "skills").resolve().is_dir():
+        errors.append("pi settings point at a directory that does not resolve")
+
+    for error in errors:
+        print(f"FAIL: {error}")
+    if errors:
+        return 1
+
+    print(f"OK: {len(skills)} skills, no stub symlinks, pi wired up")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
