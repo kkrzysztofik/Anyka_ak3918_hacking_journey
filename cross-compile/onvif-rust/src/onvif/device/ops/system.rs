@@ -301,6 +301,9 @@ pub fn handle_set_system_date_and_time(
             // A checked conversion rather than a mask: masking turned a 2039
             // request into 1970 and still answered Ok, which silently breaks
             // ws_security's ±300s skew check.
+            #[cfg(target_pointer_width = "64")]
+            let tv_sec: libc::time_t = dt.timestamp();
+            #[cfg(not(target_pointer_width = "64"))]
             let tv_sec: libc::time_t = dt.timestamp().try_into().map_err(|_| {
                 OnvifError::invalid_arg(
                     "ter:InvalidArgVal",
@@ -788,8 +791,16 @@ mod tests {
         let mut req = req_with_tz("UTC0");
         req.date_time_type = SetDateTimeType::Manual;
         req.utc_date_time = Some(DateTime {
-            date: Date { year: 2039, month: 1, day: 1 },
-            time: Time { hour: 0, minute: 0, second: 0 },
+            date: Date {
+                year: 2039,
+                month: 1,
+                day: 1,
+            },
+            time: Time {
+                hour: 0,
+                minute: 0,
+                second: 0,
+            },
         });
         let err = handle_set_system_date_and_time(&cfg, req).unwrap_err();
         let msg = format!("{err:?}");
