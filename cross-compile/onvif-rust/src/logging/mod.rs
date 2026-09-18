@@ -44,7 +44,27 @@ use tracing_subscriber::{
     util::SubscriberInitExt,
 };
 
+use chrono::TimeZone;
+
 use crate::config::ConfigRuntime;
+
+/// Stamps log lines in the configured zone.
+///
+/// Reads `time::tz`, never the config lock — `onvif/media/ops/osd.rs:114`
+/// logs while holding a config write guard, so a config read here would
+/// deadlock.
+#[derive(Debug, Clone, Copy)]
+pub struct LocalTimer;
+
+impl tracing_subscriber::fmt::time::FormatTime for LocalTimer {
+    fn format_time(
+        &self,
+        w: &mut tracing_subscriber::fmt::format::Writer<'_>,
+    ) -> std::fmt::Result {
+        let now = crate::time::tz::current().convert(chrono::Utc::now());
+        write!(w, "{}", now.format("%Y-%m-%dT%H:%M:%S%.6f%:z"))
+    }
+}
 
 /// Errors that can occur during logging initialization.
 #[derive(Debug, Error)]
@@ -204,6 +224,7 @@ fn init_logging_impl(config: &ConfigRuntime) -> LoggingResult<()> {
 
     // Create console layer
     let console_layer = fmt::layer()
+        .with_timer(LocalTimer)
         .with_target(true)
         .with_thread_ids(false)
         .with_thread_names(false)
@@ -223,6 +244,7 @@ fn init_logging_impl(config: &ConfigRuntime) -> LoggingResult<()> {
             match make_file_appender(&file_path) {
                 Some(appender) => {
                     let file_layer = fmt::layer()
+                        .with_timer(LocalTimer)
                         .with_target(true)
                         .with_file(true)
                         .with_line_number(true)
@@ -280,6 +302,7 @@ fn init_logging_impl(config: &ConfigRuntime) -> LoggingResult<()> {
             match make_file_appender(&file_path) {
                 Some(appender) => {
                     let file_layer = fmt::layer()
+                        .with_timer(LocalTimer)
                         .with_target(true)
                         .with_file(true)
                         .with_line_number(true)
@@ -466,6 +489,24 @@ impl OnvifLogFields {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_log_timer_writes_the_configured_offset() {
+        use tracing_subscriber::fmt::time::FormatTime;
+        let _lock = crate::time::tz::test_lock();
+        crate::time::tz::set_current(
+            crate::time::tz::parse("CET-1CEST,M3.5.0,M10.5.0/3").unwrap(),
+        );
+        let mut out = String::new();
+        LocalTimer
+            .format_time(&mut tracing_subscriber::fmt::format::Writer::new(&mut out))
+            .unwrap();
+        assert!(
+            out.ends_with("+01:00") || out.ends_with("+02:00"),
+            "expected a CET/CEST offset, got {out:?}"
+        );
+        crate::time::tz::set_current(crate::time::tz::PosixTz::utc());
+    }
 
     #[test]
     fn test_parse_log_level() {

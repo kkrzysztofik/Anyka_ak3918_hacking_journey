@@ -23,7 +23,7 @@ use axum::{
     middleware::Next,
     response::Response,
 };
-use chrono::Local;
+use chrono::TimeZone;
 use std::net::SocketAddr;
 
 /// Configuration for static asset access logging.
@@ -119,7 +119,7 @@ pub async fn static_asset_logging_middleware(
 /// Apache format: `[day/mon/year:hour:minute:second zone]`
 /// Example: `[10/Oct/2000:13:55:36 -0700]`
 fn format_apache_timestamp() -> String {
-    let now = Local::now();
+    let now = crate::time::tz::current().convert(chrono::Utc::now());
     let offset = now.format("%z");
     let formatted_offset = format!("{}:{}", &offset.to_string()[..3], &offset.to_string()[3..]);
     let year_time = now.format("%Y:%H:%M:%S");
