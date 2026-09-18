@@ -1,13 +1,25 @@
 #!/bin/bash
 
-# Deploy onvif-rust binary to device via FTP
-# Usage: ./deploy_onvif.sh [device_ip] [username] [password]
+# STAGE:   push — sends one binary to the device over FTP. Compiles nothing.
+# UNIT:    a single binary (onvif-rust)
+# USE FOR: DEV ITERATION ONLY. Not an upgrade path: no versioning, no A/B slot,
+#          no trial window, no rollback. To ship a change use
+#          ./scripts/build_bundle.sh then ./scripts/push_bundle.sh.
+# NEXT:    ./scripts/run_binary_dev.sh <ip> <user>
+#
+# Usage: ./push_binary_dev.sh [device_ip] [username] [password]
+#        Prefer exporting ANYKA_FTP_PASS over passing the password positionally;
+#        an argv password is visible in `ps` and lands in shell history.
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/common.sh
 source "${SCRIPT_DIR}/common.sh"
+
+# Anyone arriving here from muscle memory has not necessarily read the header.
+log_warn "push_binary_dev.sh is DEV ONLY — no versioning, no A/B slot, no rollback."
+log_warn "To ship a change: ./scripts/build_bundle.sh && ./scripts/push_bundle.sh"
 PROJECT_ROOT="${ANYKA_REPO_ROOT}"
 
 # Default values
@@ -107,7 +119,7 @@ if command -v lftp &> /dev/null; then
     UPLOAD_OK=1
 else
     log_info "Using ftp..."
-    FTP_SCRIPT=$(mktemp /tmp/ftp_deploy_onvif_rust.XXXXXX)
+    FTP_SCRIPT=$(mktemp /tmp/ftp_push_binary_dev.XXXXXX)
     cat > "$FTP_SCRIPT" << EOF
 open $DEVICE_IP
 user $USERNAME $PASSWORD
@@ -172,7 +184,7 @@ if [ $UPLOAD_OK -eq 1 ]; then
     log_success "Deployment complete. Binary available at $DEST_DIR/$DEST_BINARY"
     echo ""
     echo "To run on device (password from \$ANYKA_FTP_PASS):"
-    echo "  ./run_onvif.sh $DEVICE_IP $USERNAME"
+    echo "  ./scripts/run_binary_dev.sh $DEVICE_IP $USERNAME"
 else
     log_error "Deployment failed"
     exit 1

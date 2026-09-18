@@ -38,9 +38,9 @@ valid bundle carrying last week's work under last week's label. Nothing fails.
 
 ### Dev-only
 
-`deploy_onvif.sh` and `run_onvif.sh` push and launch a single binary over
+`push_binary_dev.sh` and `run_binary_dev.sh` push and launch a single binary over
 FTP/telnet. No versioning, no slot, no trial, no rollback — for tightening a
-debug loop, never for shipping. `run_onvif.sh` warns at startup.
+debug loop, never for shipping. Both warn at startup.
 
 ## Other
 

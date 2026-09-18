@@ -263,6 +263,7 @@ cd cross-compile/vendor-daemon && make
 cd cross-compile/www
 npm run lint && npm run type-check && npm run test
 
-# Deploy to device
-cd scripts && ./deploy_onvif.sh 192.168.2.198 admin admin
+# Ship a change to a camera (A/B bundle, auto-rollback)
+./scripts/build_bundle.sh
+CAMERA_PASS="$CAMERA_PASS" ./scripts/push_bundle.sh --host 192.168.2.198 --user admin bundle.tar
 ```
