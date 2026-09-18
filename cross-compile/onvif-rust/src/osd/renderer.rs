@@ -11,7 +11,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use chrono::Local;
+use chrono::TimeZone;
 use tokio::sync::broadcast;
 use tracing::{debug, warn};
 
@@ -19,7 +19,7 @@ use crate::config::types::OsdConfig;
 use crate::hal::anyka::ipc::AnykaIpc;
 use crate::hal::common::video::VideoInputHandle;
 use crate::osd::encode::{encode_glyphs, pad_to_erase};
-use crate::osd::format::format_datetime;
+use crate::osd::format::{DateFormat, TimeFormat, format_datetime};
 use crate::osd::layout::{CANVAS_RECT, ChannelDims, Corner, FontMetrics, canvas_rect, place};
 
 /// Logical overlay slots (both map to [`CANVAS_RECT`] on silicon).
@@ -338,6 +338,12 @@ fn channel_should_tick(
     cfg.name.enabled || cfg.datetime.enabled || has_slots
 }
 
+/// The OSD timestamp, in the configured zone.
+fn current_datetime_text(date: DateFormat, time: TimeFormat) -> String {
+    let now = chrono::Utc::now();
+    format_datetime(crate::time::tz::current().convert(now), date, time)
+}
+
 fn plan_channel_slots(
     state: &mut RenderState,
     cfg: &OsdConfig,
@@ -355,11 +361,7 @@ fn plan_channel_slots(
         erases.push(erase);
     }
     if cfg.datetime.enabled {
-        let text = format_datetime(
-            Local::now(),
-            cfg.datetime.date_format,
-            cfg.datetime.time_format,
-        );
+        let text = current_datetime_text(cfg.datetime.date_format, cfg.datetime.time_format);
         if let Some(plan) = state.plan(
             channel,
             OsdRect::DateTime,
@@ -473,11 +475,25 @@ async fn tick_channel(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::Timelike;
 
     const MAIN: ChannelDims = ChannelDims {
         width: 1280,
         height: 720,
     };
+
+    #[test]
+    fn test_datetime_slot_text_uses_the_configured_zone_not_utc() {
+        let _lock = crate::time::tz::test_lock();
+        crate::time::tz::set_current(
+            crate::time::tz::parse("CET-1CEST,M3.5.0,M10.5.0/3").unwrap(),
+        );
+        let utc_hour = chrono::Utc::now().hour();
+        let text = current_datetime_text(DateFormat::Iso, TimeFormat::H24);
+        let shown: u32 = text[11..13].parse().unwrap();
+        assert_ne!(shown, utc_hour, "OSD still rendering UTC");
+        crate::time::tz::set_current(crate::time::tz::PosixTz::utc());
+    }
 
     #[test]
     fn test_render_plan_skips_ipc_when_unchanged() {
