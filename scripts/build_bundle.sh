@@ -111,7 +111,10 @@ OUT="${OUT:-${ANYKA_REPO_ROOT}/bundle.tar}"
 # the bundle.
 if [[ -z "${ANYKA_BUILD_VERSION:-}" ]]; then
   ANYKA_BUILD_VERSION="$(git -C "${ANYKA_REPO_ROOT}" describe --tags --always)"
-  if [[ -n "$(git -C "${ANYKA_REPO_ROOT}" status --porcelain \
+  # Capture the inspection and its status separately. A trailing `|| true` here
+  # would turn a failed `git status` or `awk` into empty output, and empty
+  # output reads as "clean" -- stamping a dirty tree with a clean version.
+  if ! dirty_entries="$(git -C "${ANYKA_REPO_ROOT}" status --porcelain \
       -- ':!SD_card_contents/anyka_hack/anyka-init.bin' \
          ':!SD_card_contents/anyka_hack/onvif/onvif-rust.bin' \
          ':!SD_card_contents/anyka_hack/onvif/.build-version' \
@@ -131,8 +134,12 @@ if [[ -z "${ANYKA_BUILD_VERSION:-}" ]]; then
                 (index($0, "?? SD_card_contents/anyka_hack/vendor-daemon/") == 1 &&
                  index($0, "?? SD_card_contents/anyka_hack/vendor-daemon/lib/") != 1))
               print
-          }' \
-     || true)" ]]; then
+          }')"; then
+    log_error "could not inspect the working tree for local modifications"
+    log_error "refusing to stamp a version that might wrongly claim a clean tree"
+    exit 1
+  fi
+  if [[ -n "${dirty_entries}" ]]; then
     ANYKA_BUILD_VERSION="${ANYKA_BUILD_VERSION}-dirty"
   fi
 fi

@@ -10,11 +10,14 @@
 # The password is NEVER a command-line argument (it would land in shell
 # history and `ps`). Pass it via CAMERA_PASS env or --pass-file FILE:
 #   ./scripts/push_bundle.sh --host 192.168.2.198 --user admin \
-#       --pass-file <(echo "$CAMERA_PASS") bundle.tar
-#   CAMERA_PASS=SECRET ./scripts/push_bundle.sh --host 192.168.2.198 \
-#       --user admin bundle.tar
+#       --pass-file /path/to/netrc-credential bundle.tar
 #   ./scripts/push_bundle.sh --host 192.168.30.10 --jumphost root@192.168.3.137 \
 #       --user admin --pass-file /path/to/netrc-credential bundle.tar
+#
+# Or export it first — never inline as `CAMERA_PASS=... ./scripts/...`, which
+# records the literal in shell history:
+#   export CAMERA_PASS
+#   ./scripts/push_bundle.sh --host 192.168.2.198 --user admin bundle.tar
 #
 # Env fallbacks: CAMERA_HOST, CAMERA_USER, CAMERA_PASS, CAMERA_JUMPHOST
 
@@ -53,12 +56,13 @@ Password is taken from CAMERA_PASS or --pass-file only — never from argv, so
 it stays out of shell history and `ps`.
 
 Examples:
-  CAMERA_PASS=SECRET ./scripts/push_bundle.sh --host 192.168.2.198 \
-      --user admin bundle.tar
   ./scripts/push_bundle.sh --host 192.168.2.198 --user admin \
-      --pass-file <(echo -n "$CAMERA_PASS") bundle.tar
+      --pass-file /path/to/netrc-credential bundle.tar
   ./scripts/push_bundle.sh --host 192.168.30.10 --jumphost root@192.168.3.137 \
-      --user admin --pass-file <(echo -n "$CAMERA_PASS") bundle.tar
+      --user admin --pass-file /path/to/netrc-credential bundle.tar
+
+  export CAMERA_PASS        # then omit --pass-file entirely
+  ./scripts/push_bundle.sh --host 192.168.2.198 --user admin bundle.tar
 
 After 202: wait for reboot (~90s), then verify ports 80/554/8080 and
 GET /api/diagnostics firmware_version. See skill anyka-firmware-upgrade.

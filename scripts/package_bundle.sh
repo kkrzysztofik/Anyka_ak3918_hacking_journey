@@ -36,10 +36,18 @@ fi
 # Falling back to a fresh `git describe` would risk a bundle that claims a
 # version the binary does not report.
 if [[ -f "${SRC}/onvif/.build-version" ]]; then
-  VERSION="$(cat "${SRC}/onvif/.build-version")"
+  VERSION="$(tr -d '[:space:]' < "${SRC}/onvif/.build-version")"
 else
   VERSION="$(git -C "${ANYKA_REPO_ROOT}" describe --tags --always --dirty)"
   log_warn "no ${SRC}/onvif/.build-version (build onvif-rust first); falling back to git describe"
+fi
+
+# An empty VERSION would make every check below vacuous: the embedded-version
+# grep matches any binary, and manifest.meta would ship `version=`.
+if [[ -z "${VERSION}" ]]; then
+  log_error "version stamp is empty (${SRC}/onvif/.build-version present but blank)"
+  log_error "rebuild with ./scripts/build_bundle.sh; a blank stamp cannot be validated"
+  exit 1
 fi
 
 # The manifest must not be able to claim a version the binary does not report.
@@ -52,11 +60,18 @@ fi
 # a1660798-dirty. Every downstream gate compares the two, so catch it here.
 # Rust &str literals are length-prefixed (not NUL-terminated), so `strings`
 # glues this to the next .rodata literal. `grep -Fx` (whole-line match) fails
-# on the concatenated output; `grep -qF` (substring) finds the stamp. The old
-# prefix-collision risk ("H" matching "H-dirty") is nil for 12+ char git
-# hashes: a false match would require a coincidental 15-char prefix in .rodata.
-if ! strings -a "${SRC}/onvif/onvif-rust.bin" | grep -F -- "${VERSION}" >/dev/null; then
-  log_error "onvif-rust.bin does not embed the version string '${VERSION}'"
+# on the concatenated output, so the match has to be a substring one.
+#
+# That is why the stamp is delimited. A bare `grep -F -- "${VERSION}"` is not
+# merely collision-prone, it is systematically wrong in one direction: a clean
+# version is a proper prefix of its own dirty form, so `a1660798` matches a
+# binary stamped `a1660798-dirty` every time. That is the exact mislabelling
+# described above. src/lib.rs stores the version only as
+# `<<ANYKA_BUILD_VERSION:...>>`, so including the trailing delimiter makes the
+# substring match exact at both ends.
+STAMP="<<ANYKA_BUILD_VERSION:${VERSION}>>"
+if ! strings -a "${SRC}/onvif/onvif-rust.bin" | grep -F -- "${STAMP}" >/dev/null; then
+  log_error "onvif-rust.bin does not embed the build stamp '${STAMP}'"
   log_error "the binary was not recompiled for this stamp; the bundle would be mislabelled"
   log_info  "force a rebuild with:"
   log_info  "  touch cross-compile/onvif-rust/src/lib.rs && ./scripts/build_payload.sh"
@@ -86,8 +101,10 @@ EOF
 
 # sha256sum format, so `busybox sha256sum -c manifest.sha256` verifies it on the
 # device and a human can verify it by hand over telnet.
-( cd "${STAGE}" && find . -type f ! -name manifest.sha256 -printf '%P\n' \
-    | sort | xargs sha256sum > manifest.sha256 )
+# NUL-delimited: a bundled asset with whitespace in its name would otherwise be
+# split by xargs and silently checksummed under the wrong path, or omitted.
+( cd "${STAGE}" && find . -type f ! -name manifest.sha256 -printf '%P\0' \
+    | sort -z | xargs -0 sha256sum > manifest.sha256 )
 
 tar -cf "${OUT}" -C "${STAGE}" .
 

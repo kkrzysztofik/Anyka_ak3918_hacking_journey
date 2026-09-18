@@ -14,6 +14,7 @@ Two failure modes this catches, both silent in every host:
    file's content. That is what killed `.opencode/skills/` for two months.
 """
 
+import json
 import sys
 from pathlib import Path
 
@@ -86,6 +87,45 @@ def find_stub_symlinks(root):
     return stubs
 
 
+def check_pi_settings(repo_root):
+    """Verify .pi/settings.json actually points pi at the project skills.
+
+    Reads the file rather than probing a constant path: invalid JSON, a missing
+    `skills` key and a typo'd path all leave pi discovering nothing, and all
+    three look identical from the outside.
+    """
+    settings = repo_root / ".pi" / "settings.json"
+    skills_dir = (repo_root / ".claude" / "skills").resolve()
+
+    if not settings.is_file():
+        return [f"{settings} is missing; pi will not see project skills"]
+
+    try:
+        data = json.loads(settings.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        return [f"{settings} is not valid JSON: {exc}"]
+
+    if not isinstance(data, dict) or "skills" not in data:
+        return [f"{settings} has no 'skills' key; pi will not see project skills"]
+
+    entries = data["skills"]
+    if not isinstance(entries, list):
+        return [f"{settings} 'skills' must be a list, got {type(entries).__name__}"]
+
+    # Paths are relative to the .pi/ directory, per pi's docs.
+    for entry in entries:
+        resolved = (settings.parent / str(entry)).resolve()
+        if not resolved.is_dir():
+            continue
+        if resolved == skills_dir:
+            return []
+
+    listed = ", ".join(repr(e) for e in entries) or "nothing"
+    if any((settings.parent / str(e)).resolve().is_dir() for e in entries):
+        return [f"{settings} does not point at {skills_dir}; it lists {listed}"]
+    return [f"{settings} path does not resolve: it lists {listed}"]
+
+
 def main():
     errors = []
 
@@ -107,10 +147,7 @@ def main():
         for stub in find_stub_symlinks(directory):
             errors.append(f"{stub} looks like a symlink committed as text")
 
-    if not PI_SETTINGS.is_file():
-        errors.append(f"{PI_SETTINGS} is missing; pi will not see project skills")
-    elif not (PI_SETTINGS.parent / ".." / ".claude" / "skills").resolve().is_dir():
-        errors.append("pi settings point at a directory that does not resolve")
+    errors.extend(check_pi_settings(REPO_ROOT))
 
     for error in errors:
         print(f"FAIL: {error}")

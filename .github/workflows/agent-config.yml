@@ -37,7 +37,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6.0.0
+        with:
+          persist-credentials: false
 
       - name: Unit Tests
         working-directory: scripts/ci

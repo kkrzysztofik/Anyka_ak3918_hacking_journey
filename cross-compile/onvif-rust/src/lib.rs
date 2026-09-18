@@ -52,11 +52,27 @@ pub fn allocated() -> usize {
     ALLOCATOR.allocated()
 }
 
+/// Delimited build stamp, and the only place the version string lives in the
+/// binary.
+///
+/// `scripts/package_bundle.sh` greps the binary to prove it was compiled for
+/// the version `manifest.meta` claims. A bare substring search cannot do that:
+/// a clean stamp is a prefix of the dirty one, so `abc123` matches a binary
+/// built from `abc123-dirty` and a mislabelled bundle passes. The delimiters
+/// make the match exact.
+///
+/// `build_version()` returns a slice of this constant rather than `env!`
+/// directly, so the delimited form is what lands in `.rodata` and cannot be
+/// optimised away while anything reads the version.
+const BUILD_STAMP: &str = concat!("<<ANYKA_BUILD_VERSION:", env!("ANYKA_BUILD_VERSION"), ">>");
+
+const BUILD_STAMP_PREFIX: &str = "<<ANYKA_BUILD_VERSION:";
+
 /// `git describe` at build time — the version reported as `FirmwareVersion`
 /// and in `/api/diagnostics`. Emitted by `build.rs`; never missing, so this
 /// can be `env!` rather than `option_env!`.
 pub fn build_version() -> &'static str {
-    env!("ANYKA_BUILD_VERSION")
+    &BUILD_STAMP[BUILD_STAMP_PREFIX.len()..BUILD_STAMP.len() - ">>".len()]
 }
 
 pub mod app;
@@ -91,3 +107,26 @@ pub mod time;
 // Re-export main types for convenience
 pub use app::{AppState, AppStateBuilder, AppStateError, Application};
 pub use lifecycle::{RuntimeError, ShutdownReport, ShutdownStatus, StartupError};
+
+#[cfg(test)]
+mod build_stamp_tests {
+    use super::*;
+
+    #[test]
+    fn test_build_version_strips_the_stamp_delimiters() {
+        let version = build_version();
+        assert!(!version.is_empty(), "build version must not be empty");
+        assert!(!version.starts_with('<'), "prefix leaked: {version}");
+        assert!(!version.ends_with('>'), "suffix leaked: {version}");
+        assert_eq!(BUILD_STAMP, format!("<<ANYKA_BUILD_VERSION:{version}>>"));
+    }
+
+    #[test]
+    fn test_build_stamp_is_greppable_exactly() {
+        // package_bundle.sh greps for this literal. A clean version must not
+        // match a dirty binary's stamp, which is what the delimiters buy.
+        let clean = "abc123";
+        let dirty_stamp = format!("<<ANYKA_BUILD_VERSION:{clean}-dirty>>");
+        assert!(!dirty_stamp.contains(&format!("<<ANYKA_BUILD_VERSION:{clean}>>")));
+    }
+}

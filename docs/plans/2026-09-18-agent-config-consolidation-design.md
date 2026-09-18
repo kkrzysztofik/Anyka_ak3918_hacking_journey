@@ -135,6 +135,14 @@ layout with `slots/{a,b}`.
 
 Add a routing table at the top:
 
+> **Superseded 2026-09-19.** The script names below are the ones in use when
+> this design was written. They were renamed later in the same PR:
+> `build_sd_contents.sh` → `build_payload.sh`, `build_bundle.sh` →
+> `package_bundle.sh`, `build_upgrade_bundle.sh` → `build_bundle.sh`,
+> `copy_sd_contents.sh` → `push_payload.sh`, `upload_upgrade_bundle.sh` →
+> `push_bundle.sh`. See `scripts/README.md` for the current set. The table is
+> left as written because this is a dated record, not live documentation.
+
 | I want to… | Path |
 |---|---|
 | Ship a versioned change to a running camera | `build_upgrade_bundle.sh` → `upload_upgrade_bundle.sh` (A/B, auto-rollback) |

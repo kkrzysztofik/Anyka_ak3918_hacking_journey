@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from check_agent_config import find_stub_symlinks, load_skills
+from check_agent_config import check_pi_settings, find_stub_symlinks, load_skills
 
 
 class TestLoadSkills(unittest.TestCase):
@@ -81,6 +81,60 @@ class TestFindStubSymlinks(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             (Path(tmp) / "VERSION").write_text("1.2.3\n")
             self.assertEqual(find_stub_symlinks(Path(tmp)), [])
+
+
+class TestCheckPiSettings(unittest.TestCase):
+    """The guard must read settings.json, not just probe a constant path.
+
+    Every case here previously passed: the old check resolved a hard-coded
+    path and never opened the file.
+    """
+
+    def _repo(self, tmp, settings_text=None):
+        """Build a repo with .claude/skills/ present and optional .pi/settings.json."""
+        root = Path(tmp)
+        (root / ".claude" / "skills").mkdir(parents=True)
+        if settings_text is not None:
+            (root / ".pi").mkdir()
+            (root / ".pi" / "settings.json").write_text(settings_text)
+        return root
+
+    def test_check_pi_settings_valid_returns_no_errors(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._repo(tmp, '{"skills": ["../.claude/skills"]}')
+            self.assertEqual(check_pi_settings(root), [])
+
+    def test_check_pi_settings_missing_file_reports(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._repo(tmp)
+            self.assertIn("missing", " ".join(check_pi_settings(root)))
+
+    def test_check_pi_settings_invalid_json_reports(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._repo(tmp, '{"skills": [')
+            self.assertIn("not valid JSON", " ".join(check_pi_settings(root)))
+
+    def test_check_pi_settings_no_skills_key_reports(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._repo(tmp, '{"theme": "dark"}')
+            self.assertIn("no 'skills'", " ".join(check_pi_settings(root)))
+
+    def test_check_pi_settings_typo_in_path_reports(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._repo(tmp, '{"skills": ["../.calude/skills"]}')
+            joined = " ".join(check_pi_settings(root))
+            self.assertIn("does not resolve", joined)
+
+    def test_check_pi_settings_points_elsewhere_reports(self):
+        """Resolves to a real directory, but not the project skills dir."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._repo(tmp, '{"skills": ["/tmp"]}')
+            self.assertIn("does not point at", " ".join(check_pi_settings(root)))
+
+    def test_check_pi_settings_skills_not_a_list_reports(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._repo(tmp, '{"skills": "../.claude/skills"}')
+            self.assertIn("must be a list", " ".join(check_pi_settings(root)))
 
 
 if __name__ == "__main__":
