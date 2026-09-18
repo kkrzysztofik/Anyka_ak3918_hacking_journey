@@ -51,6 +51,9 @@ pub struct AppConfig {
     /// Event-triggered speaker chimes (`[sound]`).
     #[serde(default)]
     pub sound: SoundConfig,
+    /// System timezone (`[time]`).
+    #[serde(default)]
+    pub time: TimeConfig,
 }
 
 impl Default for AppConfig {
@@ -84,6 +87,7 @@ impl Default for AppConfig {
             stream_profile_4: p4,
             osd: OsdConfig::default(),
             sound: SoundConfig::default(),
+            time: TimeConfig::default(),
         }
     }
 }
@@ -1000,6 +1004,28 @@ impl StreamProfileConfig {
 }
 
 // ============================================================================
+// Section: [time]
+// ============================================================================
+
+/// System timezone (`[time]`).
+///
+/// A POSIX TZ string, e.g. `CET-1CEST,M3.5.0,M10.5.0/3`. Self-contained: the
+/// DST rules live in the string, so no zoneinfo files are needed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TimeConfig {
+    pub timezone: String,
+}
+
+impl Default for TimeConfig {
+    fn default() -> Self {
+        Self {
+            timezone: "UTC".to_string(),
+        }
+    }
+}
+
+// ============================================================================
 // Tests
 // ============================================================================
 
@@ -1512,5 +1538,18 @@ home_pan = 0.5
         // loading — a missing section means "defaults", not "reject the config".
         let cfg: AppConfig = toml::from_str("").unwrap();
         assert!(cfg.osd.enabled);
+    }
+
+    #[test]
+    fn test_time_config_defaults_to_utc() {
+        let c: AppConfig = toml::from_str("").unwrap_or_default();
+        assert_eq!(c.time.timezone, "UTC");
+    }
+
+    #[test]
+    fn test_time_config_round_trips_a_posix_string() {
+        let src = "[time]\ntimezone = \"CET-1CEST,M3.5.0,M10.5.0/3\"\n";
+        let c: AppConfig = toml::from_str(src).unwrap();
+        assert_eq!(c.time.timezone, "CET-1CEST,M3.5.0,M10.5.0/3");
     }
 }
