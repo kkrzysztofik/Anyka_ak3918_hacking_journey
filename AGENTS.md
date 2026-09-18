@@ -87,7 +87,10 @@ The project focuses on creating a fully ONVIF 24.12 compliant implementation whi
 | -------------------- | ------------------------------------------ | ------------------------------- |
 | **Naming**           | `snake_case` (vars/functions), `CamelCase` (types) | `camelCase`, `PascalCase` for vars |
 | **Error Handling**   | `Result<T, E>` with `?` operator           | `unwrap()`, `expect()` in production |
-| **Unsafe Code**      | Minimal, justified, documented `unsafe` blocks | Unjustified `unsafe` usage |
+| **Unsafe Code**      | Minimal, justified `unsafe` with a `// SAFETY:` comment | Unjustified or undocumented `unsafe` |
+| **Logging**          | `tracing::{info,warn,error}!`              | `println!`, `eprintln!` in production |
+| **Async locks**      | `tokio::sync::{Mutex, RwLock}`             | `std::sync::Mutex` in async code (blocks the executor) |
+| **Memory (24 MB)**   | `Box<T>` for multi-KB structs, `&str` in signatures | Large stack allocations, `String` params |
 | **Test names**       | `test_device_get_info_success`             | `test_init`, `test1`            |
 | **Mock traits**      | `mockall` with `#[automock]`               | Manual mock implementations    |
 
