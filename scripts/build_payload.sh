@@ -1,18 +1,21 @@
 #!/usr/bin/env bash
-# Assemble SD card payload into SD_card_contents/ (does not copy to media/device).
+# STAGE:   build — compiles sources. Produces nothing on a camera.
+# UNIT:    the whole payload tree, SD_card_contents/anyka_hack/
+# USE FOR: getting fresh binaries before packaging or pushing.
+# NEXT:    package_bundle.sh (-> bundle.tar) or push_payload.sh (-> card/camera)
 #
-# Builds vendor-daemon, onvif-rust, anyka-init, snmp-agent, and the WebUI into:
-#   SD_card_contents/anyka_hack/
-# Factory scripts are already tracked under SD_card_contents/Factory/.
+# Compiles vendor-daemon, onvif-rust, anyka-init, snmp-agent and the WebUI into
+# SD_card_contents/anyka_hack/. Factory scripts are already tracked under
+# SD_card_contents/Factory/. Does not copy anything to media or a device.
 #
 # Usage:
-#   ./scripts/build_sd_contents.sh
-#   ./scripts/build_sd_contents.sh --skip-www
-#   ./scripts/build_sd_contents.sh --debug
+#   ./scripts/build_payload.sh
+#   ./scripts/build_payload.sh --skip-www
+#   ./scripts/build_payload.sh --debug
 #
 # After this succeeds, copy to a card/device with:
-#   ./scripts/copy_sd_contents.sh --sd /path/to/mount
-#   ./scripts/copy_sd_contents.sh --ftp 192.168.1.100
+#   ./scripts/push_payload.sh --sd /path/to/mount
+#   ./scripts/push_payload.sh --ftp 192.168.1.100
 
 set -euo pipefail
 
@@ -26,7 +29,7 @@ BUILD_MODE="release"
 
 usage() {
   cat <<'EOF'
-Usage: build_sd_contents.sh [OPTIONS]
+Usage: build_payload.sh [OPTIONS]
 
 Assemble vendor-daemon, onvif-rust, anyka-init, and WebUI into SD_card_contents/.
 
@@ -37,9 +40,9 @@ Options:
   -h, --help      Show this help
 
 Examples:
-  ./scripts/build_sd_contents.sh
-  ./scripts/build_sd_contents.sh --skip-www
-  ./scripts/build_sd_contents.sh --debug
+  ./scripts/build_payload.sh
+  ./scripts/build_payload.sh --skip-www
+  ./scripts/build_payload.sh --debug
 EOF
 }
 
@@ -276,6 +279,7 @@ log_info "Payload roots:"
 log_info "  ${ANYKA_HACK}"
 log_info "  ${FACTORY_DIR}"
 echo ""
-log_info "Next: copy to SD card or camera:"
-log_info "  ./scripts/copy_sd_contents.sh --sd /path/to/mounted/sd"
-log_info "  ./scripts/copy_sd_contents.sh --ftp <camera-ip>"
+log_info "Next: package as an upgrade bundle, or push the whole payload:"
+log_info "  ./scripts/package_bundle.sh                       # -> bundle.tar"
+log_info "  ./scripts/push_payload.sh --sd /path/to/mounted/sd"
+log_info "  ./scripts/push_payload.sh --ftp <camera-ip>"

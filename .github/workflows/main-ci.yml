@@ -369,7 +369,7 @@ jobs:
         run: npm ci
 
       # One step, not three. `verify` (type-check + lint + format:check) is
-      # defined in package.json and shared with scripts/build_sd_contents.sh;
+      # defined in package.json and shared with scripts/build_payload.sh;
       # splitting it here would give a nicer UI at the cost of CI owning its
       # own copy of the gate list, which is the drift that let three TS7
       # errors merge green. The log shows which half failed.
@@ -466,7 +466,7 @@ jobs:
 
       # The WebUI's npm tree. Lives here rather than in the webui job because
       # `npm audit` needs the network, and the webui gate list (`npm run
-      # verify`) is shared with scripts/build_sd_contents.sh, which has to keep
+      # verify`) is shared with scripts/build_payload.sh, which has to keep
       # working offline.
       - name: Use Node.js
         if: always()

@@ -15,7 +15,7 @@
 - Verify the server port is not blocked: `netstat -ln | grep 8080`
 - Check `/mnt/logs/onvif.log` and `/mnt/logs/anyka-init.log`
 - A wrong system clock rejects authenticated ONVIF — confirm time sync in the supervisor log
-- Ensure the Rust binary is properly compiled and deployed (`./scripts/build_sd_contents.sh`)
+- Ensure the Rust binary is properly compiled and deployed (`./scripts/build_payload.sh`)
 
 ## PTZ Controls Not Working
 

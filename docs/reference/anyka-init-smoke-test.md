@@ -13,9 +13,9 @@ Plan: `docs/plans/2026-08-01-boot-runtime-rust.md`
 ```bash
 cd <repo>
 source ./setenv.sh
-./scripts/build_sd_contents.sh
+./scripts/build_payload.sh
 $EDITOR SD_card_contents/anyka_hack/anyka.toml   # set [wifi] ssid/password
-./scripts/copy_sd_contents.sh --sd /path/to/mounted/card
+./scripts/push_payload.sh --sd /path/to/mounted/card
 sync
 ```
 

@@ -143,7 +143,7 @@ probe="$(cam 'echo alive')" || true
 # already happened.
 if [[ "$(cam "[ -d '${ROOT}/slots' ] && echo yes || echo no")" = *yes* ]]; then
   log_error "${ROOT}/slots already exists — this camera is already migrated."
-  log_error "Use ./scripts/upload_upgrade_bundle.sh for a normal upgrade."
+  log_error "Use ./scripts/push_bundle.sh for a normal upgrade."
   exit 1
 fi
 [[ "$(cam "[ -x '${ROOT}/anyka-init.bin' ] && echo yes || echo no")" = *yes* ]] \

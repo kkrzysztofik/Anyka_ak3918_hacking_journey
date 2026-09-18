@@ -21,7 +21,7 @@ This replaces `gergehack.sh`, `common.sh`, `sys_monitor.sh`,
 
    ```bash
    source ./setenv.sh
-   ./scripts/build_sd_contents.sh
+   ./scripts/build_payload.sh
    ```
 
 2. **Edit Wi-Fi before first boot** in `SD_card_contents/anyka_hack/anyka.toml`:
@@ -36,7 +36,7 @@ This replaces `gergehack.sh`, `common.sh`, `sys_monitor.sh`,
    fail to associate if you forget this step.
 
 3. Copy `anyka_hack/` and `Factory/` onto the card (or use
-   `./scripts/copy_sd_contents.sh --sd /path/to/mount`).
+   `./scripts/push_payload.sh --sd /path/to/mount`).
 
 4. Insert the card and power on. After ~30 s you should have:
 
@@ -188,15 +188,15 @@ Shipped services: `udhcpc`, `wpa_supplicant`, `vendor-daemon`, `onvif`,
 
 ```bash
 # Full SD payload (vendor-daemon, onvif-rust, anyka-init, WebUI)
-./scripts/build_sd_contents.sh
+./scripts/build_payload.sh
 
 # Skip WebUI or vendor-daemon when iterating
-./scripts/build_sd_contents.sh --skip-www
-./scripts/build_sd_contents.sh --debug
+./scripts/build_payload.sh --skip-www
+./scripts/build_payload.sh --debug
 
-# Copy to a mounted card or over FTP
-./scripts/copy_sd_contents.sh --sd /path/to/mount
-./scripts/copy_sd_contents.sh --ftp 192.168.1.100
+# Push to a mounted card or over FTP
+./scripts/push_payload.sh --sd /path/to/mount
+./scripts/push_payload.sh --ftp 192.168.1.100
 ```
 
 Host tests for the supervisor crate:

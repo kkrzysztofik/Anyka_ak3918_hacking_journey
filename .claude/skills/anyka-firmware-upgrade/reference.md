@@ -49,13 +49,13 @@ spool/
 
 ## Bundle contents
 
-Produced by `scripts/build_bundle.sh` from `SD_card_contents/anyka_hack/`:
+Produced by `scripts/package_bundle.sh` from `SD_card_contents/anyka_hack/`:
 
 - `anyka-init.bin`, `vendor-daemon/`, `onvif/onvif-rust.bin`, `onvif/www/`, `onvif/config.template.toml`
 - `manifest.sha256`, `manifest.meta` (`version` from `onvif/.build-version`, `requires_config_schema`)
 
 `onvif/.build-version` is written by the onvif-rust build and is the normal
-source for `manifest.meta`'s `version`; `scripts/build_bundle.sh` falls back to
+source for `manifest.meta`'s `version`; `scripts/package_bundle.sh` falls back to
 `git describe` (with a warning) only when the binary was never built by the
 pipeline, so the manifest always matches the binary's reported `FirmwareVersion`.
 

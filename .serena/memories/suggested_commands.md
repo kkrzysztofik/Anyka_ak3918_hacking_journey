@@ -127,15 +127,15 @@ card, or `PUT /api/update`.
 
 ```bash
 # DEFAULT: versioned A/B upgrade of a running camera, with auto-rollback
-./scripts/build_upgrade_bundle.sh                     # -> bundle.tar
-CAMERA_PASS="$CAMERA_PASS" ./scripts/upload_upgrade_bundle.sh \
+./scripts/build_bundle.sh                             # compile + package -> bundle.tar
+CAMERA_PASS="$CAMERA_PASS" ./scripts/push_bundle.sh \
     --host 192.168.2.198 --user admin bundle.tar      # expect HTTP 202
 # Never pass the password as an argv element; use CAMERA_PASS or --pass-file.
 
 # Fresh camera, or a change to lib/ or Factory: full SD payload
-./scripts/build_sd_contents.sh                        # assemble only
-./scripts/copy_sd_contents.sh --sd /path/to/mount     # mounted SD card
-./scripts/copy_sd_contents.sh --ftp 192.168.2.198     # or over FTP
+./scripts/build_payload.sh                            # compile only
+./scripts/push_payload.sh --sd /path/to/mount         # mounted SD card
+./scripts/push_payload.sh --ftp 192.168.2.198         # or over FTP
 # A mode is mandatory: with no --sd/--ftp the script exits 1.
 
 # One-time per camera: move a flat install onto the A/B slot layout
