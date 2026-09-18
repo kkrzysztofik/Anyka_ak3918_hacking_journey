@@ -11,7 +11,7 @@
 
 use std::sync::Arc;
 
-use chrono::{Datelike, Timelike, Utc};
+use chrono::{Datelike, NaiveDate, NaiveDateTime, NaiveTime, TimeZone as _, Timelike, Utc};
 
 use crate::config::ConfigRuntime;
 use crate::onvif::device::types::{
@@ -245,19 +245,87 @@ pub fn handle_get_system_date_and_time(
 
 /// Handle SetSystemDateAndTime request.
 ///
-/// Not yet implemented - returns ActionNotSupported fault.
-// TODO: Implement platform call for SetSystemDateAndTime
+/// Validates the zone first and faults without a partial apply: `ter:InvalidArgVal`
+/// for a bad POSIX TZ string, `ter:MissingAttr` for `Manual` without a UTC time.
+/// `Manual` steps the wall clock and suspends NTP via the marker file; `NTP`
+/// clears the marker and leaves the clock to the sync loop.
 pub fn handle_set_system_date_and_time(
+    config: &Arc<ConfigRuntime>,
     request: SetSystemDateAndTime,
 ) -> OnvifResult<SetSystemDateAndTimeResponse> {
     tracing::debug!(
-        "SetSystemDateAndTime request: type={:?} (not implemented)",
+        "SetSystemDateAndTime request: type={:?}",
         request.date_time_type
     );
 
-    Err(OnvifError::ActionNotSupported(
-        "SetSystemDateAndTime".to_string(),
-    ))
+    let tz_string = request.time_zone.map(|t| t.tz);
+    let parsed =
+        match tz_string.as_deref() {
+            Some(s) => Some(crate::time::tz::parse(s).map_err(|e| {
+                OnvifError::invalid_arg("ter:InvalidArgVal", format!("timezone: {e}"))
+            })?),
+            None => None,
+        };
+
+    if let (Some(parsed), Some(tz_string)) = (parsed.as_ref(), tz_string.as_ref()) {
+        crate::time::tz::set_current(parsed.clone());
+        config.write().time.timezone = tz_string.clone();
+    }
+
+    let update_root = config.read().update.root.clone();
+    let marker = crate::time::ntp_marker::NtpMarker::new(&update_root);
+
+    match request.date_time_type {
+        SetDateTimeType::Manual => {
+            let dt = request
+                .utc_date_time
+                .ok_or_else(|| OnvifError::missing_arg("utc_date_time required for Manual"))?;
+            let naive = NaiveDateTime::new(
+                NaiveDate::from_ymd_opt(dt.date.year, dt.date.month as u32, dt.date.day as u32)
+                    .ok_or_else(|| {
+                        OnvifError::invalid_arg("ter:InvalidArgVal", "utc_date_time out of range")
+                    })?,
+                NaiveTime::from_hms_opt(
+                    dt.time.hour as u32,
+                    dt.time.minute as u32,
+                    dt.time.second as u32,
+                )
+                .ok_or_else(|| {
+                    OnvifError::invalid_arg("ter:InvalidArgVal", "utc_date_time out of range")
+                })?,
+            );
+            let ts = libc::timespec {
+                tv_sec: Utc
+                    .from_local_datetime(&naive)
+                    .single()
+                    .ok_or_else(|| {
+                        OnvifError::invalid_arg("ter:InvalidArgVal", "utc_date_time out of range")
+                    })?
+                    .timestamp(),
+                tv_nsec: 0,
+            };
+            // SAFETY: clock_settime(2) reads our own stack timespec; EINVAL/EPERM
+            // are returned, not trapped.
+            let rc = unsafe { libc::clock_settime(libc::CLOCK_REALTIME, &ts) };
+            if rc != 0 {
+                return Err(OnvifError::HardwareFailure(
+                    "clock_settime failed (need CAP_SYS_TIME)".to_string(),
+                ));
+            }
+            marker.disable().map_err(|e| {
+                OnvifError::HardwareFailure(format!("NTP marker write failed: {e}"))
+            })?;
+            tracing::info!("system clock set manually; NTP suspended via state/ntp.disabled");
+        }
+        SetDateTimeType::NTP => {
+            marker.enable().map_err(|e| {
+                OnvifError::HardwareFailure(format!("NTP marker clear failed: {e}"))
+            })?;
+            tracing::info!("NTP resync re-enabled; state/ntp.disabled removed");
+        }
+    }
+
+    Ok(SetSystemDateAndTimeResponse {})
 }
 
 /// Handle SystemReboot request.
@@ -611,11 +679,8 @@ mod tests {
         let _lock = crate::time::tz::test_lock();
         let config = create_test_config();
         config.write().time.timezone = "CET-1CEST,M3.5.0,M10.5.0/3".to_string();
-        crate::time::tz::set_current(
-            crate::time::tz::parse("CET-1CEST,M3.5.0,M10.5.0/3").unwrap(),
-        );
-        let r =
-            handle_get_system_date_and_time(&config, GetSystemDateAndTime {}).unwrap();
+        crate::time::tz::set_current(crate::time::tz::parse("CET-1CEST,M3.5.0,M10.5.0/3").unwrap());
+        let r = handle_get_system_date_and_time(&config, GetSystemDateAndTime {}).unwrap();
         let sdt = r.system_date_and_time;
         assert_ne!(sdt.time_zone.as_ref().unwrap().tz, "UTC");
         let utc = sdt.utc_date_time.unwrap();
@@ -656,32 +721,62 @@ mod tests {
     }
 
     // ========================================================================
-    // SetSystemDateAndTime Test
+    // SetSystemDateAndTime Tests
     // ========================================================================
 
-    #[test]
-    fn test_set_system_date_and_time_not_supported() {
-        let result = handle_set_system_date_and_time(SetSystemDateAndTime {
-            date_time_type: SetDateTimeType::Manual,
+    use chrono::TimeZone as _;
+
+    /// Ntp-type request: host-safe (no clock step, marker removal is a
+    /// NotFound no-op) while still exercising the full TZ persist/apply path.
+    fn req_with_tz(tz: &str) -> SetSystemDateAndTime {
+        SetSystemDateAndTime {
+            date_time_type: SetDateTimeType::NTP,
             daylight_savings: false,
-            time_zone: Some(TimeZone {
-                tz: "UTC0".to_string(),
-            }),
-            utc_date_time: Some(DateTime {
-                date: Date {
-                    year: 2025,
-                    month: 1,
-                    day: 15,
-                },
-                time: Time {
-                    hour: 12,
-                    minute: 30,
-                    second: 0,
-                },
-            }),
-        });
-        assert!(result.is_err());
-        assert!(matches!(result, Err(OnvifError::ActionNotSupported(_))));
+            time_zone: Some(TimeZone { tz: tz.to_string() }),
+            utc_date_time: None,
+        }
+    }
+
+    #[test]
+    fn test_set_system_date_and_time_rejects_a_bad_timezone() {
+        let cfg = create_test_config();
+        let r = handle_set_system_date_and_time(&cfg, req_with_tz("not a zone"));
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn test_set_system_date_and_time_persists_and_applies_the_zone() {
+        let _lock = crate::time::tz::test_lock();
+        let cfg = create_test_config();
+        handle_set_system_date_and_time(&cfg, req_with_tz("CET-1CEST,M3.5.0,M10.5.0/3")).unwrap();
+        assert_eq!(cfg.read().time.timezone, "CET-1CEST,M3.5.0,M10.5.0/3");
+        let july = chrono::Utc.with_ymd_and_hms(2026, 7, 15, 12, 0, 0).unwrap();
+        assert_eq!(
+            crate::time::tz::current().offset_at(july).local_minus_utc(),
+            7200
+        );
+        crate::time::tz::set_current(crate::time::tz::PosixTz::utc());
+    }
+
+    #[test]
+    fn test_ntp_marker_round_trips() {
+        let dir = tempfile::tempdir().unwrap();
+        let m = crate::time::ntp_marker::NtpMarker::new(dir.path());
+        assert!(m.ntp_enabled());
+        m.disable().unwrap();
+        assert!(!m.ntp_enabled());
+        m.enable().unwrap();
+        assert!(m.ntp_enabled());
+    }
+
+    #[test]
+    fn test_set_system_date_and_time_rejects_manual_without_utc_time() {
+        let _lock = crate::time::tz::test_lock();
+        let cfg = create_test_config();
+        let mut req = req_with_tz("UTC0");
+        req.date_time_type = SetDateTimeType::Manual;
+        assert!(handle_set_system_date_and_time(&cfg, req).is_err());
+        crate::time::tz::set_current(crate::time::tz::PosixTz::utc());
     }
 
     // ========================================================================

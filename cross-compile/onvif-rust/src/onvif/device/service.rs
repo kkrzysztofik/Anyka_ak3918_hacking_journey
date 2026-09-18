@@ -420,7 +420,7 @@ impl ServiceHandler for DeviceService {
             }),
 
             "SetSystemDateAndTime" => dispatch_sync(body_xml, |request: SetSystemDateAndTime| {
-                system_ops::handle_set_system_date_and_time(request)
+                system_ops::handle_set_system_date_and_time(&config, request)
             }),
 
             // System Operations
