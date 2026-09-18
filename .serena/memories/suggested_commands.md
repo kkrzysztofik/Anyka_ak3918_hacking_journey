@@ -76,9 +76,13 @@ $CARGO test --target x86_64-unknown-linux-gnu
 ```bash
 # Build vendor daemon for ARM
 cd cross-compile/vendor-daemon
-make                               # Build with ARM cross-compiler
+make                               # Build with ARM cross-compiler (release)
+make debug                         # Symbols + -DDEBUG
+make test                          # Host-side unit tests (runs on x86_64)
 make clean                         # Clean build artifacts
 ```
+
+IPC protocol, ring buffer layout and C coding rules: `vendor-daemon-ipc` skill.
 
 ### WebUI Frontend (www)
 
@@ -117,25 +121,39 @@ npm run lint && npm run type-check && npm run test
 
 ### Device Deployment & Debugging
 
+Full procedure lives in the `anyka-firmware-upgrade` skill; this is the command
+summary. There is **no SSH** on the camera — every path is FTP, a mounted SD
+card, or `PUT /api/update`.
+
 ```bash
-# Navigate to scripts directory
-cd scripts
+# DEFAULT: versioned A/B upgrade of a running camera, with auto-rollback
+./scripts/build_upgrade_bundle.sh                     # -> bundle.tar
+CAMERA_PASS="$CAMERA_PASS" ./scripts/upload_upgrade_bundle.sh \
+    --host 192.168.2.198 --user admin bundle.tar      # expect HTTP 202
+# Never pass the password as an argv element; use CAMERA_PASS or --pass-file.
 
-# Deploy to camera (uploads ARM binaries); default device IP is 192.168.2.198
-./deploy_onvif.sh [device_ip] [username] [password]
-./deploy_onvif.sh 192.168.2.198 admin admin  # Example
+# Fresh camera, or a change to lib/ or Factory: full SD payload
+./scripts/build_sd_contents.sh                        # assemble only
+./scripts/copy_sd_contents.sh --sd /path/to/mount     # mounted SD card
+./scripts/copy_sd_contents.sh --ftp 192.168.2.198     # or over FTP
+# A mode is mandatory: with no --sd/--ftp the script exits 1.
 
-# Run on device
-./run_onvif.sh [device_ip] [username] [password] [release|debug]
+# One-time per camera: move a flat install onto the A/B slot layout
+./scripts/migrate_to_slots.sh
 
-# Copy payload to SD card
-./copy_sd_contents.sh
+# DEV ONLY — single binary, no versioning, no rollback. Not for upgrades.
+./scripts/deploy_onvif.sh [device_ip] [username] [password]
+./scripts/run_onvif.sh [device_ip] [username] [password] [release|debug]
+```
+
+Debugging (see the `anyka-remote-debugging` skill):
+
+```bash
+# Device shell over telnet (port 24; --host defaults to 192.168.2.198)
+./scripts/debugging/cam_exec.py '<command>'
 
 # Collect crash dumps
-./debugging/collect_coredump.sh [device_ip] [username] [password]
-
-# Device shell over telnet (port 24)
-./debugging/cam_exec.py '<command>'
+./scripts/debugging/collect_coredump.sh [device_ip] [username] [password]
 ```
 
 ### Git Workflow
