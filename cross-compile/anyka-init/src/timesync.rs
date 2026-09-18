@@ -208,6 +208,10 @@ pub fn sync_once(
     // Manual clock mode (onvif-rust's `state/ntp.disabled`): do not step the
     // clock over the user's manual setting.
     if ntp_disabled.is_file() {
+        tracing::info!(
+            marker = %ntp_disabled.display(),
+            "NTP disabled by operator (manual clock); not stepping the clock"
+        );
         return None;
     }
     let bounds = Bounds {
