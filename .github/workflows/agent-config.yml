@@ -1,0 +1,47 @@
+name: Agent Config
+
+# main-ci.yml filters on cross-compile/**, validation/**, scripts/**,
+# SD_card_contents/** and .github/workflows/** — none of which cover
+# .claude/**, .opencode/** or .pi/**. A skills-only change triggers no
+# workflow there, so this one carries its own filters.
+#
+# No step consumes github.event data, so there is no injection surface.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".claude/**"
+      - ".opencode/**"
+      - ".pi/**"
+      - "scripts/ci/check_agent_config.py"
+      - "scripts/ci/test_check_agent_config.py"
+      - ".github/workflows/agent-config.yml"
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+    paths:
+      - ".claude/**"
+      - ".opencode/**"
+      - ".pi/**"
+      - "scripts/ci/check_agent_config.py"
+      - "scripts/ci/test_check_agent_config.py"
+      - ".github/workflows/agent-config.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Skills & agent config
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Unit Tests
+        working-directory: scripts/ci
+        run: python3 -m unittest test_check_agent_config -v
+
+      - name: Check Agent Config
+        run: python3 scripts/ci/check_agent_config.py
