@@ -1051,10 +1051,16 @@ jobs:
             ---
             *This comment is automatically updated on each push to the PR*`;
 
-            const { data: comments } = await github.rest.issues.listComments({
+            // Paginate. listComments returns 30 per page by default, so on a
+            // busy PR the existing summary falls off page one, the find below
+            // misses it, and each push appends another copy instead of
+            // updating. No PR has passed 30 comments yet; CodeRabbit threads
+            // make that a matter of time.
+            const comments = await github.paginate(github.rest.issues.listComments, {
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number,
+              per_page: 100,
             });
 
             const botComment = comments.find(comment =>
