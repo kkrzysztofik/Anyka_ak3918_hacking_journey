@@ -135,4 +135,8 @@ export function DeviceSettings({ onSave, initialData = { name: '', model: '' } }
 
 ## Reference
 
+Designing a new feature rather than building a specified one? Start with
+[references/personas.md](references/personas.md) — the three user personas, the
+design constraints table, and the JTBD / journey-map / component-spec templates.
+
 For detailed patterns see `.serena/memories/www-development-standards.md` (component structure, data attributes, error handling) and `.serena/memories/www-design-system.md` (layout, spacing, components). Quality gates: `cd cross-compile/www && npm run lint && npm run type-check && npm run test`.
