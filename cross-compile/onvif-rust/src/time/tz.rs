@@ -389,4 +389,23 @@ mod tests {
         );
         set_current(PosixTz::utc()); // restore for other tests
     }
+
+    /// Mirrors `www/src/utils/timezones.ts`. If you add a zone to the WebUI
+    /// picker, add it here too — an unparseable value would leave the operator
+    /// unable to select a zone the camera accepts.
+    #[test]
+    fn test_every_webui_timezone_parses() {
+        for tz in [
+            "UTC0",
+            "GMT0BST,M3.5.0/1,M10.5.0",
+            "CET-1CEST,M3.5.0,M10.5.0/3",
+            "EET-2EEST,M3.5.0/3,M10.5.0/4",
+            "EST5EDT,M3.2.0,M11.1.0",
+            "PST8PDT,M3.2.0,M11.1.0",
+            "CST-8",
+            "JST-9",
+        ] {
+            assert!(parse(tz).is_ok(), "WebUI offers {tz:?}, which the camera rejects");
+        }
+    }
 }
