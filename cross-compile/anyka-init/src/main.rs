@@ -75,7 +75,15 @@ fn main() {
     let probed = boot::system_setup(sysimpl.as_ref(), &cfg, &baseline_cfg.wifi, overlay_path);
 
     // P2.5
-    timesync::first_sync(sysimpl.as_ref(), &cfg.time);
+    // Boot resets manual clock mode: create the state dir (idempotent) and
+    // clear any marker left by a pre-reboot SetSystemDateAndTime Manual call,
+    // so NTP resumes by default.
+    let ntp_marker = timesync::ntp_disabled_marker_path(std::path::Path::new(&cfg.update.root));
+    if let Some(dir) = ntp_marker.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let _ = std::fs::remove_file(&ntp_marker);
+    timesync::first_sync(sysimpl.as_ref(), &cfg.time, &ntp_marker);
 
     // Channel is created before the monitor so link recovery can request
     // service restarts without racing the supervisor's own spawn path (R15).
@@ -202,11 +210,12 @@ fn spawn_optional_threads(
     if cfg.time.enabled {
         let s = Arc::clone(sysimpl);
         let tcfg = cfg.time.clone();
+        let ntp_marker = timesync::ntp_disabled_marker_path(std::path::Path::new(&cfg.update.root));
         let _ = std::thread::Builder::new()
             .name("timesync".into())
             .stack_size(supervisor_loop::thread_stack())
             .spawn(move || {
-                timesync::resync_loop(s.as_ref(), &tcfg);
+                timesync::resync_loop(s.as_ref(), &tcfg, &ntp_marker);
             });
     }
 

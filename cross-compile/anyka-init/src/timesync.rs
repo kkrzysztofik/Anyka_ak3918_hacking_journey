@@ -13,6 +13,7 @@ use crate::config::TimeCfg;
 use crate::sys::Sys;
 use std::io::Read;
 use std::net::{ToSocketAddrs, UdpSocket};
+use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 /// Seconds between the NTP epoch (1900-01-01) and the Unix epoch.
@@ -181,6 +182,54 @@ pub fn query(server: &str, timeout: Duration, bounds: &Bounds) -> anyhow::Result
     Ok(parse_response(&buf, nonce, bounds)?)
 }
 
+/// `{update_root}/state/ntp.disabled` — the manual-clock marker shared with
+/// onvif-rust, which writes it on `SetSystemDateAndTime` Manual mode.
+///
+/// Deliberately a bare filename, not a parsed file: `update.rs:143` records
+/// why structured state on exFAT after a power cut is a hazard here.
+pub struct NtpMarker {
+    path: PathBuf,
+}
+
+impl NtpMarker {
+    pub fn new(update_root: impl AsRef<Path>) -> Self {
+        Self {
+            path: ntp_disabled_marker_path(update_root.as_ref()),
+        }
+    }
+
+    /// Absent marker means NTP runs. Absence is the safe default: if the SD
+    /// card drops, the camera resumes syncing rather than drifting silently.
+    pub fn ntp_enabled(&self) -> bool {
+        !self.path.is_file()
+    }
+
+    pub fn disable(&self) -> std::io::Result<()> {
+        if let Some(dir) = self.path.parent() {
+            std::fs::create_dir_all(dir)?;
+        }
+        std::fs::write(&self.path, b"")?;
+        // SAFETY: sync(2) takes no arguments and cannot fail.
+        unsafe { libc::sync() };
+        Ok(())
+    }
+
+    pub fn enable(&self) -> std::io::Result<()> {
+        match std::fs::remove_file(&self.path) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e),
+        }
+        // SAFETY: sync(2) takes no arguments and cannot fail.
+        unsafe { libc::sync() };
+        Ok(())
+    }
+}
+
+pub fn ntp_disabled_marker_path(update_root: &Path) -> PathBuf {
+    update_root.join("state/ntp.disabled")
+}
+
 /// Query each configured server in turn; step the clock on the first success.
 /// Returns the applied delta in seconds, or `None` if nothing was applied.
 ///
@@ -189,7 +238,17 @@ pub fn query(server: &str, timeout: Duration, bounds: &Bounds) -> anyhow::Result
 /// DNS via `to_socket_addrs` has no caller-controlled deadline, so a single
 /// hung resolver can still overrun — the budget still bounds retries and
 /// subsequent servers.
-pub fn sync_once(sys: &dyn Sys, cfg: &TimeCfg, budget: Option<Duration>) -> Option<i64> {
+pub fn sync_once(
+    sys: &dyn Sys,
+    cfg: &TimeCfg,
+    budget: Option<Duration>,
+    ntp_disabled: &Path,
+) -> Option<i64> {
+    // Manual clock mode (onvif-rust's `state/ntp.disabled`): do not step the
+    // clock over the user's manual setting.
+    if ntp_disabled.is_file() {
+        return None;
+    }
     let bounds = Bounds {
         min_unix: cfg.min_plausible_unix,
         max_unix: cfg.max_plausible_unix,
@@ -241,7 +300,7 @@ fn delta_secs(from: SystemTime, to: SystemTime) -> i64 {
 
 /// P2.5: bounded best-effort first sync. Never blocks boot beyond
 /// `first_sync_timeout_sec`.
-pub fn first_sync(sys: &dyn Sys, cfg: &TimeCfg) -> bool {
+pub fn first_sync(sys: &dyn Sys, cfg: &TimeCfg, ntp_disabled: &Path) -> bool {
     if !cfg.enabled {
         return false;
     }
@@ -256,7 +315,7 @@ pub fn first_sync(sys: &dyn Sys, cfg: &TimeCfg) -> bool {
             );
             return false;
         }
-        if sync_once(sys, cfg, Some(remaining)).is_some() {
+        if sync_once(sys, cfg, Some(remaining), ntp_disabled).is_some() {
             return true;
         }
         let left = deadline.saturating_duration_since(sys.now());
@@ -275,7 +334,7 @@ pub fn first_sync(sys: &dyn Sys, cfg: &TimeCfg) -> bool {
 }
 
 /// Background resync loop, started after P3.
-pub fn resync_loop(sys: &dyn Sys, cfg: &TimeCfg) {
+pub fn resync_loop(sys: &dyn Sys, cfg: &TimeCfg, ntp_disabled: &Path) {
     // Until the clock has been set once, retry at `retry_interval_sec`, not
     // `resync_interval_sec`. P2.5 gives up after 15s so that boot is not held
     // hostage to the network, which means a slow wifi association routinely
@@ -285,7 +344,7 @@ pub fn resync_loop(sys: &dyn Sys, cfg: &TimeCfg) {
     let mut synced = false;
     loop {
         std::thread::sleep(Duration::from_secs(resync_wait_secs(synced, cfg)));
-        if sync_once(sys, cfg, None).is_some() {
+        if sync_once(sys, cfg, None, ntp_disabled).is_some() {
             synced = true;
         }
     }
@@ -497,6 +556,40 @@ mod nonce_tests {
 }
 
 #[cfg(test)]
+mod marker_tests {
+    use super::*;
+    use crate::sys::MockSys;
+
+    #[test]
+    fn test_ntp_marker_round_trips() {
+        let dir = tempfile::tempdir().unwrap();
+        let m = NtpMarker::new(dir.path());
+        assert!(m.ntp_enabled());
+        m.disable().unwrap();
+        assert!(!m.ntp_enabled());
+        m.enable().unwrap();
+        assert!(m.ntp_enabled());
+    }
+
+    #[test]
+    fn test_sync_once_skips_when_marker_present() {
+        let dir = tempfile::tempdir().unwrap();
+        let marker = ntp_disabled_marker_path(dir.path());
+        std::fs::create_dir_all(marker.parent().unwrap()).unwrap();
+        std::fs::write(&marker, b"").unwrap();
+        // No expectations: the marker check must return before touching the clock.
+        let sys = MockSys::new();
+        let cfg = crate::config::TimeCfg::default();
+        assert_eq!(sync_once(&sys, &cfg, None, &marker), None);
+    }
+
+    /// A marker path that does not exist: sync proceeds normally.
+    pub(crate) fn absent_marker() -> PathBuf {
+        PathBuf::from("/nonexistent/ntp.disabled")
+    }
+}
+
+#[cfg(test)]
 mod build_request_tests {
     use super::*;
 
@@ -605,7 +698,8 @@ mod query_tests {
             step_threshold_sec: 2,
             ..wide_cfg(format!("127.0.0.1:{port}"))
         };
-        let delta = sync_once(&sys, &cfg, None);
+        let marker = marker_tests::absent_marker();
+        let delta = sync_once(&sys, &cfg, None, &marker);
         handle.join().expect("server thread");
         assert!(
             matches!(delta, Some(d) if d > 0),
@@ -625,7 +719,8 @@ mod query_tests {
             step_threshold_sec: 3600,
             ..wide_cfg(format!("127.0.0.1:{port}"))
         };
-        let delta = sync_once(&sys, &cfg, None);
+        let marker = marker_tests::absent_marker();
+        let delta = sync_once(&sys, &cfg, None, &marker);
         handle.join().expect("server thread");
         assert_eq!(delta, Some(0));
     }
@@ -637,7 +732,8 @@ mod query_tests {
         // No expect_realtime()/expect_set_realtime(): the budget check must
         // reject every server before any query is attempted.
         let cfg = wide_cfg("127.0.0.1:1".into());
-        let delta = sync_once(&sys, &cfg, Some(Duration::ZERO));
+        let marker = marker_tests::absent_marker();
+        let delta = sync_once(&sys, &cfg, Some(Duration::ZERO), &marker);
         assert_eq!(delta, None);
     }
 
@@ -649,7 +745,8 @@ mod query_tests {
         // keeps the failure fast instead of waiting the full 5s socket
         // timeout.
         let cfg = wide_cfg("127.0.0.1:1".into());
-        let delta = sync_once(&sys, &cfg, Some(Duration::from_millis(300)));
+        let marker = marker_tests::absent_marker();
+        let delta = sync_once(&sys, &cfg, Some(Duration::from_millis(300)), &marker);
         assert_eq!(delta, None);
     }
 
@@ -660,7 +757,8 @@ mod query_tests {
             enabled: false,
             ..crate::config::TimeCfg::default()
         };
-        assert!(!first_sync(&sys, &cfg));
+        let marker = marker_tests::absent_marker();
+        assert!(!first_sync(&sys, &cfg, &marker));
     }
 
     #[test]
@@ -676,7 +774,8 @@ mod query_tests {
             first_sync_timeout_sec: 5,
             ..wide_cfg(format!("127.0.0.1:{port}"))
         };
-        assert!(first_sync(&sys, &cfg));
+        let marker = marker_tests::absent_marker();
+        assert!(first_sync(&sys, &cfg, &marker));
         handle.join().expect("server thread");
     }
 
@@ -688,6 +787,7 @@ mod query_tests {
             first_sync_timeout_sec: 0,
             ..wide_cfg("127.0.0.1:1".into())
         };
-        assert!(!first_sync(&sys, &cfg));
+        let marker = marker_tests::absent_marker();
+        assert!(!first_sync(&sys, &cfg, &marker));
     }
 }
