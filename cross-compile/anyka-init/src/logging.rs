@@ -56,6 +56,15 @@ pub fn init(dir: &str, level: &str, max_bytes: u64, keep: u8) -> anyhow::Result<
     let filter = tracing_subscriber::EnvFilter::try_new(level)
         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
 
+    // Parse TZ once. glibc caches the zone and will not re-read a changed TZ
+    // on its own; the supervisor's zone never changes after boot.
+    // Declared locally: the libc crate exposes tzset only on Windows.
+    // SAFETY: tzset reads the process env and updates libc's own state.
+    unsafe extern "C" {
+        fn tzset();
+    }
+    unsafe { tzset() };
+
     tracing_subscriber::registry()
         .with(filter)
         .with(
@@ -75,71 +84,37 @@ pub fn init(dir: &str, level: &str, max_bytes: u64, keep: u8) -> anyhow::Result<
     Ok(())
 }
 
-/// Timestamps log lines in the process's configured zone (the `TZ` env var).
+/// Timestamps log lines in the process's zone, which `boot.rs` sets from `TZ`.
 ///
-/// libc `localtime_r` + `strftime` rather than chrono: this process is the
-/// supervisor and its zone comes straight from `TZ`. The microsecond and
-/// offset parts are assembled by hand so it works on C libraries without the
-/// `%f`/`%:z` extensions (the camera's libc generation is unknown).
+/// libc rather than chrono: this crate has no chrono dependency and is not
+/// gaining one for a timestamp. `%z` is standard C89 strftime (`+0100`); only
+/// `%:z` is a GNU extension, so no hand-assembly is needed.
 pub struct LocalTimer;
-
-impl LocalTimer {
-    /// Write an RFC3339-style timestamp in the current zone; returns length.
-    pub fn format_now(buf: &mut [u8]) -> usize {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default();
-        // time_t is 64-bit on host glibc but 32-bit on the camera's uclibc;
-        // the mask keeps the cast lossless on the 32-bit target.
-        let secs: libc::time_t = (now.as_secs() & 0x7FFF_FFFF) as libc::time_t;
-        let mut zeroed: libc::tm = unsafe { std::mem::zeroed() };
-        // glibc caches the parsed zone and does not re-read a changed TZ env
-        // var on its own (verified on glibc 2.43); tzset() forces the reparse.
-        // Declared locally: the libc crate only exposes tzset for Windows.
-        // SAFETY: tzset reads the process env and updates libc's own state;
-        // it is async-signal-safe and cannot fail.
-        unsafe extern "C" {
-            fn tzset();
-        }
-        unsafe { tzset() };
-        // SAFETY: localtime_r writes into the caller-provided struct and
-        // never reads it uninitialized; it returns null on a broken clock,
-        // in which case the zeroed struct (1970) is used instead of a deref.
-        let ptr = unsafe { libc::localtime_r(&secs, &mut zeroed) };
-        let tm = if ptr.is_null() {
-            &zeroed
-        } else {
-            unsafe { &*ptr }
-        };
-        let mut out = [0u8; 20];
-        // SAFETY: `out` fits "YYYY-MM-DDTHH:MM:SS" (19 chars + NUL) and the
-        // format string is a NUL-terminated static byte array.
-        let n = unsafe {
-            libc::strftime(
-                out.as_mut_ptr().cast::<libc::c_char>(),
-                out.len(),
-                c"%Y-%m-%dT%H:%M:%S".as_ptr(),
-                tm,
-            )
-        };
-        let micros = now.subsec_micros();
-        let offset = tm.tm_gmtoff;
-        let mut s = String::from_utf8_lossy(&out[..n]).into_owned();
-        s.push_str(&format!(".{micros:06}"));
-        s.push(if offset < 0 { '-' } else { '+' });
-        let abs = offset.unsigned_abs();
-        s.push_str(&format!("{:02}:{:02}", abs / 3600, (abs % 3600) / 60));
-        let len = s.len().min(buf.len());
-        buf[..len].copy_from_slice(s.as_bytes()[..len].try_into().unwrap_or(&[0u8; 0]));
-        len
-    }
-}
 
 impl tracing_subscriber::fmt::time::FormatTime for LocalTimer {
     fn format_time(&self, w: &mut tracing_subscriber::fmt::format::Writer<'_>) -> std::fmt::Result {
-        let mut buf = [0u8; 64];
-        let n = Self::format_now(&mut buf);
-        write!(w, "{}", String::from_utf8_lossy(&buf[..n]))
+        let secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        // time_t is 32-bit on the camera's uclibc, 64-bit on host glibc.
+        let t: libc::time_t = secs.try_into().unwrap_or(libc::time_t::MAX);
+        let mut tm: libc::tm = unsafe { std::mem::zeroed() };
+        let mut out = [0u8; 32];
+        // SAFETY: localtime_r fills our own `tm` and never reads it
+        // uninitialised; on a broken clock it returns null and the zeroed
+        // struct (1970) is formatted instead. strftime bounds its write by
+        // out.len() and the format string is a NUL-terminated literal.
+        let n = unsafe {
+            libc::localtime_r(&t, &mut tm);
+            libc::strftime(
+                out.as_mut_ptr().cast::<libc::c_char>(),
+                out.len(),
+                c"%Y-%m-%dT%H:%M:%S%z".as_ptr(),
+                &tm,
+            )
+        };
+        write!(w, "{}", String::from_utf8_lossy(&out[..n]))
     }
 }
 
@@ -211,23 +186,25 @@ mod tests {
 
     #[test]
     fn test_local_timer_uses_the_process_tz() {
-        // set_var here touches process-global libc TZ state; restore UTC when
-        // done so no later test in this binary sees a shifted zone.
-        unsafe { std::env::set_var("TZ", "UTC") };
-        let mut buf = [0u8; 64];
-        let n = LocalTimer::format_now(&mut buf);
-        let s = String::from_utf8_lossy(&buf[..n]);
-        assert!(
-            s.ends_with("+00:00"),
-            "UTC zone must carry an explicit offset, got {s}"
-        );
+        use tracing_subscriber::fmt::time::FormatTime;
+        // SAFETY: single-threaded test; restore UTC at the end so no later test
+        // in this binary sees a shifted zone.
         unsafe { std::env::set_var("TZ", "CET-1CEST,M3.5.0,M10.5.0/3") };
-        let n2 = LocalTimer::format_now(&mut buf);
-        let s2 = String::from_utf8_lossy(&buf[..n2]);
+        unsafe extern "C" {
+            fn tzset();
+        }
+        unsafe { tzset() };
+
+        let mut s = String::new();
+        LocalTimer
+            .format_time(&mut tracing_subscriber::fmt::format::Writer::new(&mut s))
+            .unwrap();
         assert!(
-            s2.contains("+01") || s2.contains("+02"),
-            "expected a CET/CEST offset, got {s2}"
+            s.ends_with("+0100") || s.ends_with("+0200"),
+            "expected a CET/CEST offset, got {s}"
         );
+
         unsafe { std::env::set_var("TZ", "UTC") };
+        unsafe { tzset() };
     }
 }
