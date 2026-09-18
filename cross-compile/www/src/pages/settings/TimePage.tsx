@@ -29,6 +29,7 @@ import {
 } from '@/components/ui/settings-card';
 import { Switch } from '@/components/ui/switch';
 import { type DateTimeConfig, getDateTime, setDateTime, setNTP } from '@/services/timeService';
+import { TIMEZONES } from '@/utils/timezones';
 
 // Validation Schema
 const timeSchema = z.object({
@@ -42,17 +43,6 @@ const timeSchema = z.object({
 });
 
 type TimeFormData = z.infer<typeof timeSchema>;
-
-// Common Timezones (Stub list - in a real app this would be extensive)
-const TIMEZONES = [
-  { value: 'GMT', label: 'GMT (Greenwich Mean Time)' },
-  { value: 'CET', label: 'CET (Central European Time)' },
-  { value: 'EST', label: 'EST (Eastern Standard Time)' },
-  { value: 'PST', label: 'PST (Pacific Standard Time)' },
-  { value: 'CST', label: 'CST (China Standard Time)' },
-  { value: 'JST', label: 'JST (Japan Standard Time)' },
-  { value: 'UTC', label: 'UTC (Coordinated Universal Time)' },
-];
 
 export default function TimePage() {
   const queryClient = useQueryClient();

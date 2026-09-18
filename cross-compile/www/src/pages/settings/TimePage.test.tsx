@@ -16,6 +16,7 @@ import {
   testMutationWithErrorToast,
   testMutationWithSuccessToast,
 } from '@/test/mutationTestHelpers';
+import { TIMEZONES } from '@/utils/timezones';
 
 import TimePage from './TimePage';
 
@@ -236,21 +237,41 @@ describe('TimePage', () => {
     const user = userEvent.setup();
     await renderTimePage();
 
-    await selectOption(user, 'time-page-timezone-select', 'EST');
+    const newYork = 'EST5EDT,M3.2.0,M11.1.0';
+    await selectOption(user, 'time-page-timezone-select', newYork);
     await waitFor(
       () => {
         const timezoneSelect = screen.getByTestId('time-page-timezone-select');
-        expect(timezoneSelect).toHaveValue('EST');
+        expect(timezoneSelect).toHaveValue(newYork);
       },
       { timeout: 3000 },
     );
+  });
+
+  it('should round-trip every timezone value through the picker', async () => {
+    const user = userEvent.setup();
+    await renderTimePage();
+
+    for (const tz of TIMEZONES) {
+      await selectOption(user, 'time-page-timezone-select', tz.value);
+      const timezoneSelect = screen.getByTestId('time-page-timezone-select');
+      expect(timezoneSelect).toHaveValue(tz.value);
+    }
+  });
+
+  it('should match the default selection to the value returned by getSystemDateAndTime', async () => {
+    const tz = 'CET-1CEST,M3.5.0,M10.5.0/3';
+    vi.mocked(getDateTime).mockResolvedValue({ ...mockTimeConfig, timezone: tz });
+
+    await renderTimePage();
+    expect(screen.getByTestId('time-page-timezone-select')).toHaveValue(tz);
   });
 
   it('should submit form and call mutation', async () => {
     const user = userEvent.setup();
     await renderTimePage();
 
-    await selectOption(user, 'time-page-timezone-select', 'EST');
+    await selectOption(user, 'time-page-timezone-select', 'EST5EDT,M3.2.0,M11.1.0');
     // Wait for form to become dirty
     await waitFor(
       () => {
@@ -275,7 +296,7 @@ describe('TimePage', () => {
     const user = userEvent.setup();
     await renderTimePage();
 
-    await selectOption(user, 'time-page-timezone-select', 'EST');
+    await selectOption(user, 'time-page-timezone-select', 'EST5EDT,M3.2.0,M11.1.0');
     // Wait for form to become dirty
     await waitFor(
       () => {
