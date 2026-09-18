@@ -80,11 +80,16 @@ The path is relative to `.pi/`, per `earendil-works/pi` → `packages/coding-age
 
 **Step 2: Verify pi discovers the skills**
 
-Run: `pi --help 2>&1 | head -5` first to confirm pi is on PATH, then from the repo root start pi interactively and accept the project-trust prompt (pi records it in `~/.pi/agent/trust.json`; it will not load project resources until you do).
+`pi -p` does not print the startup banner, and `pi list` shows only packages. Capture the banner through a pty instead:
 
-Expected: all 11 skills listed, including `anyka-firmware-upgrade`, `anyka-remote-debugging` and `anyka-validation`.
+```bash
+timeout 25 script -qec "pi --approve --verbose" /dev/null > /tmp/pi-startup.txt 2>&1 </dev/null
+sed 's/\x1b\[[0-9;]*m//g' /tmp/pi-startup.txt | grep 'anyka-dev/.claude/skills' | wc -l
+```
 
-If pi exposes a non-interactive listing in this version, prefer it. If it does not, record the interactive result in the commit message — an unverified claim here is worthless, since the whole bug class is silent empty discovery.
+Expected: 11 (12 after Task 5), each listed under a `[Skills]` heading.
+
+**Trust is required and `--approve` does not persist.** pi loads no project-local resources until the project is trusted in `~/.pi/agent/trust.json`. `--approve` grants it for one run only — verified: the same command without `--approve` discovers **zero** project skills and leaves `trust.json` unchanged. Someone must accept the trust prompt once in a real interactive session, or pass `--approve` every time. Note this wherever pi usage is documented.
 
 **Step 3: Commit**
 
