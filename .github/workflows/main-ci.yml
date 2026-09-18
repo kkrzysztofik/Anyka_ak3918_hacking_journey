@@ -1023,7 +1023,14 @@ jobs:
               return '⚠️ Skipped';
             };
 
-            const comment = `## 🔍 Unified Code Analysis Results
+            // Stable identity for this comment. Matching on the rendered
+            // heading means any rewording of it orphans every existing
+            // comment and starts appending duplicates; the marker is invisible
+            // in the rendered body and is not editorial text.
+            const marker = '<!-- unified-code-analysis -->';
+
+            const comment = `${marker}
+            ## 🔍 Unified Code Analysis Results
 
             ### 📊 Test Coverage
             | Project | Coverage |
@@ -1063,9 +1070,15 @@ jobs:
               per_page: 100,
             });
 
-            const botComment = comments.find(comment =>
-              comment.user.type === 'Bot' &&
-              comment.body.includes('Unified Code Analysis Results')
+            const botComment = comments.find(existing =>
+              existing.user.type === 'Bot' && (
+                existing.body.includes(marker) ||
+                // Legacy: comments posted before the marker existed. Adopting
+                // one rewrites it with the marker, so this branch retires
+                // itself after one run per open PR and can be deleted once no
+                // pre-marker PRs are still open.
+                existing.body.includes('Unified Code Analysis Results')
+              )
             );
 
             if (botComment) {
