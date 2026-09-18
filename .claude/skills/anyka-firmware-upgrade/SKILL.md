@@ -23,7 +23,7 @@ Do **not** use legacy `scripts/deploy_onvif.sh` (per-binary FTP) for this path.
 ```bash
 # 1) Cross-compile + package
 ./scripts/build_upgrade_bundle.sh
-# optional: --skip-www | --skip-vendor | --debug | OUT path
+# optional: --skip-vendor | --debug | OUT path
 
 # 2) Upload (Administrator Basic auth) — expect HTTP 202.
 # Password from env or --pass-file, never argv (keeps it out of history/`ps`).
@@ -38,6 +38,8 @@ CAMERA_PASS="$CAMERA_PASS" ./scripts/upload_upgrade_bundle.sh --host 192.168.30.
 Env fallbacks: `CAMERA_HOST`, `CAMERA_USER`, `CAMERA_PASS`, `CAMERA_JUMPHOST`.
 
 Package-only (binaries already in `SD_card_contents/`): `./scripts/build_bundle.sh [OUT]`.
+Use `./scripts/build_sd_contents.sh --skip-www` only for local payload iteration,
+not for versioned upgrade bundle packaging.
 
 ## Agent workflow
 

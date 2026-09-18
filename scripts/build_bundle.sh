@@ -31,6 +31,26 @@ else
   log_warn "no ${SRC}/onvif/.build-version (build onvif-rust first); falling back to git describe"
 fi
 
+# The manifest must not be able to claim a version the binary does not report.
+# `env!("ANYKA_BUILD_VERSION")` is baked into onvif-rust.bin at compile time, but
+# a build that re-runs build.rs without recompiling lib.rs emits a binary that
+# keeps an older stamp -- or none at all. Observed both ways: a bundle built
+# 2026-08-29 carried manifest version=089b2dca over a binary with no version
+# string whatsoever, and .198 was found in the field serving
+# firmware_version=b38f8032-dirty from a slot whose manifest.meta said
+# a1660798-dirty. Every downstream gate compares the two, so catch it here.
+# Match the *whole* embedded string, not a substring: an unbounded search lets
+# manifest "H" pass against a stale binary embedding "H-dirty" (prefix match),
+# which is exactly the mislabel this gate exists to catch. The version is a
+# standalone NUL-terminated string in .rodata, so `strings` splits it out whole.
+if ! strings -a "${SRC}/onvif/onvif-rust.bin" | grep -Fxq -- "${VERSION}"; then
+  log_error "onvif-rust.bin does not embed the exact version string '${VERSION}'"
+  log_error "the binary was not recompiled for this stamp; the bundle would be mislabelled"
+  log_info  "force a rebuild with:"
+  log_info  "  touch cross-compile/onvif-rust/src/lib.rs && ./scripts/build_sd_contents.sh"
+  exit 1
+fi
+
 STAGE="$(mktemp -d)"
 trap 'rm -rf "$STAGE"' EXIT
 

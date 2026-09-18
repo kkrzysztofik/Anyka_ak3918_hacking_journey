@@ -27,9 +27,11 @@ PR #74 shipped the on-device applier, `PUT /api/update`, and `scripts/build_bund
 
 ### `build_upgrade_bundle.sh`
 
-Passes `--skip-www`, `--skip-vendor`, `--debug` through to `build_sd_contents.sh`.
-Optional positional `OUT` path (default `bundle.tar` at repo root), forwarded to
-`build_bundle.sh`.
+Forwards `--skip-vendor` and `--debug` to `build_sd_contents.sh`. It does **not**
+allow `--skip-www`: upgrade bundles are version-stamped from current sources, so
+the wrapper must rebuild the WebUI instead of risking stale staged assets under a
+fresh bundle version. Optional positional `OUT` path (default `bundle.tar` at repo
+root) is forwarded to `build_bundle.sh`.
 
 ### `upload_upgrade_bundle.sh`
 
