@@ -187,45 +187,6 @@ pub fn query(server: &str, timeout: Duration, bounds: &Bounds) -> anyhow::Result
 ///
 /// Deliberately a bare filename, not a parsed file: `update.rs:143` records
 /// why structured state on exFAT after a power cut is a hazard here.
-pub struct NtpMarker {
-    path: PathBuf,
-}
-
-impl NtpMarker {
-    pub fn new(update_root: impl AsRef<Path>) -> Self {
-        Self {
-            path: ntp_disabled_marker_path(update_root.as_ref()),
-        }
-    }
-
-    /// Absent marker means NTP runs. Absence is the safe default: if the SD
-    /// card drops, the camera resumes syncing rather than drifting silently.
-    pub fn ntp_enabled(&self) -> bool {
-        !self.path.is_file()
-    }
-
-    pub fn disable(&self) -> std::io::Result<()> {
-        if let Some(dir) = self.path.parent() {
-            std::fs::create_dir_all(dir)?;
-        }
-        std::fs::write(&self.path, b"")?;
-        // SAFETY: sync(2) takes no arguments and cannot fail.
-        unsafe { libc::sync() };
-        Ok(())
-    }
-
-    pub fn enable(&self) -> std::io::Result<()> {
-        match std::fs::remove_file(&self.path) {
-            Ok(()) => {}
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(e) => return Err(e),
-        }
-        // SAFETY: sync(2) takes no arguments and cannot fail.
-        unsafe { libc::sync() };
-        Ok(())
-    }
-}
-
 pub fn ntp_disabled_marker_path(update_root: &Path) -> PathBuf {
     update_root.join("state/ntp.disabled")
 }
@@ -559,17 +520,6 @@ mod nonce_tests {
 mod marker_tests {
     use super::*;
     use crate::sys::MockSys;
-
-    #[test]
-    fn test_ntp_marker_round_trips() {
-        let dir = tempfile::tempdir().unwrap();
-        let m = NtpMarker::new(dir.path());
-        assert!(m.ntp_enabled());
-        m.disable().unwrap();
-        assert!(!m.ntp_enabled());
-        m.enable().unwrap();
-        assert!(m.ntp_enabled());
-    }
 
     #[test]
     fn test_sync_once_skips_when_marker_present() {
