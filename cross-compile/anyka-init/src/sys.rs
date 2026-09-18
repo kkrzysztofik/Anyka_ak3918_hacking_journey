@@ -22,6 +22,9 @@ pub struct SpawnSpec {
     /// Applied after the child's environment is cleared. See
     /// `config::ServiceCfg::env`.
     pub env: BTreeMap<String, String>,
+    /// Exported *before* `env`, so a service's own `env` can override it.
+    /// `None` leaves the child without TZ (its libc defaults to UTC).
+    pub tz: Option<String>,
     pub log: String,
     pub core_dump: bool,
 }
@@ -124,9 +127,13 @@ impl Sys for RealSys {
         })?;
 
         let mut cmd = Command::new(&spec.exec);
-        cmd.args(&spec.args)
-            .env_clear()
-            .envs(&spec.env)
+        cmd.args(&spec.args).env_clear();
+        // The configured zone for libc time formatting in the child. Added
+        // before `envs` so a per-service env entry still wins.
+        if let Some(tz) = &spec.tz {
+            cmd.env("TZ", tz);
+        }
+        cmd.envs(&spec.env)
             .stdin(Stdio::null())
             .stdout(Stdio::from(log))
             .stderr(Stdio::from(log_err));
@@ -354,6 +361,7 @@ mod tests {
             exec: script.to_string_lossy().into_owned(),
             args: Vec::new(),
             env: BTreeMap::new(),
+            tz: None,
             log: log.to_string_lossy().into_owned(),
             core_dump: false,
         };
@@ -400,6 +408,7 @@ mod tests {
             exec: "true".to_string(),
             args: Vec::new(),
             env: BTreeMap::new(),
+            tz: None,
             log: log.to_string_lossy().into_owned(),
             core_dump: false,
         };
@@ -410,5 +419,45 @@ mod tests {
         let mut status: libc::c_int = 0;
         assert_eq!(unsafe { libc::waitpid(pid, &mut status, 0) }, pid);
         assert!(libc::WIFEXITED(status) && libc::WEXITSTATUS(status) == 0);
+    }
+
+    #[test]
+    fn a_spawned_child_sees_the_tz_env() {
+        let _fork_guard = FORK_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let d = tempfile::tempdir().unwrap();
+        let log = d.path().join("out.log");
+        let spec = SpawnSpec {
+            exec: "/bin/sh".to_string(),
+            args: vec!["-c".to_string(), "echo TZ=$TZ".to_string()],
+            env: BTreeMap::new(),
+            tz: Some("CET-1CEST".to_string()),
+            log: log.to_string_lossy().into_owned(),
+            core_dump: false,
+        };
+        let pid = RealSys::new().spawn(&spec).unwrap();
+
+        // Poll the log briefly: the child prints the TZ it saw.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let contents = loop {
+            if let Ok(s) = std::fs::read_to_string(&log)
+                && !s.is_empty()
+            {
+                break s;
+            }
+            if std::time::Instant::now() >= deadline {
+                panic!("child never wrote to {}", log.display());
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        };
+        // SAFETY: pid is the child this test spawned.
+        let mut status: libc::c_int = 0;
+        assert_eq!(unsafe { libc::waitpid(pid, &mut status, 0) }, pid);
+        assert!(
+            contents.trim() == "TZ=CET-1CEST",
+            "child TZ was {:?}, expected CET-1CEST",
+            contents.trim()
+        );
     }
 }

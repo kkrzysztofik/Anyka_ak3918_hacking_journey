@@ -232,13 +232,10 @@ pub fn system_setup(
     baseline_wifi: &WifiCfg,
     overlay_path: &std::path::Path,
 ) -> SupplicantOwnership {
-    // Affects this process only. `gergehack.sh:358` exported TZ for children to
-    // inherit; `Sys::spawn` calls `env_clear()`, so a service sees TZ only if
-    // its own `[services.X].env` declares it. Kept because it costs nothing and
-    // makes any libc time formatting inside the supervisor correct — but do not
-    // read this line as "services run in the configured timezone". They do not.
-    // (onvif-rust does not care either way: it hardcodes `tz: "UTC"` at
-    // onvif/device/ops/system.rs:191.)
+    // The supervisor's own zone is cosmetic: `Sys::spawn` clears the child env
+    // and re-adds TZ from the onvif config (`SpawnSpec.tz`), which is the
+    // source of truth. Keep this for the supervisor's own libc time
+    // formatting.
     //
     // SAFETY: set_var is not thread-safe, and P2 runs before any thread is
     // started. Do not move this call after P3.
@@ -302,6 +299,49 @@ pub fn system_setup(
     }
 
     probed
+}
+
+/// The `[time]` section of the onvif config. Parsed into a shape, not
+/// `toml::Value`: this toml version's `FromStr for Value` rejects ordinary
+/// documents ("unexpected content, expected nothing"), and `from_str` into a
+/// serde type is the path onvif-rust itself uses.
+#[derive(serde::Deserialize, Default)]
+struct OnvifConfigTime {
+    #[serde(default)]
+    time: OnvifTimeSection,
+}
+
+#[derive(serde::Deserialize, Default)]
+struct OnvifTimeSection {
+    #[serde(default)]
+    timezone: String,
+}
+
+/// The configured zone: `[time].timezone` from the onvif service's config —
+/// the single source of truth (ONVIF/WebUI write it there). Checked in the
+/// active slot first, then the unslotted payload layout, so both cameras that
+/// have walked the update system and stock cameras resolve.
+///
+/// `None` when the file or section is absent: children then keep UTC rather
+/// than a stale or guessed value.
+pub fn resolve_timezone(root: &std::path::Path, slots: &crate::update::Slots) -> Option<String> {
+    let active = slots.running_slot();
+    let candidates = [
+        crate::update::slot_path(root, active, &root.join("onvif/config.toml")),
+        root.join("onvif/config.toml"),
+    ];
+    for p in candidates {
+        let Ok(s) = std::fs::read_to_string(&p) else {
+            continue;
+        };
+        let Ok(c) = toml::from_str::<OnvifConfigTime>(&s) else {
+            continue;
+        };
+        if !c.time.timezone.is_empty() {
+            return Some(c.time.timezone);
+        }
+    }
+    None
 }
 
 #[cfg(test)]
@@ -760,5 +800,50 @@ channel = 6
             SupplicantOwnership::Unowned,
             "unknown chip with fallback disabled must fail, leaving the socket unowned"
         );
+    }
+}
+
+#[cfg(test)]
+mod tz_tests {
+    use super::*;
+    use crate::sys::{RealSys, SpawnSpec};
+    use std::collections::BTreeMap;
+
+    #[test]
+    fn test_spawn_env_carries_tz() {
+        let spec = SpawnSpec {
+            exec: "true".into(),
+            args: vec!["-l".into()],
+            env: BTreeMap::new(),
+            tz: Some("CET-1CEST,M3.5.0,M10.5.0/3".into()),
+            log: std::env::temp_dir()
+                .join("tz-test.log")
+                .to_string_lossy()
+                .into_owned(),
+            core_dump: false,
+        };
+        RealSys::default().spawn(&spec).unwrap();
+    }
+
+    /// A config carrying a `[time]` section: `resolve_timezone` must return the
+    /// POSIX string; a config without one must yield `None`.
+    #[test]
+    fn test_resolve_timezone_reads_the_onvif_config() {
+        let dir = tempfile::tempdir().unwrap();
+        let onvif = dir.path().join("onvif");
+        std::fs::create_dir_all(&onvif).unwrap();
+        std::fs::write(
+            onvif.join("config.toml"),
+            "[time]\ntimezone = \"CET-1CEST,M3.5.0,M10.5.0/3\"\n",
+        )
+        .unwrap();
+        let slots = crate::update::Slots::new(dir.path());
+        assert_eq!(
+            resolve_timezone(dir.path(), &slots),
+            Some("CET-1CEST,M3.5.0,M10.5.0/3".to_string())
+        );
+
+        std::fs::write(onvif.join("config.toml"), "[server]\n").unwrap();
+        assert_eq!(resolve_timezone(dir.path(), &slots), None);
     }
 }

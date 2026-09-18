@@ -70,6 +70,9 @@ fn spec_of_slot(svc: &ServiceCfg, root: &Path, slots: &crate::update::Slots) -> 
             .iter()
             .map(|(k, v)| (k.clone(), rewrite_env(k, v, &rewrite)))
             .collect(),
+        // The zone from the onvif config (source of truth); a service's own
+        // `[services.X].env` TZ entry still overrides this one.
+        tz: crate::boot::resolve_timezone(root, slots),
         log: svc.log.clone(),
         core_dump: svc.core_dump,
     }
