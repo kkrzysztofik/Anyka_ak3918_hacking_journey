@@ -86,6 +86,8 @@ pub mod diagnostics;
 
 pub mod osd;
 
+pub mod time;
+
 // Re-export main types for convenience
 pub use app::{AppState, AppStateBuilder, AppStateError, Application};
 pub use lifecycle::{RuntimeError, ShutdownReport, ShutdownStatus, StartupError};
