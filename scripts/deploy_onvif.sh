@@ -61,25 +61,50 @@ fi
 
 UPLOAD_OK=0
 
+# Temp-name upload + rename avoids ETXTBSY: STOR over a locked (running) binary
+# returns 550, but writing to a fresh name then RENAME over it succeeds because
+# the rename only replaces the directory entry, not the in-use inode.
+TEMP_BINARY="${BINARY_NAME}.bin.new"
+
 if command -v lftp &> /dev/null; then
     log_info "Using lftp..."
+    log_info "Step 1: connect + mkdir + upload to temp name"
     LFTP_OUTPUT=$(lftp -c "
+        set xfer:temp-extension .part
         open ftp://$USERNAME:$PASSWORD@$DEVICE_IP
         mkdir -p $DEST_DIR
         cd $DEST_DIR
-        put $SOURCE_DIR/$BINARY_NAME -o $DEST_BINARY
+        put $SOURCE_DIR/$BINARY_NAME -o $TEMP_BINARY
+        quit
+    " 2>&1)
+    LFTP_EXIT_CODE=$?
+
+    if [ $LFTP_EXIT_CODE -ne 0 ] || echo "$LFTP_OUTPUT" | grep -qi "550\|error\|failed"; then
+        log_error "lftp STOR to temp name failed (550 = target locked or no perm):"
+        echo "$LFTP_OUTPUT" | grep -i "550\|553\|500\|error\|failed" || echo "$LFTP_OUTPUT"
+        log_error "If the binary is running, stop it via telnet :24: killall onvif-rust.bin"
+        exit 1
+    fi
+    log_info "Step 2: rename temp -> final + chmod 755"
+    LFTP_OUTPUT=$(lftp -c "
+        open ftp://$USERNAME:$PASSWORD@$DEVICE_IP
+        cd $DEST_DIR
+        rename -f $TEMP_BINARY $DEST_BINARY
         chmod 755 $DEST_BINARY
         quit
     " 2>&1)
     LFTP_EXIT_CODE=$?
 
-    if [ $LFTP_EXIT_CODE -eq 0 ] && ! echo "$LFTP_OUTPUT" | grep -qi "error\|failed"; then
-        log_success "onvif-rust uploaded successfully"
-        UPLOAD_OK=1
-    else
-        log_error "lftp upload failed:"
-        echo "$LFTP_OUTPUT" | grep -i "error\|failed" || true
+    if [ $LFTP_EXIT_CODE -ne 0 ] || echo "$LFTP_OUTPUT" | grep -qi "550\|553\|500 Unknown\|error\|failed"; then
+        log_error "lftp rename/chmod failed (chmod 500 = server ignored it, non-fatal):"
+        echo "$LFTP_OUTPUT" | grep -i "550\|553\|500\|error\|failed" || echo "$LFTP_OUTPUT"
+        # chmod failures are non-fatal if the rename landed; only rename failure is fatal
+        if echo "$LFTP_OUTPUT" | grep -qi "550\|553"; then
+            exit 1
+        fi
     fi
+    log_success "onvif-rust uploaded + renamed + chmod'd"
+    UPLOAD_OK=1
 else
     log_info "Using ftp..."
     FTP_SCRIPT=$(mktemp /tmp/ftp_deploy_onvif_rust.XXXXXX)
@@ -89,22 +114,25 @@ user $USERNAME $PASSWORD
 binary
 mkdir $DEST_DIR
 cd $DEST_DIR
-put $SOURCE_DIR/$BINARY_NAME $DEST_BINARY
+put $SOURCE_DIR/$BINARY_NAME $TEMP_BINARY
+rename -f $TEMP_BINARY $DEST_BINARY
 chmod 755 $DEST_BINARY
 quit
 EOF
 
+    log_info "Step 1+2: connect + upload temp + rename + chmod"
     FTP_OUTPUT=$(ftp -n < "$FTP_SCRIPT" 2>&1)
     FTP_EXIT_CODE=$?
     rm -f "$FTP_SCRIPT"
 
-    if [ $FTP_EXIT_CODE -eq 0 ] && ! echo "$FTP_OUTPUT" | grep -qE "553 Error|500 Unknown|550"; then
-        log_success "onvif-rust uploaded successfully"
-        UPLOAD_OK=1
-    else
-        log_error "ftp upload failed:"
-        echo "$FTP_OUTPUT" | grep -E "(553|500|550|Error)" || true
+    if [ $FTP_EXIT_CODE -ne 0 ] || echo "$FTP_OUTPUT" | grep -qE "553 Error|550|500 Unknown"; then
+        log_error "ftp upload/rename/chmod failed:"
+        echo "$FTP_OUTPUT" | grep -E "(553|550|500|Error)" || echo "$FTP_OUTPUT"
+        log_error "If the binary is running, stop it via telnet :24: killall onvif-rust.bin"
+        exit 1
     fi
+    log_success "onvif-rust uploaded + renamed + chmod'd"
+    UPLOAD_OK=1
 fi
 
 # The FTP clients report success even when STOR failed, and overwriting a binary
