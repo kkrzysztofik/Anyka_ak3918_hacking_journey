@@ -6,7 +6,42 @@
 //!
 //! chrono has an equivalent parser but it is crate-private (`tz_info`).
 
+use std::sync::{OnceLock, RwLock};
+
 use chrono::{DateTime, Datelike, FixedOffset, NaiveDate, NaiveDateTime, Utc};
+
+/// The zone every consumer reads: the OSD renderer, the log timer and the
+/// ONVIF handlers.
+///
+/// A global rather than state threaded through `AppState` because the log
+/// timer is constructed before `AppState` exists, and because the alternative —
+/// reading the config lock — deadlocks: `onvif/media/ops/osd.rs:114` holds a
+/// config write guard across a call that logs.
+///
+/// INVARIANT: never log while holding this lock.
+fn cell() -> &'static RwLock<PosixTz> {
+    static CELL: OnceLock<RwLock<PosixTz>> = OnceLock::new();
+    CELL.get_or_init(|| RwLock::new(PosixTz::utc()))
+}
+
+/// The zone currently in force.
+///
+/// Falls back to UTC if the lock was poisoned, because a log line with a
+/// slightly wrong timestamp beats a panic inside the logger.
+pub fn current() -> PosixTz {
+    match cell().read() {
+        Ok(tz) => tz.clone(),
+        Err(_) => PosixTz::utc(),
+    }
+}
+
+/// Replace the zone in force. Call after loading config and on every accepted
+/// `SetSystemDateAndTime`.
+pub fn set_current(tz: PosixTz) {
+    if let Ok(mut slot) = cell().write() {
+        *slot = tz;
+    }
+}
 
 /// A transition rule in the `Mm.w.d[/time]` form.
 ///
@@ -318,5 +353,18 @@ mod tests {
         for bad in ["", "X", "CET-", "CET-1CEST,M13.5.0,M10.5.0"] {
             assert!(parse(bad).is_err(), "expected {bad:?} to be rejected");
         }
+    }
+
+    #[test]
+    fn test_current_defaults_to_utc_before_any_set() {
+        // No set_current call in this test binary path; UTC is the safe default.
+        assert_eq!(current().offset_at(utc(2026, 7, 1, 12)).local_minus_utc(), 0);
+    }
+
+    #[test]
+    fn test_set_current_is_visible_to_readers() {
+        set_current(parse("CET-1CEST,M3.5.0,M10.5.0/3").unwrap());
+        assert_eq!(current().offset_at(utc(2026, 7, 15, 12)).local_minus_utc(), 7200);
+        set_current(PosixTz::utc()); // restore for other tests
     }
 }
