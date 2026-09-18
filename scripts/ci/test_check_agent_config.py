@@ -41,6 +41,29 @@ class TestLoadSkills(unittest.TestCase):
             with self.assertRaises(ValueError):
                 load_skills(Path(tmp))
 
+    def test_load_skills_unterminated_frontmatter_raises(self):
+        """`partition` returns the whole remainder when the closing --- is absent.
+
+        Without an explicit check the entire body parses as frontmatter, so a
+        malformed manifest passes here while every agent host rejects it.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            skill = Path(tmp) / "unclosed"
+            skill.mkdir()
+            (skill / "SKILL.md").write_text(
+                "---\nname: unclosed\ndescription: Never closes.\n\nBody text.\n"
+            )
+            with self.assertRaises(ValueError):
+                load_skills(Path(tmp))
+
+    def test_load_skills_no_frontmatter_at_all_raises(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            skill = Path(tmp) / "plain"
+            skill.mkdir()
+            (skill / "SKILL.md").write_text("# Just a heading\n\nNo frontmatter.\n")
+            with self.assertRaises(ValueError):
+                load_skills(Path(tmp))
+
     def test_load_skills_ignores_loose_files(self):
         with tempfile.TemporaryDirectory() as tmp:
             (Path(tmp) / "README.md").write_text("# Not a skill\n")

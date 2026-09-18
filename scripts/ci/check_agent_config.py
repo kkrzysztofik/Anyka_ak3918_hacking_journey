@@ -33,11 +33,19 @@ EXCLUDE_DIRS = frozenset({"node_modules", ".git"})
 
 
 def _frontmatter(text):
-    """Return the frontmatter block as a flat dict."""
+    """Return the frontmatter block as a flat dict, or None if malformed.
+
+    The closing delimiter has to be checked explicitly: `partition` returns the
+    entire remaining text when its separator is absent, so an unterminated
+    block would parse the whole document body as frontmatter and pass
+    validation that every agent host would fail.
+    """
     if not text.startswith("---"):
-        return {}
+        return None
     _, _, rest = text.partition("---")
-    block, _, _ = rest.partition("---")
+    block, delimiter, _ = rest.partition("---")
+    if not delimiter:
+        return None
     fields = {}
     for line in block.splitlines():
         key, sep, value = line.partition(":")
@@ -56,6 +64,8 @@ def load_skills(skills_dir):
         if not manifest.is_file():
             raise ValueError(f"{entry} has no SKILL.md")
         fields = _frontmatter(manifest.read_text(encoding="utf-8"))
+        if fields is None:
+            raise ValueError(f"{manifest} has no '---' delimited frontmatter block")
         name = fields.get("name")
         description = fields.get("description")
         if not description:
