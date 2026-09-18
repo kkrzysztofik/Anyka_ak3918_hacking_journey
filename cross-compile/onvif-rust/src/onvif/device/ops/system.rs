@@ -297,10 +297,16 @@ pub fn handle_set_system_date_and_time(
             let dt = Utc.from_local_datetime(&naive).single().ok_or_else(|| {
                 OnvifError::invalid_arg("ter:InvalidArgVal", "utc_date_time out of range")
             })?;
-            // uclibc's time_t is 32-bit on the camera (1901..=2038, which
-            // covers the camera's lifetime); host glibc is 64-bit. The u64
-            // intermediate keeps the final cast a real type change on both.
-            let tv_sec: libc::time_t = (dt.timestamp() as u64 & 0x7FFF_FFFF) as libc::time_t;
+            // uclibc's time_t is 32-bit on the camera, 64-bit on host glibc.
+            // A checked conversion rather than a mask: masking turned a 2039
+            // request into 1970 and still answered Ok, which silently breaks
+            // ws_security's ±300s skew check.
+            let tv_sec: libc::time_t = dt.timestamp().try_into().map_err(|_| {
+                OnvifError::invalid_arg(
+                    "ter:InvalidArgVal",
+                    "utc_date_time out of range for this platform",
+                )
+            })?;
             let ts = libc::timespec { tv_sec, tv_nsec: 0 };
             // SAFETY: clock_settime(2) reads our own stack timespec; EINVAL/EPERM
             // are returned, not trapped.
@@ -772,6 +778,33 @@ mod tests {
         let mut req = req_with_tz("UTC0");
         req.date_time_type = SetDateTimeType::Manual;
         assert!(handle_set_system_date_and_time(&cfg, req).is_err());
+        crate::time::tz::set_current(crate::time::tz::PosixTz::utc());
+    }
+
+    #[test]
+    fn test_set_system_date_and_time_rejects_a_year_past_2038() {
+        let _lock = crate::time::tz::test_lock();
+        let cfg = create_test_config();
+        let mut req = req_with_tz("UTC0");
+        req.date_time_type = SetDateTimeType::Manual;
+        req.utc_date_time = Some(DateTime {
+            date: Date { year: 2039, month: 1, day: 1 },
+            time: Time { hour: 0, minute: 0, second: 0 },
+        });
+        let err = handle_set_system_date_and_time(&cfg, req).unwrap_err();
+        let msg = format!("{err:?}");
+        if cfg!(target_pointer_width = "32") {
+            assert!(
+                msg.contains("out of range"),
+                "expected an out-of-range fault on 32-bit, got {msg}"
+            );
+        } else {
+            // 64-bit time_t: conversion succeeds, clock_settime needs CAP_SYS_TIME
+            assert!(
+                msg.contains("clock_settime"),
+                "expected a clock_settime failure on 64-bit host, got {msg}"
+            );
+        }
         crate::time::tz::set_current(crate::time::tz::PosixTz::utc());
     }
 
