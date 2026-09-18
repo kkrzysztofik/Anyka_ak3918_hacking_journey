@@ -10,8 +10,8 @@ React-based web interface for the Anyka AK3918 camera, communicating securely vi
 
 ### Prerequisites
 
-- Node.js 18+
-- npm 9+
+- Node.js 22.12+ (CI uses Node.js 24)
+- npm 10+
 
 ### Installation
 
