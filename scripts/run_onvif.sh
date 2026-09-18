@@ -1,6 +1,11 @@
 #!/bin/bash
 
-# Execute onvif-rust on device via telnet
+# STAGE:   run — executes an already-deployed binary on the device via telnet.
+# UNIT:    one binary
+# USE FOR: DEV ITERATION ONLY. Not an upgrade path: no versioning, no A/B slot,
+#          no trial window, no rollback. To ship a change use
+#          ./scripts/build_bundle.sh then ./scripts/push_bundle.sh.
+#
 # Usage: ./run_onvif.sh [device_ip] [username] [password] [release|debug]
 #
 # The mode selects the config file (config.toml vs config_debug.toml).
@@ -12,6 +17,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/common.sh
 source "${SCRIPT_DIR}/common.sh"
 PROJECT_ROOT="${ANYKA_REPO_ROOT}"
+
+# Anyone reaching this script from muscle memory has not necessarily read the
+# header. Warn and continue; refusing would break existing dev loops.
+log_warn "run_onvif.sh is DEV ONLY — no versioning, no A/B slot, no rollback."
+log_warn "To ship a change: ./scripts/build_bundle.sh && ./scripts/push_bundle.sh"
 
 # Default values
 DEFAULT_IP="192.168.1.100"

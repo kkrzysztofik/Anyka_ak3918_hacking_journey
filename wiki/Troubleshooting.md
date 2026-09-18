@@ -12,10 +12,10 @@
 
 - Confirm `anyka-init` started the service: `grep started /mnt/logs/anyka-init.log`
 - Check if the `onvif-rust` process is running: `ps | grep onvif-rust`
-- Verify the server port is not blocked: `netstat -ln | grep 8080`
+- Verify the server port is not blocked: `netstat -ln | grep ':80 '` (ONVIF is port 80; 554 is RTSP and 8080 is HTTP-FLV)
 - Check `/mnt/logs/onvif.log` and `/mnt/logs/anyka-init.log`
 - A wrong system clock rejects authenticated ONVIF — confirm time sync in the supervisor log
-- Ensure the Rust binary is properly compiled and deployed (`./scripts/build_sd_contents.sh`)
+- Ensure the Rust binary is both rebuilt **and** pushed — `build_payload.sh` only compiles. Normal sequence: `./scripts/build_bundle.sh` then `./scripts/push_bundle.sh --host <camera-ip> --user admin bundle.tar`
 
 ## PTZ Controls Not Working
 

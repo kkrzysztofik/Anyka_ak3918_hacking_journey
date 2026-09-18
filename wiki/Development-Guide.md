@@ -85,7 +85,7 @@ To rebuild the camera SD overlay (including `anyka-init`):
 
 ```bash
 source ./setenv.sh
-./scripts/build_sd_contents.sh
+./scripts/build_payload.sh
 ```
 
 Configuration and boot behaviour: [[Boot-Runtime-Supervisor]].

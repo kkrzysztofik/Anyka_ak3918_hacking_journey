@@ -1,6 +1,6 @@
 ---
 name: anyka-embedded-build
-description: Use when building, cross-compiling, linting, testing, or deploying Anyka ARM binaries for the AK3918 camera (ARM target, x86_64 host checks, SD card deployment, armv5te, uclibc, setenv toolchain).
+description: Use when building, cross-compiling, linting, or testing Anyka ARM binaries for the AK3918 camera (ARM target, x86_64 host checks, armv5te, uclibc, setenv vendored toolchain, pre-commit quality gates). For getting a build onto a camera, use anyka-firmware-upgrade instead.
 version: 2.0.0
 ---
 
@@ -62,34 +62,20 @@ $CARGO doc --target x86_64-unknown-linux-gnu --no-deps
 $CARGO build --release --target armv5te-unknown-linux-uclibceabi
 ```
 
-## SD Card Deployment
+## Deployment
 
-The payload lives in `SD_card_contents/anyka_hack/`. The skill's bundled `scripts/deploy.sh` copies an ARM binary onto the card or over the network:
+This skill builds; it does not deploy. See **`anyka-firmware-upgrade`** for every
+path onto a camera — A/B bundle upgrade, full SD payload, one-time slot
+migration, and single-binary dev iteration.
 
-```bash
-# SSH deploy to a camera
-.claude/skills/anyka-embedded-build/scripts/deploy.sh 192.168.2.198 root onvif-rust
-
-# SD card deploy (WARNING: will modify /dev/sdX)
-.claude/skills/anyka-embedded-build/scripts/deploy.sh sdcard /dev/sdb onvif-rust
-```
-
-Manual SD card layout reference:
-
-```
-SD_card_contents/
-└── anyka_hack/
-    ├── onvif-rust          # ARM binary
-    ├── lib/                # shared libs (solib search path for gdb)
-    ├── config/             # config.toml
-    └── start.sh            # startup script
-```
+The build output is staged under `SD_card_contents/anyka_hack/`, which is laid
+out as A/B slots (`active`, `slots/{a,b}`, `spool/`, `state/`); that skill's
+reference documents the tree.
 
 ## Device Runtime Facts
 
-- Camera default IP: `192.168.2.198`. Remote shell: **telnet port 24** (root, no password) — see the `anyka-remote-debugging` skill for `scripts/debugging/cam_exec.py`.
-- Coredumps land in `/mnt/coredumps` (kernel core_pattern), old ones in `/mnt/logs` and `/mnt/anyka_hack/onvif`.
-- ONVIF endpoint: `http://<ip>:8080/onvif/device_service`.
+- Camera default IP: `192.168.2.198`. ONVIF is on port **80** (`http://<ip>/onvif/device_service`); 554 is RTSP and 8080 is HTTP-FLV.
+- There is **no SSH** on the camera — remote shell is telnet port 24, and coredump collection is over FTP. See `anyka-remote-debugging` for both.
 
 ## Troubleshooting
 

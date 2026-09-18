@@ -1,17 +1,21 @@
 #!/usr/bin/env bash
-# Copy assembled SD_card_contents/ to a mounted SD card or to the camera via FTP.
+# STAGE:   push — sends to a card or camera. Compiles nothing.
+# UNIT:    the whole payload tree, including lib/ and Factory/
+# USE FOR: a fresh camera, or a change to lib/ or Factory that a bundle cannot
+#          carry. For an ordinary code change use build_bundle.sh + push_bundle.sh
+#          instead — this path has no versioning, no trial and no rollback.
 #
-# Does not build — run ./scripts/build_sd_contents.sh first.
+# PRECONDITION: run ./scripts/build_payload.sh first. This script only copies.
 #
 # Modes (exactly one required):
 #   --sd PATH     Sync anyka_hack/ + Factory/ onto a mounted SD card
 #   --ftp HOST    Upload trees to /mnt/anyka_hack and /mnt/Factory on the camera
 #
 # Usage:
-#   ./scripts/copy_sd_contents.sh --sd /media/$USER/SDCARD
-#   ./scripts/copy_sd_contents.sh --ftp 192.168.1.100
-#   ./scripts/copy_sd_contents.sh --ftp 192.168.1.100 --user root --pass ''
-#   ./scripts/copy_sd_contents.sh --ftp 192.168.1.100 --dry-run
+#   ./scripts/push_payload.sh --sd /media/$USER/SDCARD
+#   ./scripts/push_payload.sh --ftp 192.168.1.100
+#   ./scripts/push_payload.sh --ftp 192.168.1.100 --user root --pass ''
+#   ./scripts/push_payload.sh --ftp 192.168.1.100 --dry-run
 
 set -euo pipefail
 
@@ -32,7 +36,7 @@ DO_DELETE=false
 
 usage() {
   cat <<'EOF'
-Usage: copy_sd_contents.sh (--sd PATH | --ftp HOST) [OPTIONS]
+Usage: push_payload.sh (--sd PATH | --ftp HOST) [OPTIONS]
 
 Copy SD_card_contents/anyka_hack and SD_card_contents/Factory to a mounted
 SD card or to the camera filesystem over FTP (/mnt/...).
@@ -50,9 +54,9 @@ Options:
   -h, --help          Show this help
 
 Examples:
-  ./scripts/copy_sd_contents.sh --sd /media/kmk/SDCARD
-  ./scripts/copy_sd_contents.sh --ftp 192.168.1.100
-  ./scripts/copy_sd_contents.sh --ftp 192.168.1.100 --user root --pass mypass --delete
+  ./scripts/push_payload.sh --sd /media/kmk/SDCARD
+  ./scripts/push_payload.sh --ftp 192.168.1.100
+  ./scripts/push_payload.sh --ftp 192.168.1.100 --user root --pass mypass --delete
 EOF
 }
 
@@ -127,15 +131,15 @@ require_payload() {
     missing=1
   fi
   if [[ ! -f "${SRC_HACK}/onvif/onvif-rust.bin" ]]; then
-    log_error "Missing ${SRC_HACK}/onvif/onvif-rust.bin — run ./scripts/build_sd_contents.sh first"
+    log_error "Missing ${SRC_HACK}/onvif/onvif-rust.bin — run ./scripts/build_payload.sh first"
     missing=1
   fi
   if [[ ! -f "${SRC_HACK}/snmp/snmp-agent.bin" ]]; then
-    log_error "Missing ${SRC_HACK}/snmp/snmp-agent.bin — run ./scripts/build_sd_contents.sh first"
+    log_error "Missing ${SRC_HACK}/snmp/snmp-agent.bin — run ./scripts/build_payload.sh first"
     missing=1
   fi
   if [[ ! -f "${SRC_HACK}/vendor-daemon/vendor-daemon.bin" ]]; then
-    log_error "Missing ${SRC_HACK}/vendor-daemon/vendor-daemon.bin — run ./scripts/build_sd_contents.sh first"
+    log_error "Missing ${SRC_HACK}/vendor-daemon/vendor-daemon.bin — run ./scripts/build_payload.sh first"
     missing=1
   fi
   if [[ "${missing}" -ne 0 ]]; then

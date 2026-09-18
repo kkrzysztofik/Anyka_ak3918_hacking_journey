@@ -1,17 +1,23 @@
 #!/usr/bin/env bash
-# Upload an upgrade bundle.tar to a camera via PUT /api/update.
+# STAGE:   push — sends to a camera. Compiles and packages nothing.
+# UNIT:    bundle.tar, via PUT /api/update
+# USE FOR: the normal upgrade. A/B slots, trial window, automatic rollback.
+# BEFORE:  ./scripts/build_bundle.sh
 #
 # Expects HTTP 202 (queued). The applier stages the inactive slot, flips
 # `active`, and reboots on its next poll — this script does not wait.
 #
 # The password is NEVER a command-line argument (it would land in shell
 # history and `ps`). Pass it via CAMERA_PASS env or --pass-file FILE:
-#   ./scripts/upload_upgrade_bundle.sh --host 192.168.2.198 --user admin \
-#       --pass-file <(echo "$CAMERA_PASS") bundle.tar
-#   CAMERA_PASS=SECRET ./scripts/upload_upgrade_bundle.sh --host 192.168.2.198 \
-#       --user admin bundle.tar
-#   ./scripts/upload_upgrade_bundle.sh --host 192.168.30.10 --jumphost root@192.168.3.137 \
+#   ./scripts/push_bundle.sh --host 192.168.2.198 --user admin \
+#       --pass-file /path/to/netrc-credential bundle.tar
+#   ./scripts/push_bundle.sh --host 192.168.30.10 --jumphost root@192.168.3.137 \
 #       --user admin --pass-file /path/to/netrc-credential bundle.tar
+#
+# Or export it first — never inline as `CAMERA_PASS=... ./scripts/...`, which
+# records the literal in shell history:
+#   export CAMERA_PASS
+#   ./scripts/push_bundle.sh --host 192.168.2.198 --user admin bundle.tar
 #
 # Env fallbacks: CAMERA_HOST, CAMERA_USER, CAMERA_PASS, CAMERA_JUMPHOST
 
@@ -32,7 +38,7 @@ PASS_FILE=""
 
 usage() {
   cat <<'EOF'
-Usage: upload_upgrade_bundle.sh [OPTIONS] BUNDLE.tar
+Usage: push_bundle.sh [OPTIONS] BUNDLE.tar
 
 PUT the upgrade bundle to http://<host>/api/update (Administrator Basic auth).
 Success is HTTP 202 only — the camera queues the apply and will reboot later.
@@ -50,12 +56,13 @@ Password is taken from CAMERA_PASS or --pass-file only — never from argv, so
 it stays out of shell history and `ps`.
 
 Examples:
-  CAMERA_PASS=SECRET ./scripts/upload_upgrade_bundle.sh --host 192.168.2.198 \
-      --user admin bundle.tar
-  ./scripts/upload_upgrade_bundle.sh --host 192.168.2.198 --user admin \
-      --pass-file <(echo -n "$CAMERA_PASS") bundle.tar
-  ./scripts/upload_upgrade_bundle.sh --host 192.168.30.10 --jumphost root@192.168.3.137 \
-      --user admin --pass-file <(echo -n "$CAMERA_PASS") bundle.tar
+  ./scripts/push_bundle.sh --host 192.168.2.198 --user admin \
+      --pass-file /path/to/netrc-credential bundle.tar
+  ./scripts/push_bundle.sh --host 192.168.30.10 --jumphost root@192.168.3.137 \
+      --user admin --pass-file /path/to/netrc-credential bundle.tar
+
+  export CAMERA_PASS        # then omit --pass-file entirely
+  ./scripts/push_bundle.sh --host 192.168.2.198 --user admin bundle.tar
 
 After 202: wait for reboot (~90s), then verify ports 80/554/8080 and
 GET /api/diagnostics firmware_version. See skill anyka-firmware-upgrade.

@@ -369,7 +369,7 @@ jobs:
         run: npm ci
 
       # One step, not three. `verify` (type-check + lint + format:check) is
-      # defined in package.json and shared with scripts/build_sd_contents.sh;
+      # defined in package.json and shared with scripts/build_payload.sh;
       # splitting it here would give a nicer UI at the cost of CI owning its
       # own copy of the gate list, which is the drift that let three TS7
       # errors merge green. The log shows which half failed.
@@ -466,7 +466,7 @@ jobs:
 
       # The WebUI's npm tree. Lives here rather than in the webui job because
       # `npm audit` needs the network, and the webui gate list (`npm run
-      # verify`) is shared with scripts/build_sd_contents.sh, which has to keep
+      # verify`) is shared with scripts/build_payload.sh, which has to keep
       # working offline.
       - name: Use Node.js
         if: always()
@@ -1023,7 +1023,14 @@ jobs:
               return '⚠️ Skipped';
             };
 
-            const comment = `## 🔍 Unified Code Analysis Results
+            // Stable identity for this comment. Matching on the rendered
+            // heading means any rewording of it orphans every existing
+            // comment and starts appending duplicates; the marker is invisible
+            // in the rendered body and is not editorial text.
+            const marker = '<!-- unified-code-analysis -->';
+
+            const comment = `${marker}
+            ## 🔍 Unified Code Analysis Results
 
             ### 📊 Test Coverage
             | Project | Coverage |
@@ -1051,15 +1058,27 @@ jobs:
             ---
             *This comment is automatically updated on each push to the PR*`;
 
-            const { data: comments } = await github.rest.issues.listComments({
+            // Paginate. listComments returns 30 per page by default, so on a
+            // busy PR the existing summary falls off page one, the find below
+            // misses it, and each push appends another copy instead of
+            // updating. No PR has passed 30 comments yet; CodeRabbit threads
+            // make that a matter of time.
+            const comments = await github.paginate(github.rest.issues.listComments, {
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number,
+              per_page: 100,
             });
 
-            const botComment = comments.find(comment =>
-              comment.user.type === 'Bot' &&
-              comment.body.includes('Unified Code Analysis Results')
+            const botComment = comments.find(existing =>
+              existing.user.type === 'Bot' && (
+                existing.body.includes(marker) ||
+                // Legacy: comments posted before the marker existed. Adopting
+                // one rewrites it with the marker, so this branch retires
+                // itself after one run per open PR and can be deleted once no
+                // pre-marker PRs are still open.
+                existing.body.includes('Unified Code Analysis Results')
+              )
             );
 
             if (botComment) {

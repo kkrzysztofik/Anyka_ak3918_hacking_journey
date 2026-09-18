@@ -30,7 +30,7 @@ of the camera wifi scripts, not the hack.
 # Updating
 
 Swap or rewrite the SD card contents and reboot. The supervisor binary is
-`anyka_hack/anyka-init.bin`, built by `./scripts/build_sd_contents.sh`.
+`anyka_hack/anyka-init.bin`, built by `./scripts/build_payload.sh`.
 
 Dropbear SSH is controlled by `[services.dropbear]` in `anyka.toml` (`enabled`,
 `args`). There are no separate `ssh_*` keys.

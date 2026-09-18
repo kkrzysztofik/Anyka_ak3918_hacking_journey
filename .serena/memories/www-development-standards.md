@@ -11,7 +11,7 @@ npm run test                       # All tests must pass
 ```
 
 `verify` is the single definition of the WebUI gate list. `main-ci.yml` and
-`scripts/build_sd_contents.sh` both call it, so a new gate goes in `verify`,
+`scripts/build_payload.sh` both call it, so a new gate goes in `verify`,
 never into one caller — that drift is what let three TS 7 errors merge green
 and stop a fleet rollout at the deploy gate.
 
