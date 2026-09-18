@@ -43,6 +43,7 @@
 #include <string.h>
 #include <strings.h>   /* strcasecmp */
 #include <stdint.h>
+#include <time.h>      /* tzset */
 #include <errno.h>
 #include <fcntl.h>
 #include <signal.h>
@@ -161,6 +162,11 @@ int main(int argc, char *argv[])
 {
     (void)argc;
     (void)argv;
+
+    /* The supervisor exports the configured zone (SpawnSpec.tz -> TZ). Re-parse
+     * it before the first log line so localtime_r() stamps match the camera's
+     * zone; without TZ the C library keeps UTC (the pre-feature behaviour). */
+    tzset();
 
     /* ================================================================
      * LOG FILE PATH INITIALIZATION
