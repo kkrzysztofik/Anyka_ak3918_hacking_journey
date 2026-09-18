@@ -28,9 +28,9 @@ fn cell() -> &'static RwLock<PosixTz> {
 /// plan forbids adding `serial_test`, and a poisoned lock must not cascade
 /// into unrelated failures.
 #[cfg(test)]
-pub fn test_lock() -> std::sync::MutexGuard<'static, ()> {
-    static TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-    TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+pub fn test_lock() -> parking_lot::ReentrantMutexGuard<'static, ()> {
+    static TEST_LOCK: parking_lot::ReentrantMutex<()> = parking_lot::ReentrantMutex::new(());
+    TEST_LOCK.lock()
 }
 
 /// The zone currently in force.
@@ -405,7 +405,10 @@ mod tests {
             "CST-8",
             "JST-9",
         ] {
-            assert!(parse(tz).is_ok(), "WebUI offers {tz:?}, which the camera rejects");
+            assert!(
+                parse(tz).is_ok(),
+                "WebUI offers {tz:?}, which the camera rejects"
+            );
         }
     }
 }

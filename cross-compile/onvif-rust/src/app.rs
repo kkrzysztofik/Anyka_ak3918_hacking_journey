@@ -2034,10 +2034,10 @@ mod tests {
 
     #[test]
     fn test_apply_configured_timezone_sets_the_cell() {
+        let _lock = crate::time::tz::test_lock();
         let mut cfg = AppConfig::default();
         cfg.time.timezone = "CET-1CEST,M3.5.0,M10.5.0/3".to_string();
         apply_configured_timezone(&cfg);
-        let _lock = crate::time::tz::test_lock();
         let july = chrono::Utc.with_ymd_and_hms(2026, 7, 15, 12, 0, 0).unwrap();
         assert_eq!(
             crate::time::tz::current().offset_at(july).local_minus_utc(),
@@ -2048,10 +2048,10 @@ mod tests {
 
     #[test]
     fn test_apply_configured_timezone_falls_back_to_utc_on_garbage() {
+        let _lock = crate::time::tz::test_lock();
         let mut cfg = AppConfig::default();
         cfg.time.timezone = "not a timezone".to_string();
         apply_configured_timezone(&cfg);
-        let _lock = crate::time::tz::test_lock();
         let july = chrono::Utc.with_ymd_and_hms(2026, 7, 15, 12, 0, 0).unwrap();
         assert_eq!(
             crate::time::tz::current().offset_at(july).local_minus_utc(),
