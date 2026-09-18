@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "description": "ONVIF Camera Web Interface",
   "type": "module",
+  "engines": {
+    "node": ">=22.12.0"
+  },
   "scripts": {
     "dev": "vite",
     "build": "vite build && node scripts/precompress.mjs ../../SD_card_contents/anyka_hack/onvif/www",
@@ -62,7 +65,7 @@
     "@typescript-eslint/parser": "^8.70.0",
     "@typescript/native": "npm:typescript@^7.0.2",
     "@vitejs/plugin-react": "^6.1.1",
-    "@vitest/coverage-v8": "^4.1.11",
+    "@vitest/coverage-v8": "^5.0.0",
     "eslint": "^10.10.0",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-react-hooks": "^7.1.1",
