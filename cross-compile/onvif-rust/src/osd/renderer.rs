@@ -11,7 +11,6 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use chrono::TimeZone;
 use tokio::sync::broadcast;
 use tracing::{debug, warn};
 
@@ -485,9 +484,7 @@ mod tests {
     #[test]
     fn test_datetime_slot_text_uses_the_configured_zone_not_utc() {
         let _lock = crate::time::tz::test_lock();
-        crate::time::tz::set_current(
-            crate::time::tz::parse("CET-1CEST,M3.5.0,M10.5.0/3").unwrap(),
-        );
+        crate::time::tz::set_current(crate::time::tz::parse("CET-1CEST,M3.5.0,M10.5.0/3").unwrap());
         let utc_hour = chrono::Utc::now().hour();
         let text = current_datetime_text(DateFormat::Iso, TimeFormat::H24);
         let shown: u32 = text[11..13].parse().unwrap();

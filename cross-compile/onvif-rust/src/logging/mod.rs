@@ -44,8 +44,6 @@ use tracing_subscriber::{
     util::SubscriberInitExt,
 };
 
-use chrono::TimeZone;
-
 use crate::config::ConfigRuntime;
 
 /// Stamps log lines in the configured zone.
@@ -57,10 +55,7 @@ use crate::config::ConfigRuntime;
 pub struct LocalTimer;
 
 impl tracing_subscriber::fmt::time::FormatTime for LocalTimer {
-    fn format_time(
-        &self,
-        w: &mut tracing_subscriber::fmt::format::Writer<'_>,
-    ) -> std::fmt::Result {
+    fn format_time(&self, w: &mut tracing_subscriber::fmt::format::Writer<'_>) -> std::fmt::Result {
         let now = crate::time::tz::current().convert(chrono::Utc::now());
         write!(w, "{}", now.format("%Y-%m-%dT%H:%M:%S%.6f%:z"))
     }
@@ -494,9 +489,7 @@ mod tests {
     fn test_log_timer_writes_the_configured_offset() {
         use tracing_subscriber::fmt::time::FormatTime;
         let _lock = crate::time::tz::test_lock();
-        crate::time::tz::set_current(
-            crate::time::tz::parse("CET-1CEST,M3.5.0,M10.5.0/3").unwrap(),
-        );
+        crate::time::tz::set_current(crate::time::tz::parse("CET-1CEST,M3.5.0,M10.5.0/3").unwrap());
         let mut out = String::new();
         LocalTimer
             .format_time(&mut tracing_subscriber::fmt::format::Writer::new(&mut out))

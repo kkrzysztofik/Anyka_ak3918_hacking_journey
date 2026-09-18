@@ -6,7 +6,7 @@
 //!
 //! chrono has an equivalent parser but it is crate-private (`tz_info`).
 
-use std::sync::{Mutex, OnceLock, RwLock};
+use std::sync::{OnceLock, RwLock};
 
 use chrono::{DateTime, Datelike, FixedOffset, NaiveDate, NaiveDateTime, Utc};
 
@@ -29,7 +29,7 @@ fn cell() -> &'static RwLock<PosixTz> {
 /// into unrelated failures.
 #[cfg(test)]
 pub fn test_lock() -> std::sync::MutexGuard<'static, ()> {
-    static TEST_LOCK: Mutex<()> = Mutex::new(());
+    static TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
     TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner())
 }
 
@@ -373,14 +373,20 @@ mod tests {
     fn test_current_defaults_to_utc_before_any_set() {
         // No set_current call in this test binary path; UTC is the safe default.
         let _lock = test_lock();
-        assert_eq!(current().offset_at(utc(2026, 7, 1, 12)).local_minus_utc(), 0);
+        assert_eq!(
+            current().offset_at(utc(2026, 7, 1, 12)).local_minus_utc(),
+            0
+        );
     }
 
     #[test]
     fn test_set_current_is_visible_to_readers() {
         let _lock = test_lock();
         set_current(parse("CET-1CEST,M3.5.0,M10.5.0/3").unwrap());
-        assert_eq!(current().offset_at(utc(2026, 7, 15, 12)).local_minus_utc(), 7200);
+        assert_eq!(
+            current().offset_at(utc(2026, 7, 15, 12)).local_minus_utc(),
+            7200
+        );
         set_current(PosixTz::utc()); // restore for other tests
     }
 }

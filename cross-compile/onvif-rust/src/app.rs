@@ -44,6 +44,10 @@ use streaming_lib::common::auth::{Auth, AuthAlgorithm, AuthType, CredentialValid
 /// camera that boots with the wrong clock display is recoverable over the
 /// network, one that does not boot is not.
 pub(crate) fn apply_configured_timezone(cfg: &AppConfig) {
+    // Tests run app boots in parallel; serialize with the other tz-cell
+    // writers. Boot is single-threaded in production, so no lock there.
+    #[cfg(test)]
+    let _lock = crate::time::tz::test_lock();
     match crate::time::tz::parse(&cfg.time.timezone) {
         Ok(tz) => crate::time::tz::set_current(tz),
         Err(e) => {
@@ -2020,33 +2024,40 @@ impl Application {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::TimeZone;
     use crate::config::UserLevel;
     use crate::lifecycle::ShutdownStatus;
     use crate::lifecycle::health::HealthState;
     use crate::platform::StubPlatformBuilder;
     use crate::utils::MemoryMonitor;
+    use chrono::TimeZone;
     use std::net::TcpListener;
 
     #[test]
     fn test_apply_configured_timezone_sets_the_cell() {
-        let _lock = crate::time::tz::test_lock();
         let mut cfg = AppConfig::default();
         cfg.time.timezone = "CET-1CEST,M3.5.0,M10.5.0/3".to_string();
         apply_configured_timezone(&cfg);
+        let _lock = crate::time::tz::test_lock();
         let july = chrono::Utc.with_ymd_and_hms(2026, 7, 15, 12, 0, 0).unwrap();
-        assert_eq!(crate::time::tz::current().offset_at(july).local_minus_utc(), 7200);
+        assert_eq!(
+            crate::time::tz::current().offset_at(july).local_minus_utc(),
+            7200
+        );
         crate::time::tz::set_current(crate::time::tz::PosixTz::utc());
     }
 
     #[test]
     fn test_apply_configured_timezone_falls_back_to_utc_on_garbage() {
-        let _lock = crate::time::tz::test_lock();
         let mut cfg = AppConfig::default();
         cfg.time.timezone = "not a timezone".to_string();
         apply_configured_timezone(&cfg);
+        let _lock = crate::time::tz::test_lock();
         let july = chrono::Utc.with_ymd_and_hms(2026, 7, 15, 12, 0, 0).unwrap();
-        assert_eq!(crate::time::tz::current().offset_at(july).local_minus_utc(), 0);
+        assert_eq!(
+            crate::time::tz::current().offset_at(july).local_minus_utc(),
+            0
+        );
+        crate::time::tz::set_current(crate::time::tz::PosixTz::utc());
     }
 
     fn make_app_state_for_stream_auth(

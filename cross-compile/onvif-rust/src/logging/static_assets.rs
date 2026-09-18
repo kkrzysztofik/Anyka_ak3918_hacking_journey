@@ -23,7 +23,6 @@ use axum::{
     middleware::Next,
     response::Response,
 };
-use chrono::TimeZone;
 use std::net::SocketAddr;
 
 /// Configuration for static asset access logging.
