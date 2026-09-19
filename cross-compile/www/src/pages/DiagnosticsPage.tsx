@@ -37,6 +37,7 @@ import {
   getLogs,
 } from '@/services/diagnosticsService';
 import { getSoundStatus, playSound } from '@/services/soundService';
+import { formatDuration } from '@/utils/formatDuration';
 
 const RESTART_THRESHOLD_S = 300; // 5 minutes
 const STALL_THRESHOLD_MS = 5000; // frame age above this → stalled
@@ -57,17 +58,6 @@ const LOG_LEVEL_OPTIONS: Array<{ value: LogLevel | 'all'; label: string }> = [
 
 function formatKbps(bps: number): string {
   return `${Math.round(bps / 1000)} kbps`;
-}
-
-function formatDuration(seconds: number): string {
-  const d = Math.floor(seconds / 86400);
-  const h = Math.floor((seconds % 86400) / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  const s = Math.floor(seconds % 60);
-  if (d > 0) return `${d}d ${h}h ${m}m`;
-  if (h > 0) return `${h}h ${m}m`;
-  if (m > 0) return `${m}m ${s}s`;
-  return `${s}s`;
 }
 
 function StatCard({

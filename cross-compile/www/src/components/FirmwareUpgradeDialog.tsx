@@ -22,8 +22,13 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
+import { isAbortError, waitForCameraBack } from '@/lib/waitForCameraBack';
 import { ApiError } from '@/services/api';
-import { getDiagnostics, uploadFirmware } from '@/services/diagnosticsService';
+import {
+  type Diagnostics,
+  getDiagnostics,
+  uploadFirmware,
+} from '@/services/diagnosticsService';
 
 const MAX_BYTES = 64 * 1024 * 1024;
 const POLL_INTERVAL_MS = 2000;
@@ -42,30 +47,6 @@ function isValidTar(file: File | null): file is File {
   return (
     !!file && file.name.toLowerCase().endsWith('.tar') && file.size > 0 && file.size <= MAX_BYTES
   );
-}
-
-function sleep(ms: number, signal: AbortSignal): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (signal.aborted) {
-      reject(new DOMException('Aborted', 'AbortError'));
-      return;
-    }
-    const onAbort = () => {
-      window.clearTimeout(id);
-      reject(new DOMException('Aborted', 'AbortError'));
-    };
-    const id = window.setTimeout(() => {
-      signal.removeEventListener('abort', onAbort);
-      resolve();
-    }, ms);
-    signal.addEventListener('abort', onAbort);
-  });
-}
-
-function isAbortError(err: unknown): boolean {
-  return err instanceof DOMException
-    ? err.name === 'AbortError'
-    : err instanceof Error && err.name === 'AbortError';
 }
 
 export function FirmwareUpgradeDialog({
@@ -130,35 +111,34 @@ export function FirmwareUpgradeDialog({
 
   const pollUntilBack = useCallback(
     async (signal: AbortSignal) => {
-      const deadline = Date.now() + POLL_TIMEOUT_MS;
-      // ponytail: down→up edge approximates reconnect; trial-status API if false reverted reports appear.
-      let sawDown = false;
-      while (Date.now() < deadline) {
-        if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
-        try {
-          const diagnostics = await getDiagnostics(signal);
-          if (sawDown) {
-            const next = diagnostics.firmware_version;
-            if (next !== previousVersion) {
-              setResultMessage(`Upgrade committed. Firmware version is now ${next}.`);
-            } else {
-              setResultMessage(`Upgrade probably reverted. Firmware version is still ${next}.`);
-            }
-            setStep('result');
-            return;
-          }
-          // Still reachable with a pre-reboot snapshot — keep polling.
-        } catch (err) {
-          if (isAbortError(err)) throw err;
-          sawDown = true;
+      // The probe stashes the latest snapshot on a holder object (a bare `let` would
+      // get narrowed to its initial `null` across the closure boundary). On 'back'
+      // the version comparison below keys off it, exactly as the old inline loop did.
+      const latest: { current: Diagnostics | null } = { current: null };
+      const probe = async (sig?: AbortSignal) => {
+        latest.current = await getDiagnostics(sig ?? signal);
+      };
+
+      const outcome = await waitForCameraBack(probe, {
+        intervalMs: POLL_INTERVAL_MS,
+        timeoutMs: POLL_TIMEOUT_MS,
+        signal,
+      });
+
+      if (outcome === 'back') {
+        const next = latest.current?.firmware_version ?? 'unknown';
+        if (next !== previousVersion) {
+          setResultMessage(`Upgrade committed. Firmware version is now ${next}.`);
+        } else {
+          setResultMessage(`Upgrade probably reverted. Firmware version is still ${next}.`);
         }
-        await sleep(POLL_INTERVAL_MS, signal);
+      } else if (outcome === 'still-down') {
+        setResultMessage('Camera still unreachable. Refresh later.');
+      } else {
+        setResultMessage(
+          'Timed out waiting for reboot. The camera stayed reachable — check whether the update applied.',
+        );
       }
-      setResultMessage(
-        sawDown
-          ? 'Camera still unreachable. Refresh later.'
-          : 'Timed out waiting for reboot. The camera stayed reachable — check whether the update applied.',
-      );
       setStep('result');
     },
     [previousVersion],
