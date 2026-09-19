@@ -78,6 +78,33 @@ pub fn request_restart(path: &Path, name: &str) -> bool {
     round_trip(path, &format!("restart {name}\n")).is_some_and(|r| r.trim() == "ok")
 }
 
+/// The supervisor's answer to an `enable`/`disable` request.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToggleReply {
+    /// Applied, or an idempotent no-op.
+    Accepted,
+    /// Not a configured service, or not toggleable.
+    Unknown,
+    /// The supervisor refused: the config write failed, or its loop did not
+    /// answer within its own 1 s budget.
+    Error,
+    /// Socket unreachable — an older anyka-init in the other A/B slot.
+    Unreachable,
+}
+
+/// Blocking. Sends `enable <name>` or `disable <name>` to the supervisor.
+pub fn request_toggle(path: &Path, name: &str, enabled: bool) -> ToggleReply {
+    let verb = if enabled { "enable" } else { "disable" };
+    match round_trip(path, &format!("{verb} {name}\n")) {
+        None => ToggleReply::Unreachable,
+        Some(r) => match r.trim() {
+            "ok" => ToggleReply::Accepted,
+            "unknown" => ToggleReply::Unknown,
+            _ => ToggleReply::Error,
+        },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -182,5 +209,84 @@ mod tests {
 
         server.join().expect("server thread");
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn test_request_toggle_maps_all_reply_words() {
+        use std::os::unix::net::UnixListener;
+
+        let path = format!("/tmp/onvif-tog-test-{}.sock", std::process::id());
+        let _ = std::fs::remove_file(&path);
+        let listener = UnixListener::bind(&path).expect("bind");
+        let server = std::thread::spawn(move || {
+            use std::io::{BufRead, Write};
+            // Four connections: ok, unknown, error, garbage.
+            let replies: [&[u8]; 4] = [b"ok\n", b"unknown\n", b"error\n", b"nope\n"];
+            for (stream, reply) in listener.incoming().take(4).zip(replies) {
+                let Ok(mut stream) = stream else { continue };
+                let mut line = String::new();
+                if std::io::BufReader::new(&stream).read_line(&mut line).is_err() {
+                    continue;
+                }
+                let _ = stream.write_all(reply);
+            }
+        });
+
+        let p = std::path::Path::new(&path);
+        assert_eq!(
+            request_toggle(p, "snmp", true),
+            ToggleReply::Accepted
+        );
+        assert_eq!(
+            request_toggle(p, "snmp", false),
+            ToggleReply::Unknown
+        );
+        assert_eq!(request_toggle(p, "snmp", true), ToggleReply::Error);
+        // Anything that is not one of the three words is a failure, not a
+        // success.
+        assert_eq!(
+            request_toggle(p, "snmp", false),
+            ToggleReply::Error
+        );
+
+        server.join().expect("server thread");
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn test_request_toggle_sends_the_right_verb() {
+        // The verb is the only thing distinguishing the two calls; pin it.
+        use std::os::unix::net::UnixListener;
+        let path = format!("/tmp/onvif-tog-verb-{}.sock", std::process::id());
+        let _ = std::fs::remove_file(&path);
+        let listener = UnixListener::bind(&path).expect("bind");
+        let server = std::thread::spawn(move || {
+            use std::io::{BufRead, Write};
+            let mut seen = Vec::new();
+            for stream in listener.incoming().take(2) {
+                let Ok(mut stream) = stream else { continue };
+                let mut line = String::new();
+                let _ = std::io::BufReader::new(&stream).read_line(&mut line);
+                seen.push(line);
+                let _ = stream.write_all(b"ok\n");
+            }
+            seen
+        });
+
+        let p = std::path::Path::new(&path);
+        request_toggle(p, "snmp", true);
+        request_toggle(p, "onvif", false);
+        let seen = server.join().expect("server thread");
+        assert_eq!(seen, vec!["enable snmp\n", "disable onvif\n"]);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn test_request_toggle_on_a_missing_socket_is_unreachable() {
+        let missing = std::path::Path::new("/tmp/definitely-not-a-socket-xyz.sock");
+        assert_eq!(
+            request_toggle(missing, "snmp", true),
+            ToggleReply::Unreachable
+        );
     }
 }
