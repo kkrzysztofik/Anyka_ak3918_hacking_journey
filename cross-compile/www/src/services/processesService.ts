@@ -1,10 +1,10 @@
 /**
  * Processes Service
  *
- * JSON operations for the /api/processes and /api/services/{name}/restart
- * endpoints. Uses authorizedFetch so 401 responses trigger the shared
- * session-expiry path, and validates runtime shapes by hand like the other
- * services — no schema library.
+ * JSON operations for the /api/processes and the /api/services/{name}/
+ * restart|enable|disable endpoints. Uses authorizedFetch so 401 responses
+ * trigger the shared session-expiry path, and validates runtime shapes by
+ * hand like the other services — no schema library.
  */
 import { ApiError, authorizedFetch } from '@/services/api';
 
@@ -21,7 +21,7 @@ export interface Process {
 
 export interface ServiceStatus {
   name: string;
-  /** 'running' or 'backoff'. */
+  /** 'running' | 'backoff' | 'disabled'. */
   state: string;
   /** Null when the service is not running. */
   pid: number | null;
@@ -109,18 +109,21 @@ export async function getProcesses(signal?: AbortSignal): Promise<ProcessesRespo
   return payload;
 }
 
+export type ServiceAction = 'restart' | 'enable' | 'disable';
+
 /**
- * Request a supervised-service restart.
+ * Restart, enable or disable a supervised service.
  *
- * 202 means accepted, not completed: the supervisor SIGTERMs and the normal
- * exit path restarts under backoff. A 404 (unknown service) or 503
- * (supervisor unreachable) throws. A network-level failure — the camera
- * dropping the connection as it goes down, expected for `onvif` — surfaces
- * as a TypeError from fetch, not an ApiError, so callers can tell the two
- * apart.
+ * 202 means the supervisor accepted: for a toggle the on-disk config is
+ * already written, and state transitions on the supervisor's schedule. A 404
+ * (unknown or non-toggleable service), 409 (restart of a disabled service) or
+ * 503 (supervisor unreachable / config write failed) throws an ApiError. A
+ * network-level failure — the camera dropping the connection as onvif itself
+ * goes down — surfaces as a fetch TypeError, so callers can distinguish "it
+ * did this to us" from "it failed".
  */
-export async function restartService(name: string): Promise<void> {
-  const response = await authorizedFetch(`/api/services/${encodeURIComponent(name)}/restart`, {
+export async function serviceAction(name: string, action: ServiceAction): Promise<void> {
+  const response = await authorizedFetch(`/api/services/${encodeURIComponent(name)}/${action}`, {
     method: 'POST',
   });
 
@@ -129,8 +132,22 @@ export async function restartService(name: string): Promise<void> {
   }
   const text = await response.text();
   throw new ApiError(
-    `Restart of ${name} failed with status ${response.status}`,
+    `${action} of ${name} failed with status ${response.status}`,
     response.status,
     text,
   );
+}
+
+/**
+ * Request a supervised-service restart.
+ *
+ * 202 means accepted, not completed: the supervisor SIGTERMs and the normal
+ * exit path restarts under backoff. A 404 (unknown service), 409 (service is
+ * disabled) or 503 (supervisor unreachable) throws. A network-level failure —
+ * the camera dropping the connection as it goes down, expected for `onvif` —
+ * surfaces as a TypeError from fetch, not an ApiError, so callers can tell
+ * the two apart.
+ */
+export async function restartService(name: string): Promise<void> {
+  return serviceAction(name, 'restart');
 }

@@ -4,7 +4,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ApiError, authorizedFetch } from '@/services/api';
-import { getProcesses, restartService } from '@/services/processesService';
+import { getProcesses, restartService, serviceAction } from '@/services/processesService';
 
 vi.mock('@/services/api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/services/api')>();
@@ -135,6 +135,57 @@ describe('processesService', () => {
       );
 
       await expect(restartService('onvif')).rejects.toThrow(ApiError);
+    });
+  });
+
+  describe('serviceAction', () => {
+    it.each([
+      ['enable', '/api/services/snmp/enable'],
+      ['disable', '/api/services/snmp/disable'],
+      ['restart', '/api/services/snmp/restart'],
+    ] as const)('posts to the %s endpoint', async (action, url) => {
+      vi.mocked(authorizedFetch).mockResolvedValueOnce(new Response('', { status: 202 }));
+
+      await expect(serviceAction('snmp', action)).resolves.toBeUndefined();
+
+      expect(authorizedFetch).toHaveBeenCalledWith(
+        url,
+        expect.objectContaining({ method: 'POST' }),
+      );
+    });
+
+    it('encodes the service name', async () => {
+      vi.mocked(authorizedFetch).mockResolvedValueOnce(new Response('', { status: 202 }));
+
+      await serviceAction('a b', 'disable');
+
+      expect(authorizedFetch).toHaveBeenCalledWith(
+        '/api/services/a%20b/disable',
+        expect.anything(),
+      );
+    });
+
+    it('throws ApiError on 404 with the body', async () => {
+      vi.mocked(authorizedFetch).mockResolvedValueOnce(
+        new Response('unknown service', { status: 404 }),
+      );
+
+      await expect(serviceAction('nope', 'enable')).rejects.toThrow('404');
+    });
+
+    it('throws ApiError on 503', async () => {
+      vi.mocked(authorizedFetch).mockResolvedValueOnce(
+        new Response('supervisor unreachable', { status: 503 }),
+      );
+
+      await expect(serviceAction('snmp', 'disable')).rejects.toThrow('503');
+    });
+
+    it('surfaces a dropped connection as a TypeError, not ApiError', async () => {
+      vi.mocked(authorizedFetch).mockRejectedValueOnce(new TypeError('fetch failed'));
+
+      const err = await serviceAction('onvif', 'disable').catch((e) => e);
+      expect(err).toBeInstanceOf(TypeError);
     });
   });
 });
