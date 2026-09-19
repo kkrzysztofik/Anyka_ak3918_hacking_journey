@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <sys/stat.h>   /* fstat, S_ISREG on the heartbeat fd */
 #include <time.h>
 #include <pthread.h>
 #include <unistd.h>
@@ -469,18 +470,31 @@ static void *push_frame_thread(void *arg)
             if (state->stream_id == 0) {
                 /* Not fopen(): that creates 0666 in a shared /tmp, so any
                  * process could rewrite the heartbeat, and would follow a
-                 * pre-planted symlink at the path. */
+                 * pre-planted symlink at the path.
+                 *
+                 * O_NOFOLLOW rejects a symlink but not a FIFO, and opening a
+                 * FIFO O_WRONLY blocks until someone opens the read end. This
+                 * runs on the frame-push thread every 300 frames, so a FIFO
+                 * planted at the path would stall the video pipeline outright.
+                 * O_NONBLOCK makes that case fail with ENXIO instead, and the
+                 * fstat() below rejects anything that is not a regular file. */
                 int hb_fd = open(PUSH_HEARTBEAT_PATH,
-                                 O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW,
+                                 O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW | O_NONBLOCK,
                                  0644);
                 if (hb_fd >= 0) {
-                    FILE *hb = fdopen(hb_fd, "w");
-                    if (hb) {
-                        fprintf(hb, "%llu\n",
-                                (unsigned long long)frames_pushed);
-                        fclose(hb);
-                    } else {
+                    struct stat hb_st;
+                    if (fstat(hb_fd, &hb_st) != 0 || !S_ISREG(hb_st.st_mode)) {
+                        log_warn("[push] heartbeat path is not a regular file, skipping");
                         close(hb_fd);
+                    } else {
+                        FILE *hb = fdopen(hb_fd, "w");
+                        if (hb) {
+                            fprintf(hb, "%llu\n",
+                                    (unsigned long long)frames_pushed);
+                            fclose(hb);
+                        } else {
+                            close(hb_fd);
+                        }
                     }
                 }
             }

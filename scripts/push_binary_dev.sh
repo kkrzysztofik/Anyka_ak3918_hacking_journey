@@ -78,48 +78,67 @@ UPLOAD_OK=0
 # the rename only replaces the directory entry, not the in-use inode.
 TEMP_BINARY="${BINARY_NAME}.bin.new"
 
+# Each transfer runs as its own step so rename and chmod can be judged
+# separately: a failed rename means the binary never landed and is fatal, while
+# the camera's FTP server answers `500 Unknown command` to chmod and the upload
+# is still fine.
+#
+# Every capture uses `if ! VAR=$(...)`. A bare `VAR=$(cmd)` assignment takes the
+# command's exit status, so under `set -e` a failed transfer would kill the
+# script at the assignment and the diagnostics below would never print. Inside
+# an `if` condition errexit is suspended, so the failure is ours to report.
+ftp_fatal() {
+    log_error "$1"
+    shift
+    printf '%s\n' "$@" | grep -iE "550|553|500|error|failed" || printf '%s\n' "$@"
+    log_error "If the binary is running, stop it via telnet :24: killall onvif-rust.bin"
+    exit 1
+}
+
 if command -v lftp &> /dev/null; then
     log_info "Using lftp..."
-    log_info "Step 1: connect + mkdir + upload to temp name"
-    LFTP_OUTPUT=$(lftp -c "
+
+    log_info "Step 1/3: connect + mkdir + upload to temp name"
+    if ! LFTP_OUTPUT=$(lftp -c "
         set xfer:temp-extension .part
         open ftp://$USERNAME:$PASSWORD@$DEVICE_IP
         mkdir -p $DEST_DIR
         cd $DEST_DIR
         put $SOURCE_DIR/$BINARY_NAME -o $TEMP_BINARY
         quit
-    " 2>&1)
-    LFTP_EXIT_CODE=$?
-
-    if [ $LFTP_EXIT_CODE -ne 0 ] || echo "$LFTP_OUTPUT" | grep -qi "550\|error\|failed"; then
-        log_error "lftp STOR to temp name failed (550 = target locked or no perm):"
-        echo "$LFTP_OUTPUT" | grep -i "550\|553\|500\|error\|failed" || echo "$LFTP_OUTPUT"
-        log_error "If the binary is running, stop it via telnet :24: killall onvif-rust.bin"
-        exit 1
+    " 2>&1) || printf '%s' "$LFTP_OUTPUT" | grep -qiE "550|553|error|failed"; then
+        ftp_fatal "lftp STOR to temp name failed (550 = target locked or no perm):" "$LFTP_OUTPUT"
     fi
-    log_info "Step 2: rename temp -> final + chmod 755"
-    LFTP_OUTPUT=$(lftp -c "
+
+    log_info "Step 2/3: rename temp -> final (fatal if this fails)"
+    if ! LFTP_OUTPUT=$(lftp -c "
         open ftp://$USERNAME:$PASSWORD@$DEVICE_IP
         cd $DEST_DIR
         rename -f $TEMP_BINARY $DEST_BINARY
+        quit
+    " 2>&1) || printf '%s' "$LFTP_OUTPUT" | grep -qiE "550|553|500|error|failed"; then
+        ftp_fatal "lftp rename failed; ${TEMP_BINARY} may be left behind:" "$LFTP_OUTPUT"
+    fi
+
+    log_info "Step 3/3: chmod 755 (non-fatal)"
+    if ! LFTP_OUTPUT=$(lftp -c "
+        open ftp://$USERNAME:$PASSWORD@$DEVICE_IP
+        cd $DEST_DIR
         chmod 755 $DEST_BINARY
         quit
-    " 2>&1)
-    LFTP_EXIT_CODE=$?
-
-    if [ $LFTP_EXIT_CODE -ne 0 ] || echo "$LFTP_OUTPUT" | grep -qi "550\|553\|500 Unknown\|error\|failed"; then
-        log_error "lftp rename/chmod failed (chmod 500 = server ignored it, non-fatal):"
-        echo "$LFTP_OUTPUT" | grep -i "550\|553\|500\|error\|failed" || echo "$LFTP_OUTPUT"
-        # chmod failures are non-fatal if the rename landed; only rename failure is fatal
-        if echo "$LFTP_OUTPUT" | grep -qi "550\|553"; then
-            exit 1
-        fi
+    " 2>&1) || printf '%s' "$LFTP_OUTPUT" | grep -qiE "550|553|500|error|failed"; then
+        log_warn "chmod was rejected; the binary is in place but may not be executable"
+        log_warn "fix over telnet :24 if needed: chmod 755 ${DEST_DIR}/${DEST_BINARY}"
     fi
-    log_success "onvif-rust uploaded + renamed + chmod'd"
+
+    log_success "onvif-rust uploaded and renamed into place"
     UPLOAD_OK=1
 else
     log_info "Using ftp..."
     FTP_SCRIPT=$(mktemp /tmp/ftp_push_binary_dev.XXXXXX)
+    # chmod is deliberately not in this batch: the camera's FTP server answers
+    # `500 Unknown command`, and batching it here would make a cosmetic failure
+    # indistinguishable from a failed upload or rename.
     cat > "$FTP_SCRIPT" << EOF
 open $DEVICE_IP
 user $USERNAME $PASSWORD
@@ -128,22 +147,29 @@ mkdir $DEST_DIR
 cd $DEST_DIR
 put $SOURCE_DIR/$BINARY_NAME $TEMP_BINARY
 rename -f $TEMP_BINARY $DEST_BINARY
-chmod 755 $DEST_BINARY
 quit
 EOF
 
-    log_info "Step 1+2: connect + upload temp + rename + chmod"
-    FTP_OUTPUT=$(ftp -n < "$FTP_SCRIPT" 2>&1)
-    FTP_EXIT_CODE=$?
+    log_info "Step 1/2: connect + upload temp + rename (fatal if either fails)"
+    if ! FTP_OUTPUT=$(ftp -n < "$FTP_SCRIPT" 2>&1); then
+        rm -f "$FTP_SCRIPT"
+        ftp_fatal "ftp upload/rename failed:" "$FTP_OUTPUT"
+    fi
     rm -f "$FTP_SCRIPT"
 
-    if [ $FTP_EXIT_CODE -ne 0 ] || echo "$FTP_OUTPUT" | grep -qE "553 Error|550|500 Unknown"; then
-        log_error "ftp upload/rename/chmod failed:"
-        echo "$FTP_OUTPUT" | grep -E "(553|550|500|Error)" || echo "$FTP_OUTPUT"
-        log_error "If the binary is running, stop it via telnet :24: killall onvif-rust.bin"
-        exit 1
+    if printf '%s' "$FTP_OUTPUT" | grep -qE "553|550"; then
+        ftp_fatal "ftp upload/rename failed:" "$FTP_OUTPUT"
     fi
-    log_success "onvif-rust uploaded + renamed + chmod'd"
+
+    log_info "Step 2/2: chmod 755 (non-fatal)"
+    if ! printf 'open %s\nuser %s %s\ncd %s\nchmod 755 %s\nquit\n' \
+            "$DEVICE_IP" "$USERNAME" "$PASSWORD" "$DEST_DIR" "$DEST_BINARY" \
+            | ftp -n > /dev/null 2>&1; then
+        log_warn "chmod was rejected; the binary is in place but may not be executable"
+        log_warn "fix over telnet :24 if needed: chmod 755 ${DEST_DIR}/${DEST_BINARY}"
+    fi
+
+    log_success "onvif-rust uploaded and renamed into place"
     UPLOAD_OK=1
 fi
 
