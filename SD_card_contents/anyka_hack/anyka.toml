@@ -96,7 +96,10 @@ log = "/mnt/logs/udhcpc.log"
 
 [services.wpa_supplicant]
 enabled = true
-exec = "/usr/sbin/wpa_supplicant"
+# R17: /usr/sbin/wpa_supplicant does not exist on these cameras — the real
+# binary is /tmp/wpa_supplicant (extracted from /data/wifi_tool.tgz at boot;
+# see wifi.rs SUPPLICANT_BIN). Same class as the /sbin/udhcpc mistake.
+exec = "/tmp/wpa_supplicant"
 args = ["-i", "wlan0", "-D", "nl80211", "-c", "/etc/jffs2/wpa_supplicant.conf"]
 log = "/mnt/logs/wpa_supplicant.log"
 
