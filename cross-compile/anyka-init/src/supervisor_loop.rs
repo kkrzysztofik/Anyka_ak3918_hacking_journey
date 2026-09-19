@@ -312,11 +312,39 @@ fn handle_restart_service(sys: &dyn Sys, services: &[Service], name: String) {
     }
 }
 
-fn handle_query_status(services: &[Service], reply_tx: &Sender<ControlMsg>) {
+/// One row per **configured** service, not per running one: a disabled
+/// service has to be listable or the UI has no way to offer re-enabling it.
+/// `cfg` is the single source of truth — both the boot path and the toggle
+/// handler write it before anything else.
+fn handle_query_status(cfg: &Config, services: &[Service], reply_tx: &Sender<ControlMsg>) {
     let now = Instant::now();
-    let rows: Vec<control::ServiceStatus> = services
+    let rows: Vec<control::ServiceStatus> = cfg
+        .services
         .iter()
-        .map(|s| control::ServiceStatus::from_svc_state(&s.name, &s.state, &s.hist, now))
+        .map(|(name, entry)| {
+            match services.iter().find(|s| s.name == *name) {
+                _ if !entry.enabled => {
+                    control::ServiceStatus::from_svc_state(
+                        name,
+                        &SvcState::Disabled,
+                        &RestartHistory::default(),
+                        now,
+                    )
+                }
+                Some(svc) => {
+                    control::ServiceStatus::from_svc_state(&svc.name, &svc.state, &svc.hist, now)
+                }
+                // Enabled but not yet in the vec: render as pending, never drop.
+                None => control::ServiceStatus {
+                    name: name.clone(),
+                    state: "backoff",
+                    pid: None,
+                    uptime_s: 0,
+                    restarts: 0,
+                    retry_in_s: 0,
+                },
+            }
+        })
         .collect();
     let _ = reply_tx.send(ControlMsg::Status(rows));
 }
@@ -557,7 +585,7 @@ fn dispatch_msg(
             false
         }
         Ok(Msg::QueryStatus(reply_tx)) => {
-            handle_query_status(services, &reply_tx);
+            handle_query_status(ctx.cfg, services, &reply_tx);
             false
         }
         Ok(Msg::ToggleService { name, enabled, reply }) => {
@@ -1298,5 +1326,54 @@ mod run_tests {
             control::ToggleOutcome::Ok
         );
         assert!(!hb.exists());
+    }
+
+    #[test]
+    fn test_query_status_lists_enabled_and_disabled_services() {
+        let mut services = BTreeMap::new();
+        services.insert("onvif".to_string(), svc_cfg("/bin/true", true));
+        services.insert("snmp".to_string(), svc_cfg("/bin/true", false));
+        services.insert("dropbear".to_string(), svc_cfg("/bin/true", false));
+        let cfg = test_config(services);
+
+        let svcs = vec![Service {
+            name: "onvif".into(),
+            spec: dummy_spec(),
+            state: SvcState::Running {
+                pid: 42,
+                since: Instant::now() - Duration::from_secs(90),
+            },
+            hist: RestartHistory::default(),
+        }];
+
+        let (tx, rx) = channel();
+        handle_query_status(&cfg, &svcs, &tx);
+        let ControlMsg::Status(rows) = rx.recv().expect("status");
+
+        // BTreeMap order; disabled rows synthesized from cfg.
+        let names: Vec<&str> = rows.iter().map(|r| r.name.as_str()).collect();
+        assert_eq!(names, vec!["dropbear", "onvif", "snmp"]);
+        let snmp = rows.iter().find(|r| r.name == "snmp").expect("snmp row");
+        assert_eq!(snmp.state, "disabled");
+        assert_eq!(snmp.pid, None);
+        let onvif = rows.iter().find(|r| r.name == "onvif").expect("onvif row");
+        assert_eq!(onvif.state, "running");
+        assert_eq!(onvif.pid, Some(42));
+    }
+
+    #[test]
+    fn test_query_status_never_drops_a_configured_service() {
+        // Defensive: cfg says enabled, the vec does not have it (should not
+        // happen after Task 4's insertion). The row must still appear, never
+        // vanish.
+        let mut services = BTreeMap::new();
+        services.insert("snmp".to_string(), svc_cfg("/bin/true", true));
+        let cfg = test_config(services);
+
+        let (tx, rx) = channel();
+        handle_query_status(&cfg, &[], &tx);
+        let ControlMsg::Status(rows) = rx.recv().expect("status");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].state, "backoff");
     }
 }
