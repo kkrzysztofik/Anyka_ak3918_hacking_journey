@@ -7,7 +7,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { type WaitOutcome, waitForCameraBack } from '@/lib/waitForCameraBack';
 import { getDiagnostics } from '@/services/diagnosticsService';
-import { type ProcessesResponse, getProcesses, restartService } from '@/services/processesService';
+import {
+  type ProcessesResponse,
+  type ServiceStatus,
+  getProcesses,
+  restartService,
+  serviceAction,
+} from '@/services/processesService';
 import { mockToast, renderWithProviders, waitForPageLoad } from '@/test/componentTestHelpers';
 
 import ProcessesCard from './ProcessesCard';
@@ -15,6 +21,7 @@ import ProcessesCard from './ProcessesCard';
 vi.mock('@/services/processesService', () => ({
   getProcesses: vi.fn(),
   restartService: vi.fn(),
+  serviceAction: vi.fn(),
 }));
 
 vi.mock('@/services/diagnosticsService', () => ({
@@ -115,10 +122,8 @@ describe('ProcessesCard', () => {
 
     await user.click(screen.getByTestId('diagnostics-processes-restart-snmp'));
 
-    expect(screen.getByTestId('diagnostics-processes-restart-dialog')).toBeInTheDocument();
-    expect(screen.getByTestId('diagnostics-processes-restart-dialog-title')).toHaveTextContent(
-      'snmp',
-    );
+    expect(screen.getByTestId('diagnostics-processes-action-dialog')).toBeInTheDocument();
+    expect(screen.getByTestId('diagnostics-processes-action-title')).toHaveTextContent('snmp');
   });
 
   it('should call restartService with the service name on confirm', async () => {
@@ -131,7 +136,7 @@ describe('ProcessesCard', () => {
     );
 
     await user.click(screen.getByTestId('diagnostics-processes-restart-snmp'));
-    await user.click(screen.getByTestId('diagnostics-processes-restart-confirm'));
+    await user.click(screen.getByTestId('diagnostics-processes-action-confirm'));
 
     await waitFor(() => expect(restartService).toHaveBeenCalledWith('snmp'));
     await waitFor(() =>
@@ -149,9 +154,9 @@ describe('ProcessesCard', () => {
 
     await user.click(screen.getByTestId('diagnostics-processes-restart-onvif'));
 
-    expect(
-      screen.getByTestId('diagnostics-processes-restart-dialog-description'),
-    ).toHaveTextContent('vendor-daemon');
+    expect(screen.getByTestId('diagnostics-processes-action-description')).toHaveTextContent(
+      'vendor-daemon',
+    );
   });
 
   it('should enter the reconnecting state when onvif is restarted', async () => {
@@ -169,10 +174,141 @@ describe('ProcessesCard', () => {
     );
 
     await user.click(screen.getByTestId('diagnostics-processes-restart-onvif'));
-    await user.click(screen.getByTestId('diagnostics-processes-restart-confirm'));
+    await user.click(screen.getByTestId('diagnostics-processes-action-confirm'));
 
     await waitFor(() =>
       expect(screen.getByTestId('diagnostics-processes-reconnecting')).toBeInTheDocument(),
     );
+  });
+});
+
+const SNMP: ServiceStatus = {
+  name: 'snmp',
+  state: 'running',
+  pid: 123,
+  uptime_s: 500,
+  restarts: 0,
+  retry_in_s: 0,
+};
+const OFF: ServiceStatus = {
+  name: 'snmp',
+  state: 'disabled',
+  pid: null,
+  uptime_s: 0,
+  restarts: 0,
+  retry_in_s: 0,
+};
+const supervisedFixture = (rows: ServiceStatus[]): ProcessesResponse => ({
+  supervised: rows,
+  processes: [],
+});
+
+describe('ProcessesCard service toggling', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(getDiagnostics).mockResolvedValue({} as Awaited<ReturnType<typeof getDiagnostics>>);
+  });
+
+  it('shows Disable for an enabled service and Enable (dimmed) for a disabled one', async () => {
+    vi.mocked(getProcesses).mockResolvedValue(supervisedFixture([SNMP, { ...OFF, name: 'dropbear' }]));
+    renderWithProviders(<ProcessesCard />);
+    await waitForPageLoad('diagnostics-processes-title');
+    expect(await screen.findByTestId('diagnostics-processes-disable-snmp')).toBeInTheDocument();
+    expect(screen.queryByTestId('diagnostics-processes-enable-snmp')).not.toBeInTheDocument();
+    expect(screen.getByTestId('diagnostics-processes-enable-dropbear')).toBeInTheDocument();
+    expect(screen.getByTestId('diagnostics-processes-row-dropbear')).toHaveClass('opacity-50');
+    expect(screen.getByTestId('diagnostics-processes-status-dropbear')).toHaveTextContent(
+      'disabled',
+    );
+    // A disabled service is not restartable.
+    expect(screen.queryByTestId('diagnostics-processes-restart-dropbear')).not.toBeInTheDocument();
+  });
+
+  it('offers no toggle for wpa_supplicant', async () => {
+    vi.mocked(getProcesses).mockResolvedValue(supervisedFixture([{ ...SNMP, name: 'wpa_supplicant' }]));
+    renderWithProviders(<ProcessesCard />);
+    await waitForPageLoad('diagnostics-processes-title');
+    expect(await screen.findByTestId('diagnostics-processes-restart-wpa_supplicant')).toBeInTheDocument();
+    expect(screen.queryByTestId('diagnostics-processes-disable-wpa_supplicant')).not.toBeInTheDocument();
+  });
+
+  it('disabling snmp goes through the confirm dialog', async () => {
+    vi.mocked(getProcesses).mockResolvedValue(supervisedFixture([SNMP]));
+    vi.mocked(serviceAction).mockResolvedValue(undefined);
+    renderWithProviders(<ProcessesCard />);
+    await waitForPageLoad('diagnostics-processes-title');
+    const user = userEvent.setup();
+    await user.click(await screen.findByTestId('diagnostics-processes-disable-snmp'));
+    expect(screen.getByTestId('diagnostics-processes-action-title')).toHaveTextContent(
+      'Disable snmp?',
+    );
+    await user.click(screen.getByTestId('diagnostics-processes-action-confirm'));
+    await waitFor(() => expect(serviceAction).toHaveBeenCalledWith('snmp', 'disable'));
+  });
+
+  it('enabling calls serviceAction with enable', async () => {
+    vi.mocked(getProcesses).mockResolvedValue(supervisedFixture([OFF]));
+    vi.mocked(serviceAction).mockResolvedValue(undefined);
+    renderWithProviders(<ProcessesCard />);
+    await waitForPageLoad('diagnostics-processes-title');
+    const user = userEvent.setup();
+    await user.click(await screen.findByTestId('diagnostics-processes-enable-snmp'));
+    await user.click(screen.getByTestId('diagnostics-processes-action-confirm'));
+    await waitFor(() => expect(serviceAction).toHaveBeenCalledWith('snmp', 'enable'));
+  });
+
+  it('warns that disabling vendor-daemon stops video', async () => {
+    vi.mocked(getProcesses).mockResolvedValue(supervisedFixture([{ ...SNMP, name: 'vendor-daemon' }]));
+    renderWithProviders(<ProcessesCard />);
+    await waitForPageLoad('diagnostics-processes-title');
+    const user = userEvent.setup();
+    await user.click(await screen.findByTestId('diagnostics-processes-disable-vendor-daemon'));
+    expect(screen.getByTestId('diagnostics-processes-action-description')).toHaveTextContent(
+      'streams go dead',
+    );
+  });
+
+  it('shows the onvif consequence copy when disabling onvif', async () => {
+    vi.mocked(getProcesses).mockResolvedValue(supervisedFixture([{ ...SNMP, name: 'onvif' }]));
+    renderWithProviders(<ProcessesCard />);
+    await waitForPageLoad('diagnostics-processes-title');
+    const user = userEvent.setup();
+    await user.click(await screen.findByTestId('diagnostics-processes-disable-onvif'));
+    expect(screen.getByTestId('diagnostics-processes-action-description')).toHaveTextContent(
+      'only reachable via FTP',
+    );
+  });
+
+  it('disabling onvif does NOT enter the reconnecting state, even when the connection drops', async () => {
+    vi.mocked(getProcesses).mockResolvedValue(supervisedFixture([{ ...SNMP, name: 'onvif' }]));
+    vi.mocked(serviceAction).mockRejectedValue(new TypeError('fetch failed'));
+    renderWithProviders(<ProcessesCard />);
+    await waitForPageLoad('diagnostics-processes-title');
+    const user = userEvent.setup();
+    await user.click(await screen.findByTestId('diagnostics-processes-disable-onvif'));
+    await user.click(screen.getByTestId('diagnostics-processes-action-confirm'));
+    await waitFor(() => expect(serviceAction).toHaveBeenCalledWith('onvif', 'disable'));
+    // A dropped connection on disable is the expected success path: the card
+    // reports it as done, not as an error, and never waits for a comeback.
+    expect(screen.queryByTestId('diagnostics-processes-reconnecting')).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByTestId('diagnostics-processes-onvif-off-note')).toBeInTheDocument(),
+    );
+  });
+
+  it('an ApiError from disable is an error toast with no waiting', async () => {
+    vi.mocked(getProcesses).mockResolvedValue(supervisedFixture([SNMP]));
+    vi.mocked(serviceAction).mockRejectedValue(
+      Object.assign(new Error('disable of snmp failed with status 503'), { name: 'ApiError' }),
+    );
+    renderWithProviders(<ProcessesCard />);
+    await waitForPageLoad('diagnostics-processes-title');
+    const user = userEvent.setup();
+    await user.click(await screen.findByTestId('diagnostics-processes-disable-snmp'));
+    await user.click(screen.getByTestId('diagnostics-processes-action-confirm'));
+    await waitFor(() =>
+      expect(mockToast.error).toHaveBeenCalledWith(expect.stringContaining('503')),
+    );
+    expect(screen.queryByTestId('diagnostics-processes-reconnecting')).not.toBeInTheDocument();
   });
 });

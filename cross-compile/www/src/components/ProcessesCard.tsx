@@ -28,7 +28,13 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { isAbortError, waitForCameraBack } from '@/lib/waitForCameraBack';
 import { getDiagnostics } from '@/services/diagnosticsService';
-import { type ServiceStatus, getProcesses, restartService } from '@/services/processesService';
+import {
+  type ServiceAction,
+  type ServiceStatus,
+  getProcesses,
+  restartService,
+  serviceAction,
+} from '@/services/processesService';
 import { formatDuration } from '@/utils/formatDuration';
 
 // One endpoint feeds both tables; split queries would double requests to save nothing.
@@ -37,42 +43,66 @@ const REFRESH_MS = 10_000;
 const ONVIF_WAIT_INTERVAL_MS = 2000;
 const ONVIF_WAIT_TIMEOUT_MS = 5 * 60 * 1000;
 
+/// Services the supervisor refuses to toggle (anyka-init: NON_TOGGLEABLE).
+/// Rendering a button that always 404s is worse than rendering none.
+const NON_TOGGLEABLE = new Set(['wpa_supplicant']);
+
+const DISABLE_COPY: Record<string, string> = {
+  onvif:
+    'Web, ONVIF and RTSP access end immediately. The camera stays up, but it is then only reachable via FTP (or the deadman telnet after a failed boot). Re-enabling requires FTP or an SD-card edit.',
+  'vendor-daemon':
+    'Video capture and encoding stop; streams go dead until it is re-enabled. The camera does not reboot — the video watchdog is stood down with it.',
+  udhcpc:
+    'Stops DHCP renewals, so a configured static address is no longer overwritten on renewal. The link watchdog still runs a one-shot udhcpc if the default route disappears.',
+  snmp: 'SNMP polling stops.',
+  dropbear: 'The SSH daemon will not run until it is re-enabled.',
+};
+
+const DEFAULT_ENABLE_COPY = 'The service starts immediately under the normal supervisor backoff policy.';
+
+const ACTION_VERB: Record<ServiceAction, string> = {
+  restart: 'Restart',
+  enable: 'Enable',
+  disable: 'Disable',
+};
+
+type PendingAction = { service: ServiceStatus; action: ServiceAction } | null;
+
+function actionDescription(p: NonNullable<PendingAction>): string {
+  if (p.action === 'restart') {
+    return p.service.name === 'onvif'
+      ? 'Restarting onvif also stops vendor-daemon — video and this page will drop with it and recover on their own when the camera returns.'
+      : 'The supervisor sends SIGTERM; the service is restarted under its normal backoff policy.';
+  }
+  if (p.action === 'enable') {
+    return DEFAULT_ENABLE_COPY;
+  }
+  return DISABLE_COPY[p.service.name] ?? 'The service stops and will not run again until re-enabled.';
+}
+
 function ServiceStateBadge({ service }: Readonly<{ service: ServiceStatus }>) {
-  const running = service.state === 'running';
+  const state = service.state;
   return (
     <Badge
       className={
-        running
+        state === 'running'
           ? 'border-transparent bg-green-500/10 text-green-500'
-          : 'border-transparent bg-amber-500/10 text-amber-500'
+          : state === 'disabled'
+            ? 'border-transparent bg-zinc-500/10 text-zinc-400'
+            : 'border-transparent bg-amber-500/10 text-amber-500'
       }
       data-testid={`diagnostics-processes-status-${service.name}`}
     >
-      {service.state}
+      {state}
     </Badge>
-  );
-}
-
-function RestartDescription({ service }: Readonly<{ service: ServiceStatus }>) {
-  if (service.name !== 'onvif') {
-    return (
-      <AlertDialogDescription data-testid="diagnostics-processes-restart-dialog-description">
-        The supervisor sends SIGTERM; the service is restarted under its normal backoff policy.
-      </AlertDialogDescription>
-    );
-  }
-  return (
-    <AlertDialogDescription data-testid="diagnostics-processes-restart-dialog-description">
-      Restarting onvif also stops vendor-daemon — video and this page will drop with it and recover
-      on their own when the camera returns.
-    </AlertDialogDescription>
   );
 }
 
 export default function ProcessesCard() {
   const queryClient = useQueryClient();
-  const [target, setTarget] = useState<ServiceStatus | null>(null);
+  const [pending, setPending] = useState<PendingAction>(null);
   const [reconnecting, setReconnecting] = useState(false);
+  const [onvifOff, setOnvifOff] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
 
   const { data } = useQuery({
@@ -91,13 +121,10 @@ export default function ProcessesCard() {
     void queryClient.invalidateQueries({ queryKey: ['processes'] });
   }, [queryClient]);
 
-  const handleConfirm = useCallback(
-    async (e: React.MouseEvent) => {
-      e.preventDefault();
-      const service = target;
-      if (!service) return;
-      setTarget(null);
-
+  // The extracted restart path: unchanged behaviour, including the onvif
+  // reconnecting state.
+  const runRestart = useCallback(
+    async (service: ServiceStatus) => {
       if (service.name !== 'onvif') {
         try {
           await restartService(service.name);
@@ -111,8 +138,9 @@ export default function ProcessesCard() {
 
       // onvif: the POST's own connection is the one that gets dropped, so a
       // network-level failure here is the expected outcome, not an error.
-      // An ApiError (404 unknown service / 503 supervisor unreachable) is a
-      // real failure — say so and do not wait for a reboot that won't come.
+      // An ApiError (404 unknown service / 409 disabled service / 503
+      // supervisor unreachable) is a real failure — say so and do not wait for
+      // a reboot that won't come.
       const controller = new AbortController();
       abortRef.current = controller;
       setReconnecting(true);
@@ -141,7 +169,46 @@ export default function ProcessesCard() {
         invalidate();
       }
     },
-    [invalidate, target],
+    [invalidate],
+  );
+
+  const handleConfirm = useCallback(
+    async (e: React.MouseEvent) => {
+      e.preventDefault();
+      const p = pending;
+      if (!p) return;
+      setPending(null);
+
+      if (p.action === 'restart') {
+        await runRestart(p.service);
+        return;
+      }
+
+      // Disable/enable involves no reboot — except disabling onvif, which
+      // takes down the very HTTP server serving this page.
+      const isOnvifOff = p.action === 'disable' && p.service.name === 'onvif';
+      const reportOnvifOff = () => {
+        setOnvifOff(true);
+        toast.success('onvif disabled — the camera is reachable via FTP only');
+      };
+      try {
+        await serviceAction(p.service.name, p.action);
+        if (isOnvifOff) reportOnvifOff();
+        else toast.success(`${p.service.name} ${p.action === 'enable' ? 'enabled' : 'disabled'}`);
+        invalidate();
+      } catch (err) {
+        if (err instanceof Error && err.name === 'ApiError') {
+          toast.error(err.message);
+        } else if (isOnvifOff) {
+          // Network-level failure on an onvif disable: the only cause is the
+          // camera killing our own connection — i.e. it worked.
+          reportOnvifOff();
+        } else {
+          toast.error(err instanceof Error ? err.message : 'Toggle failed');
+        }
+      }
+    },
+    [invalidate, pending, runRestart],
   );
 
   const supervised = data?.supervised ?? null;
@@ -179,6 +246,15 @@ export default function ProcessesCard() {
             onvif is restarting — the page will drop and recover on its own…
           </p>
         )}
+        {onvifOff && (
+          <p
+            className="text-muted-foreground text-sm"
+            data-testid="diagnostics-processes-onvif-off-note"
+            aria-live="polite"
+          >
+            onvif is disabled — Web access is down until it is re-enabled via FTP or the SD card.
+          </p>
+        )}
 
         {data === undefined ? (
           <p className="text-muted-foreground text-sm" data-testid="diagnostics-processes-loading">
@@ -207,50 +283,80 @@ export default function ProcessesCard() {
                     </tr>
                   </thead>
                   <tbody>
-                    {supervised.map((service) => (
-                      <tr
-                        key={service.name}
-                        className="border-border border-b last:border-b-0"
-                        data-testid={`diagnostics-processes-row-${service.name}`}
-                      >
-                        <td className="py-2 pr-4 font-mono">{service.name}</td>
-                        <td className="py-2 pr-4">
-                          <ServiceStateBadge service={service} />
-                        </td>
-                        <td
-                          className="font-mono text-white"
-                          data-testid={`diagnostics-processes-pid-${service.name}`}
+                    {supervised.map((service) => {
+                      const isDisabled = service.state === 'disabled';
+                      const toggleable = !NON_TOGGLEABLE.has(service.name);
+                      return (
+                        <tr
+                          key={service.name}
+                          className={`border-border border-b last:border-b-0 ${isDisabled ? 'opacity-50' : ''}`}
+                          data-testid={`diagnostics-processes-row-${service.name}`}
                         >
-                          {service.pid ?? '—'}
-                        </td>
-                        <td
-                          className="font-mono text-white"
-                          data-testid={`diagnostics-processes-uptime-${service.name}`}
-                        >
-                          {service.state === 'running' ? formatDuration(service.uptime_s) : '—'}
-                          {service.state === 'backoff' && (
-                            <span
-                              className="text-muted-foreground"
-                              data-testid={`diagnostics-processes-retry-countdown-${service.name}`}
-                            >
-                              {` restarts in ${service.retry_in_s}s`}
-                            </span>
-                          )}
-                        </td>
-                        <td className="font-mono text-white">{service.restarts}</td>
-                        <td className="py-2 text-right">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            data-testid={`diagnostics-processes-restart-${service.name}`}
-                            onClick={() => setTarget(service)}
+                          <td className="py-2 pr-4 font-mono">{service.name}</td>
+                          <td className="py-2 pr-4">
+                            <ServiceStateBadge service={service} />
+                          </td>
+                          <td
+                            className="font-mono text-white"
+                            data-testid={`diagnostics-processes-pid-${service.name}`}
                           >
-                            <RotateCw className="h-3.5 w-3.5" />
-                            Restart
-                          </Button>
-                        </td>
-                      </tr>
-                    ))}
+                            {service.pid ?? '—'}
+                          </td>
+                          <td
+                            className="font-mono text-white"
+                            data-testid={`diagnostics-processes-uptime-${service.name}`}
+                          >
+                            {service.state === 'running' ? formatDuration(service.uptime_s) : '—'}
+                            {service.state === 'backoff' && (
+                              <span
+                                className="text-muted-foreground"
+                                data-testid={`diagnostics-processes-retry-countdown-${service.name}`}
+                              >
+                                {` restarts in ${service.retry_in_s}s`}
+                              </span>
+                            )}
+                          </td>
+                          <td className="font-mono text-white">{service.restarts}</td>
+                          <td className="py-2">
+                            <div className="flex justify-end gap-2">
+                              {!isDisabled && (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  data-testid={`diagnostics-processes-restart-${service.name}`}
+                                  onClick={() =>
+                                    setPending({ service, action: 'restart' })
+                                  }
+                                >
+                                  <RotateCw className="h-3.5 w-3.5" />
+                                  Restart
+                                </Button>
+                              )}
+                              {toggleable &&
+                                (isDisabled ? (
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    data-testid={`diagnostics-processes-enable-${service.name}`}
+                                    onClick={() => setPending({ service, action: 'enable' })}
+                                  >
+                                    Enable
+                                  </Button>
+                                ) : (
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    data-testid={`diagnostics-processes-disable-${service.name}`}
+                                    onClick={() => setPending({ service, action: 'disable' })}
+                                  >
+                                    Disable
+                                  </Button>
+                                ))}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -319,33 +425,37 @@ export default function ProcessesCard() {
       </CardContent>
 
       <AlertDialog
-        open={target !== null}
+        open={pending !== null}
         onOpenChange={(open) => {
-          if (!open) setTarget(null);
+          if (!open) setPending(null);
         }}
       >
         <AlertDialogContent
           className="bg-card border-border text-foreground"
-          data-testid="diagnostics-processes-restart-dialog"
+          data-testid="diagnostics-processes-action-dialog"
         >
           <AlertDialogHeader>
-            <AlertDialogTitle data-testid="diagnostics-processes-restart-dialog-title">
-              Restart {target?.name}?
+            <AlertDialogTitle data-testid="diagnostics-processes-action-title">
+              {pending ? `${ACTION_VERB[pending.action]} ${pending.service.name}?` : ''}
             </AlertDialogTitle>
-            {target && <RestartDescription service={target} />}
+            {pending && (
+              <AlertDialogDescription data-testid="diagnostics-processes-action-description">
+                {actionDescription(pending)}
+              </AlertDialogDescription>
+            )}
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel data-testid="diagnostics-processes-restart-cancel">
+            <AlertDialogCancel data-testid="diagnostics-processes-action-cancel">
               Cancel
             </AlertDialogCancel>
             <AlertDialogAction
-              data-testid="diagnostics-processes-restart-confirm"
+              data-testid="diagnostics-processes-action-confirm"
               onClick={(e) => {
                 e.preventDefault();
                 void handleConfirm(e);
               }}
             >
-              Restart
+              {pending ? ACTION_VERB[pending.action] : ''}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
