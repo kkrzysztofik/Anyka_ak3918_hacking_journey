@@ -664,6 +664,14 @@ impl OnvifServer {
                     post(crate::diagnostics::processes::handle_restart_service).layer(timeout()),
                 );
                 api = api.route(
+                    "/services/{name}/enable",
+                    post(crate::diagnostics::processes::handle_enable_service).layer(timeout()),
+                );
+                api = api.route(
+                    "/services/{name}/disable",
+                    post(crate::diagnostics::processes::handle_disable_service).layer(timeout()),
+                );
+                api = api.route(
                     "/network",
                     get(crate::diagnostics::network::handle_get_network)
                         .put(crate::diagnostics::network::handle_put_network)

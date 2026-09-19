@@ -143,6 +143,45 @@ pub async fn handle_restart_service(AxumPath(name): AxumPath<String>) -> impl In
         // a 404 rather than a silently-ignored "ok". Costs one extra
         // round-trip on a path a human clicks, which is free.
         crate::diagnostics::services::query_status(sock)
+            .map(|rows| rows.iter().find(|r| r.name == name).map(|r| r.state.clone()))
+            .map(|state| (state, name))
+    })
+    .await;
+
+    let Ok(Some((state, name))) = known else {
+        return (StatusCode::SERVICE_UNAVAILABLE, "supervisor unreachable").into_response();
+    };
+    let Some(state) = state else {
+        return (StatusCode::NOT_FOUND, "unknown service").into_response();
+    };
+    if state == "disabled" {
+        // The supervisor would accept this and do nothing: there is no process
+        // to signal. Enable it instead.
+        return (StatusCode::CONFLICT, "service is disabled").into_response();
+    }
+
+    let accepted = tokio::task::spawn_blocking(move || {
+        crate::diagnostics::services::request_restart(sock, &name)
+    })
+    .await;
+
+    match accepted {
+        Ok(true) => StatusCode::ACCEPTED.into_response(),
+        _ => (StatusCode::SERVICE_UNAVAILABLE, "restart not accepted").into_response(),
+    }
+}
+
+/// Shared core for the enable/disable routes.
+///
+/// 202, not 200: accepted, not confirmed — the supervisor SIGTERMs (disable)
+/// or starts under backoff (enable) on its own schedule.
+async fn toggle_service(name: String, enabled: bool) -> impl IntoResponse {
+    let sock = std::path::Path::new(crate::diagnostics::services::SOCKET_PATH);
+
+    // Validate against the live snapshot (which now includes disabled rows)
+    // so an unknown name is a 404, not a silently-accepted "ok".
+    let known = tokio::task::spawn_blocking(move || {
+        crate::diagnostics::services::query_status(sock)
             .map(|rows| rows.iter().any(|r| r.name == name))
             .map(|found| (found, name))
     })
@@ -155,15 +194,34 @@ pub async fn handle_restart_service(AxumPath(name): AxumPath<String>) -> impl In
         return (StatusCode::NOT_FOUND, "unknown service").into_response();
     }
 
-    let accepted = tokio::task::spawn_blocking(move || {
-        crate::diagnostics::services::request_restart(sock, &name)
+    let reply = tokio::task::spawn_blocking(move || {
+        crate::diagnostics::services::request_toggle(sock, &name, enabled)
     })
     .await;
 
-    match accepted {
-        Ok(true) => StatusCode::ACCEPTED.into_response(),
-        _ => (StatusCode::SERVICE_UNAVAILABLE, "restart not accepted").into_response(),
+    match reply {
+        Ok(crate::diagnostics::services::ToggleReply::Accepted) => {
+            StatusCode::ACCEPTED.into_response()
+        }
+        Ok(crate::diagnostics::services::ToggleReply::Unknown) => {
+            (StatusCode::NOT_FOUND, "unknown or non-toggleable service").into_response()
+        }
+        _ => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "toggle not accepted by supervisor",
+        )
+            .into_response(),
     }
+}
+
+/// POST /api/services/{name}/enable
+pub async fn handle_enable_service(AxumPath(name): AxumPath<String>) -> impl IntoResponse {
+    toggle_service(name, true).await
+}
+
+/// POST /api/services/{name}/disable
+pub async fn handle_disable_service(AxumPath(name): AxumPath<String>) -> impl IntoResponse {
+    toggle_service(name, false).await
 }
 
 #[cfg(test)]
@@ -217,5 +275,15 @@ mod tests {
     #[test]
     fn test_parse_status_rss_without_a_vmrss_line_is_zero() {
         assert_eq!(parse_status_rss("Name:\tkworker\nState:\tS\n"), 0);
+    }
+
+    /// The socket path is a constant, so the testable axis on a dev host is
+    /// the no-supervisor path. Pin that it degrades to 503 and never 500.
+    #[tokio::test]
+    async fn test_toggle_service_without_a_supervisor_is_503() {
+        let resp = toggle_service("snmp".to_string(), true)
+            .await
+            .into_response();
+        assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
     }
 }

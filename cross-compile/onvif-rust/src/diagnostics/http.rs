@@ -365,6 +365,25 @@ mod tests {
         );
     }
 
+    /// The two new state changes ride the same catch-all as restart — pin
+    /// that so a future whitelist edit cannot silently open them to lower
+    /// levels.
+    #[test]
+    fn test_required_level_for_a_service_enable_is_administrator() {
+        assert_eq!(
+            required_level_for_path("/services/onvif/enable"),
+            AuthLevel::Administrator
+        );
+    }
+
+    #[test]
+    fn test_required_level_for_a_service_disable_is_administrator() {
+        assert_eq!(
+            required_level_for_path("/services/snmp/disable"),
+            AuthLevel::Administrator
+        );
+    }
+
     // ── reuse proof: verify_basic_auth_self integration ──────────────────
     //
     // These tests exercise the same verify_basic_auth_self → check_required_level
