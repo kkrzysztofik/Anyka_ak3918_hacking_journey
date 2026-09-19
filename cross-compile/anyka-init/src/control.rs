@@ -78,21 +78,42 @@ pub fn encode_status(rows: &[ServiceStatus]) -> String {
 pub enum Request {
     Status,
     Restart(String),
+    Enable(String),
+    Disable(String),
 }
 
-/// Parse one line. `"status\n"` -> `Status`,
-/// `"restart <name>\n"` -> `Restart(name)`. Everything else -> `None`.
-/// A blank name is rejected, as is a name containing a tab.
+/// Parse one line: `"status\n"`, `"restart <name>\n"`, `"enable <name>\n"`,
+/// `"disable <name>\n"`. Blank or tab-bearing names are rejected; unknown
+/// verbs are `None`.
 pub fn parse_request(line: &str) -> Option<Request> {
     let line = line.trim_end_matches(['\r', '\n']);
     if line == "status" {
         return Some(Request::Status);
     }
-    let name = line.strip_prefix("restart ")?.trim();
+    let (verb, name) = line.split_once(' ')?;
+    let name = name.trim();
     if name.is_empty() || name.contains('\t') {
         return None;
     }
-    Some(Request::Restart(name.to_owned()))
+    match verb {
+        "restart" => Some(Request::Restart(name.to_owned())),
+        "enable" => Some(Request::Enable(name.to_owned())),
+        "disable" => Some(Request::Disable(name.to_owned())),
+        _ => None,
+    }
+}
+
+/// Outcome of an `enable`/`disable` request, decided by the supervisor loop —
+/// only it can see whether the name is configured and toggleable, and whether
+/// the config write succeeded.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToggleOutcome {
+    /// Applied — including the idempotent no-op case (already in that state).
+    Ok,
+    /// Not a configured service, or not toggleable.
+    Unknown,
+    /// The config write failed, or the loop did not answer. Nothing changed.
+    Error,
 }
 
 #[cfg(test)]
@@ -193,5 +214,33 @@ mod tests {
     fn test_parse_request_rejects_unknown() {
         assert_eq!(parse_request("nonsense\n"), None);
         assert_eq!(parse_request("\n"), None);
+    }
+
+    #[test]
+    fn test_parse_request_enable() {
+        assert_eq!(
+            parse_request("enable snmp\n"),
+            Some(Request::Enable("snmp".into()))
+        );
+    }
+
+    #[test]
+    fn test_parse_request_disable() {
+        assert_eq!(
+            parse_request("disable onvif\r\n"),
+            Some(Request::Disable("onvif".into()))
+        );
+    }
+
+    #[test]
+    fn test_parse_request_toggle_rejects_blank_or_tabbed_names() {
+        assert_eq!(parse_request("disable \n"), None);
+        assert_eq!(parse_request("enable a\tb\n"), None);
+    }
+
+    #[test]
+    fn test_parse_request_still_rejects_unknown_verbs() {
+        assert_eq!(parse_request("destroy onvif\n"), None);
+        assert_eq!(parse_request("status\n"), Some(Request::Status));
     }
 }

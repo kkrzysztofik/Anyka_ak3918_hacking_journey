@@ -48,6 +48,13 @@ pub enum Msg {
     /// monitor's next rung is a reboot, which does not need the process to die.
     KillService(String),
     QueryStatus(Sender<ControlMsg>),
+    /// Runtime enable/disable of a configured service. The handler persists to
+    /// `anyka.toml` first, then transitions in-memory state.
+    ToggleService {
+        name: String,
+        enabled: bool,
+        reply: Sender<control::ToggleOutcome>,
+    },
 }
 
 struct Service {
@@ -353,11 +360,45 @@ fn handle_control_conn(mut stream: UnixStream, tx: &Sender<Msg>) -> std::io::Res
             // else as a failure — keep the reply minimal, not chatty.
             let _ = stream.write_all(b"ok\n");
         }
+        Some(control::Request::Enable(name)) => send_toggle(&mut stream, tx, name, true),
+        Some(control::Request::Disable(name)) => send_toggle(&mut stream, tx, name, false),
         None => {
             let _ = stream.write_all(b"unknown\n");
         }
     }
     Ok(())
+}
+
+/// Ask the loop to toggle a service and write its verdict back to the
+/// connection.
+///
+/// The 1 s budget is deliberately below the client's 2 s socket timeout
+/// (`onvif-rust/src/diagnostics/services.rs`): if we answered later than the
+/// client waits, an applied-and-persisted toggle would surface as a 503.
+fn send_toggle<W: std::io::Write>(
+    writer: &mut W,
+    tx: &Sender<Msg>,
+    name: String,
+    enabled: bool,
+) {
+    let (reply_tx, reply_rx) = channel();
+    let sent = tx.send(Msg::ToggleService {
+        name,
+        enabled,
+        reply: reply_tx,
+    });
+    let outcome = match sent {
+        Ok(()) => reply_rx
+            .recv_timeout(Duration::from_secs(1))
+            .unwrap_or(control::ToggleOutcome::Error),
+        Err(_) => control::ToggleOutcome::Error,
+    };
+    let reply = match outcome {
+        control::ToggleOutcome::Ok => "ok\n",
+        control::ToggleOutcome::Unknown => "unknown\n",
+        control::ToggleOutcome::Error => "error\n",
+    };
+    let _ = writer.write_all(reply.as_bytes());
 }
 
 pub fn spawn_control_thread(tx: Sender<Msg>) -> std::io::Result<()> {
@@ -406,6 +447,11 @@ fn dispatch_msg(
         }
         Ok(Msg::QueryStatus(reply_tx)) => {
             handle_query_status(services, &reply_tx);
+            false
+        }
+        // TEMPORARY (Task 3 → replaced in Task 4)
+        Ok(Msg::ToggleService { reply, .. }) => {
+            let _ = reply.send(control::ToggleOutcome::Error);
             false
         }
         Ok(Msg::Shutdown) => {
