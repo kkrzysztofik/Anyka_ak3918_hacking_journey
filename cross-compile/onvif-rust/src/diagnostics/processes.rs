@@ -1,5 +1,9 @@
 //! `/proc` walk backing the raw process table on the diagnostics page.
 
+use axum::Json;
+use axum::extract::Path as AxumPath;
+use axum::http::StatusCode;
+use axum::response::IntoResponse;
 use serde::Serialize;
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -45,7 +49,7 @@ pub fn parse_stat(line: &str, hz: u64) -> Option<Process> {
         comm,
         state,
         rss_kb: 0,
-        cpu_time_s: if hz == 0 { 0 } else { (utime + stime) / hz },
+        cpu_time_s: (utime + stime).checked_div(hz).unwrap_or(0),
     })
 }
 
@@ -90,8 +94,76 @@ pub fn collect() -> Vec<Process> {
             Some(p)
         })
         .collect();
-    out.sort_by(|a, b| b.rss_kb.cmp(&a.rss_kb));
+    out.sort_by_key(|p| std::cmp::Reverse(p.rss_kb));
     out
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ProcessesResponse {
+    /// `None` when the supervisor control socket is unreachable. The raw
+    /// table still renders; the UI degrades to a note.
+    pub supervised: Option<Vec<crate::diagnostics::services::ServiceStatus>>,
+    pub processes: Vec<Process>,
+}
+
+/// GET /api/processes
+pub async fn handle_processes() -> impl IntoResponse {
+    // One spawn_blocking for BOTH the socket round-trip and the whole /proc
+    // walk — see the note on `collect`.
+    let result = tokio::task::spawn_blocking(|| {
+        let supervised = crate::diagnostics::services::query_status(std::path::Path::new(
+            crate::diagnostics::services::SOCKET_PATH,
+        ));
+        ProcessesResponse {
+            supervised,
+            processes: collect(),
+        }
+    })
+    .await;
+
+    match result {
+        Ok(body) => Json(body).into_response(),
+        Err(e) => {
+            tracing::warn!(error = %e, "process listing task failed");
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+    }
+}
+
+/// POST /api/services/{name}/restart
+///
+/// 202, not 200: the supervisor SIGTERMs and the normal exit path restarts
+/// under backoff. "Accepted" is the honest status — nothing here waits for the
+/// service to come back.
+pub async fn handle_restart_service(AxumPath(name): AxumPath<String>) -> impl IntoResponse {
+    let sock = std::path::Path::new(crate::diagnostics::services::SOCKET_PATH);
+
+    let known = tokio::task::spawn_blocking(move || {
+        // Validate the name against the live snapshot so an unknown service is
+        // a 404 rather than a silently-ignored "ok". Costs one extra
+        // round-trip on a path a human clicks, which is free.
+        crate::diagnostics::services::query_status(sock)
+            .map(|rows| rows.iter().any(|r| r.name == name))
+            .map(|found| (found, name))
+    })
+    .await;
+
+    let Ok(Some((found, name))) = known else {
+        return (StatusCode::SERVICE_UNAVAILABLE, "supervisor unreachable").into_response();
+    };
+    if !found {
+        return (StatusCode::NOT_FOUND, "unknown service").into_response();
+    }
+
+    let accepted = tokio::task::spawn_blocking(move || {
+        crate::diagnostics::services::request_restart(sock, &name)
+    })
+    .await;
+
+    match accepted {
+        Ok(true) => StatusCode::ACCEPTED.into_response(),
+        _ => (StatusCode::SERVICE_UNAVAILABLE, "restart not accepted").into_response(),
+    }
 }
 
 #[cfg(test)]

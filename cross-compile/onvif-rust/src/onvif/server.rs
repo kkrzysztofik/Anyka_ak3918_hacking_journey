@@ -649,10 +649,20 @@ impl OnvifServer {
                 .route(
                     "/logs",
                     get(crate::diagnostics::http::handle_logs).layer(timeout()),
+                )
+                .route(
+                    "/processes",
+                    get(crate::diagnostics::processes::handle_processes).layer(timeout()),
                 );
             if state.auth_enabled {
                 // No timeout: see the comment on `timeout` above.
                 api = api.route("/update", put(crate::diagnostics::update::handle_update));
+                // A state change, like /update: it must not exist at all when
+                // auth is off, because the middleware passes everything through.
+                api = api.route(
+                    "/services/{name}/restart",
+                    post(crate::diagnostics::processes::handle_restart_service).layer(timeout()),
+                );
                 api = api.route(
                     "/network",
                     get(crate::diagnostics::network::handle_get_network)
@@ -1888,6 +1898,32 @@ mod tests {
             response.status(),
             StatusCode::FORBIDDEN,
             "valid non-admin credentials must not be allowed to upload firmware"
+        );
+    }
+
+    /// A restart is a state change; Operator-level credentials must not carry it.
+    #[tokio::test]
+    async fn test_service_restart_route_rejects_non_admin_credentials_with_403() {
+        use axum::body::Body;
+        use axum::http::{Request, StatusCode};
+        use base64::Engine;
+        use tower::ServiceExt;
+
+        let app = make_diagnostics_app_with_user(true, "viewer", crate::config::UserLevel::User, 0);
+        let credentials = base64::engine::general_purpose::STANDARD.encode("viewer:pass");
+
+        let request = Request::builder()
+            .method("POST")
+            .uri("/api/services/onvif/restart")
+            .header("Authorization", format!("Basic {credentials}"))
+            .body(Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(
+            response.status(),
+            StatusCode::FORBIDDEN,
+            "valid non-admin credentials must not be allowed to restart a service"
         );
     }
 
