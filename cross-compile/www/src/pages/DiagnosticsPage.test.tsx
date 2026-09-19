@@ -14,6 +14,7 @@ import type { UseDiagnosticsResult } from '@/hooks/useDiagnostics';
 import { useDiagnostics } from '@/hooks/useDiagnostics';
 import type { Diagnostics } from '@/services/diagnosticsService';
 import { getLogs } from '@/services/diagnosticsService';
+import { getProcesses } from '@/services/processesService';
 import { getSoundStatus, playSound } from '@/services/soundService';
 import { renderWithProviders } from '@/test/componentTestHelpers';
 
@@ -21,6 +22,7 @@ import DiagnosticsPage from './DiagnosticsPage';
 
 vi.mock('@/hooks/useDiagnostics');
 vi.mock('@/services/diagnosticsService');
+vi.mock('@/services/processesService');
 vi.mock('@/services/soundService');
 vi.mock('sonner', () => ({
   toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() },
@@ -81,12 +83,45 @@ describe('DiagnosticsPage', () => {
       ],
     });
     vi.mocked(playSound).mockResolvedValue('accepted');
+    vi.mocked(getProcesses).mockResolvedValue({
+      supervised: [
+        { name: 'onvif', state: 'running', pid: 42, uptime_s: 90, restarts: 3, retry_in_s: 0 },
+        {
+          name: 'vendor-daemon',
+          state: 'running',
+          pid: 17,
+          uptime_s: 3661,
+          restarts: 0,
+          retry_in_s: 0,
+        },
+      ],
+      processes: [
+        { pid: 42, ppid: 1, comm: 'onvif-rust.bin', state: 'S', rss_kb: 8192, cpu_time_s: 3 },
+      ],
+    });
   });
 
   it('test_DiagnosticsPage_render_shows_title_and_description', () => {
     renderWithProviders(<DiagnosticsPage />);
     expect(screen.getByTestId('diagnostics-title')).toBeInTheDocument();
     expect(screen.getByTestId('diagnostics-description')).toBeInTheDocument();
+  });
+
+  describe('Processes card', () => {
+    it('test_DiagnosticsPage_processes_card_shows_supervised_services', async () => {
+      renderWithProviders(<DiagnosticsPage />);
+      await waitFor(() =>
+        expect(screen.getByTestId('diagnostics-processes-row-onvif')).toBeInTheDocument(),
+      );
+    });
+
+    it('test_DiagnosticsPage_processes_card_shows_unavailable_note_when_supervisor_unavailable', async () => {
+      vi.mocked(getProcesses).mockResolvedValue({ supervised: null, processes: [] });
+      renderWithProviders(<DiagnosticsPage />);
+      await waitFor(() =>
+        expect(screen.getByTestId('diagnostics-processes-supervisor-note')).toBeInTheDocument(),
+      );
+    });
   });
 
   describe('CPU stat card', () => {

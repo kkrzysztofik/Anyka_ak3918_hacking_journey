@@ -46,9 +46,11 @@ describe('processesService', () => {
 
   describe('getProcesses', () => {
     it('should parse a well-formed response', async () => {
-      vi.mocked(authorizedFetch).mockResolvedValueOnce(new Response(JSON.stringify(wellFormed), {
-        status: 200,
-      }));
+      vi.mocked(authorizedFetch).mockResolvedValueOnce(
+        new Response(JSON.stringify(wellFormed), {
+          status: 200,
+        }),
+      );
 
       const data = await getProcesses();
 
@@ -71,10 +73,9 @@ describe('processesService', () => {
 
     it('should treat supervised: null as valid (control socket unavailable)', async () => {
       vi.mocked(authorizedFetch).mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({ supervised: null, processes: wellFormed.processes }),
-          { status: 200 },
-        ),
+        new Response(JSON.stringify({ supervised: null, processes: wellFormed.processes }), {
+          status: 200,
+        }),
       );
 
       const data = await getProcesses();
@@ -88,9 +89,11 @@ describe('processesService', () => {
         ...wellFormed,
         supervised: [{ name: 'onvif', state: 'running', pid: 42 }], // missing fields
       };
-      vi.mocked(authorizedFetch).mockResolvedValueOnce(new Response(JSON.stringify(bad), {
-        status: 200,
-      }));
+      vi.mocked(authorizedFetch).mockResolvedValueOnce(
+        new Response(JSON.stringify(bad), {
+          status: 200,
+        }),
+      );
 
       await expect(getProcesses()).rejects.toThrow(ApiError);
     });
@@ -115,17 +118,21 @@ describe('processesService', () => {
     });
 
     it('should throw ApiError on 404 (unknown service)', async () => {
-      vi.mocked(authorizedFetch).mockResolvedValueOnce(new Response('unknown service', {
-        status: 404,
-      }));
+      vi.mocked(authorizedFetch).mockResolvedValueOnce(
+        new Response('unknown service', {
+          status: 404,
+        }),
+      );
 
       await expect(restartService('nope')).rejects.toThrow(ApiError);
     });
 
     it('should throw ApiError on 503 (supervisor unreachable)', async () => {
-      vi.mocked(authorizedFetch).mockResolvedValueOnce(new Response('unreachable', {
-        status: 503,
-      }));
+      vi.mocked(authorizedFetch).mockResolvedValueOnce(
+        new Response('unreachable', {
+          status: 503,
+        }),
+      );
 
       await expect(restartService('onvif')).rejects.toThrow(ApiError);
     });

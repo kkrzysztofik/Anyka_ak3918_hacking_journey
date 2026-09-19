@@ -24,11 +24,7 @@ import {
 import { cn } from '@/lib/utils';
 import { isAbortError, waitForCameraBack } from '@/lib/waitForCameraBack';
 import { ApiError } from '@/services/api';
-import {
-  type Diagnostics,
-  getDiagnostics,
-  uploadFirmware,
-} from '@/services/diagnosticsService';
+import { type Diagnostics, getDiagnostics, uploadFirmware } from '@/services/diagnosticsService';
 
 const MAX_BYTES = 64 * 1024 * 1024;
 const POLL_INTERVAL_MS = 2000;

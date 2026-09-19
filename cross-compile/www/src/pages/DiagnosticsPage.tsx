@@ -18,6 +18,7 @@ import {
 import { toast } from 'sonner';
 
 import { FirmwareUpgradeDialog } from '@/components/FirmwareUpgradeDialog';
+import ProcessesCard from '@/components/ProcessesCard';
 import { Sparkline } from '@/components/common/Sparkline';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -1052,6 +1053,8 @@ export default function DiagnosticsPage() {
         previousVersion={data?.firmware_version ?? null}
         onFinished={handleUpgradeFinished}
       />
+
+      <ProcessesCard />
 
       <SoundTestCard />
 
