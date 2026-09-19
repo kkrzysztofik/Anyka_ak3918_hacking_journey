@@ -1,11 +1,14 @@
 //! The P3 + P4 supervision loop.
 
 use crate::config::{Config, ServiceCfg};
+use crate::control;
 use crate::logging;
 use crate::storm::StormState;
 use crate::supervise::{Action, Event, Policy, RestartHistory, SvcState, decide};
 use crate::sys::{ExitStatus, Pid, SpawnSpec, Sys};
 use std::collections::BTreeMap;
+use std::os::unix::fs::PermissionsExt;
+use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -30,6 +33,10 @@ pub fn thread_stack() -> usize {
 /// by sending the process SIGCHLD.
 const REAP_POLL_INTERVAL: Duration = Duration::from_secs(1);
 
+pub enum ControlMsg {
+    Status(Vec<control::ServiceStatus>),
+}
+
 pub enum Msg {
     Exited(Pid, ExitStatus),
     Shutdown,
@@ -40,6 +47,7 @@ pub enum Msg {
     /// SIGKILL. A task wedged in D state will not die even from this — the
     /// monitor's next rung is a reboot, which does not need the process to die.
     KillService(String),
+    QueryStatus(Sender<ControlMsg>),
 }
 
 struct Service {
@@ -297,6 +305,15 @@ fn handle_restart_service(sys: &dyn Sys, services: &[Service], name: String) {
     }
 }
 
+fn handle_query_status(services: &[Service], reply_tx: &Sender<ControlMsg>) {
+    let now = Instant::now();
+    let rows: Vec<control::ServiceStatus> = services
+        .iter()
+        .map(|s| control::ServiceStatus::from_svc_state(&s.name, &s.state, &s.hist, now))
+        .collect();
+    let _ = reply_tx.send(ControlMsg::Status(rows));
+}
+
 fn handle_kill_service(sys: &dyn Sys, services: &[Service], name: String) {
     match services.iter().find(|s| s.name == name) {
         Some(svc) => match svc.state.pid() {
@@ -311,6 +328,55 @@ fn handle_kill_service(sys: &dyn Sys, services: &[Service], name: String) {
         },
         None => tracing::warn!(service = %name, "kill requested for unknown service"),
     }
+}
+
+fn handle_control_conn(mut stream: UnixStream, tx: &Sender<Msg>) -> std::io::Result<()> {
+    use std::io::{BufRead, Write};
+    let mut reader = std::io::BufReader::new(&stream);
+    let mut line = String::new();
+    if reader.read_line(&mut line)? == 0 {
+        return Ok(());
+    }
+    match control::parse_request(&line) {
+        Some(control::Request::Status) => {
+            let (reply_tx, reply_rx) = channel();
+            if tx.send(Msg::QueryStatus(reply_tx)).is_ok() {
+                let reply = reply_rx.recv();
+                if let Ok(ControlMsg::Status(rows)) = reply {
+                    let _ = stream.write_all(control::encode_status(&rows).as_bytes());
+                }
+            }
+        }
+        Some(control::Request::Restart(name)) => {
+            let _ = tx.send(Msg::RestartService(name.clone()));
+            let _ = stream.write_all(format!("restarted {name}\n").as_bytes());
+        }
+        None => {
+            let _ = stream.write_all(b"unknown\n");
+        }
+    }
+    Ok(())
+}
+
+pub fn spawn_control_thread(tx: Sender<Msg>) -> std::io::Result<()> {
+    let socket_path = "/tmp/anyka-supervisor.sock";
+    let _ = std::fs::remove_file(socket_path);
+    let listener = UnixListener::bind(socket_path)?;
+    let _ = std::fs::set_permissions(socket_path, std::fs::Permissions::from_mode(0o600));
+
+    std::thread::Builder::new()
+        .name("supervisor-ctl".into())
+        .stack_size(thread_stack())
+        .spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(stream) = stream else { break };
+                if let Err(e) = handle_control_conn(stream, &tx) {
+                    tracing::warn!(error = %e, "control connection failed");
+                }
+            }
+        })
+        .map_err(std::io::Error::other)?;
+    Ok(())
 }
 
 /// Returns `true` when the supervisor loop should exit.
@@ -334,6 +400,10 @@ fn dispatch_msg(
         }
         Ok(Msg::KillService(name)) => {
             handle_kill_service(sys.as_ref(), services, name);
+            false
+        }
+        Ok(Msg::QueryStatus(reply_tx)) => {
+            handle_query_status(services, &reply_tx);
             false
         }
         Ok(Msg::Shutdown) => {

@@ -89,6 +89,9 @@ fn main() {
     // service restarts without racing the supervisor's own spawn path (R15).
     let (tx, rx) = supervisor_loop::make_channel();
     supervisor_loop::spawn_signal_thread(tx.clone());
+    if let Err(e) = supervisor_loop::spawn_control_thread(tx.clone()) {
+        tracing::warn!(error = %e, "failed to spawn the control thread");
+    }
 
     spawn_optional_threads(&sysimpl, &cfg, &tx, safe_mode);
 
