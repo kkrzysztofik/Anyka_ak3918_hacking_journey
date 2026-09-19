@@ -82,9 +82,16 @@ existing optional threads, holding a `Sender<Msg>` clone. Blocking accept on a
 `UnixListener`, one request per connection, line protocol:
 
 ```
-"status\n"          -> {"services":[{name,state,pid,uptime_s,restarts,backoff_until_s}...]}\n
+"status\n"          -> one TSV line per service, then a blank line:
+                       <name>\t<state>\t<pid>\t<uptime_s>\t<restarts>\t<retry_in_s>\n
 "restart <name>\n"  -> "ok\n" | "unknown\n"
 ```
+
+**Not JSON.** `anyka-init` has no `serde_json` and this does not justify adding
+one: the payload is a flat list of six scalars per row between two processes we
+own on both ends. TSV needs no escaping decision, is ~20 lines to write, and is
+readable straight off `nc`/`socat` over telnet. `onvif-rust` converts to JSON
+for the browser, where `serde_json` already exists.
 
 Changes to `supervisor_loop.rs`:
 
@@ -103,9 +110,16 @@ Changes to `supervisor_loop.rs`:
 `Instant` is converted to seconds at snapshot time so nothing non-serializable
 crosses the socket.
 
-Socket path: new `[control] socket` key in `anyka.toml`, default
-`/tmp/anyka-init.sock`, mode `0600`, unlinked before bind so a stale socket from
-an unclean exit does not block bind permanently.
+Socket path: **hardcoded** `/tmp/anyka-init.sock`, mode `0600`, unlinked before
+bind so a stale socket from an unclean exit does not block bind permanently.
+
+No config key, deliberately. `Config` carries `#[serde(deny_unknown_fields)]`
+(`config.rs:29`), so an `anyka.toml` containing a `[control]` stanza is a hard
+parse error for any older `anyka-init` binary — which is exactly what sits in
+the other A/B slot after a rollback. A cosmetic tunable is not worth converting
+a rollback into a config failure, and bundles do not carry `anyka.toml` anyway,
+so the key would have to be appended by hand on every camera. If the path ever
+needs to move, add the key then, behind a `schema` bump.
 
 Notes:
 
