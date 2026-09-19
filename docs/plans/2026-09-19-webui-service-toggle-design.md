@@ -2,7 +2,7 @@
 
 - **Date:** 2026-09-19
 - **Extends:** `2026-09-19-webui-process-control-design.md` (control socket, `/api/processes`, ProcessesCard)
-- **Status:** approved in brainstorming session 2026-09-19; spec pending user review
+- **Status:** approved in brainstorming session 2026-09-19; revised 2026-09-19 after a code review against `monitor.rs`, `netoverlay.rs` and `supervisor_loop.rs`
 - **Branch:** `design/webui-process-control` (or a successor)
 
 ## Motivation and scope
@@ -25,12 +25,20 @@ Diagnostics → Processes card**, serving two uses with one mechanism:
 
 **Decisions recorded in the brainstorming session:**
 
-- All services are toggleable, including `onvif` and `vendor-daemon`; each
+- Every service is toggleable **except `wpa_supplicant`** (see §2.1); each
   carries its own consequence warning in the confirm dialog.
 - State persists in `/mnt/anyka_hack/anyka.toml` (`[services.<name>]
   enabled =`), the file both A/B slots already read. Toggles survive
   reboots and A/B upgrades; a full SD payload push resets them to shipped
   defaults (a declared fresh-setup event).
+  - This is the first writer of `anyka.toml` in the codebase, and it
+    contradicts the invariant asserted in `netoverlay.rs:3-7` ("Nothing in
+    this codebase writes it"). Chosen anyway, and deliberately: an older
+    `anyka-init` in the other A/B slot honours `enabled = false` in this
+    file, whereas it would ignore a new overlay file entirely and silently
+    re-enable a service after a rollback. The `netoverlay.rs` comment is
+    corrected as part of this work, and the line-level editor (§3) is what
+    keeps the operator's comments and credentials intact.
 - The mechanism is **Approach A**: the supervisor is the sole actor. The
   control socket gains `enable`/`disable` requests; only anyka-init writes
   the config file and only anyka-init mutates service state. onvif-rust is
@@ -50,11 +58,19 @@ disable <name>\n   ->  ok\n | unknown\n | error\n
 
 - `ok` — applied (or the no-op case: the service already had that state; no
   file write in the no-op case).
-- `unknown` — malformed line, or name not present in `[services]`.
+- `unknown` — malformed line, name not present in `[services]`, or a name
+  that is not toggleable (`wpa_supplicant`, §2.1).
 - `error` — **new reply word.** The config write failed (I/O or write
   error). The action is then *not applied at all*: persistence is the first
   step, and a "disabled" that silently re-enables itself on the next reboot
   would defeat the escape-hatch use case.
+
+Unlike `restart`, these two replies depend on work the supervisor loop has
+to do, so the control thread waits for the loop to answer. **That wait must
+be shorter than the client's socket timeout**, which is 2 s
+(`diagnostics/services.rs:26`) — a server that waits longer hands the user a
+503 for a toggle that was applied and persisted. The wait is 1 s; a loop
+that cannot answer in 1 s is wedged, and `error` is the honest reply.
 
 `status` extends to one row per **configured** service (enabled and
 disabled alike), same six-field TSV:
@@ -79,10 +95,14 @@ New messages `Msg::DisableService(String)` and `Msg::EnableService(String)`
 so the index-based `by_pid` map is never disturbed and the crash-loop
 `Reboot` path (which exits the whole process) is unreachable for it:
 
-- `decide()` gains one arm: `(Disabled, _) → { action: None, next: Disabled }`.
-  Two guard sites exist where the loop steps a service per tick or per exit
-  report; both no-op on `Disabled` before touching `decide()` or `hist`.
-- **disable** (name must exist in `cfg.services`, else `unknown`):
+- `decide()` returns `{ action: None, next: Disabled }` for a `Disabled`
+  service, without touching `hist`. That single guard is sufficient: the
+  per-tick stepper acts only on `Action::Start`, and the exit-report path
+  records nothing of its own beyond the `by_pid` removal and one `warn!`.
+  No extra guards in `tick_services` / `handle_service_exited` — they would
+  be unreachable by effect.
+- **disable** (name must exist in `cfg.services` and not be
+  `wpa_supplicant`, else `unknown`):
   1. `set_service_enabled(path, name, false)` — file first (section 3).
      On failure reply `error` and change nothing.
   2. In-memory `cfg.services[name].enabled = false`.
@@ -90,7 +110,9 @@ so the index-based `by_pid` map is never disturbed and the crash-loop
      `state = Disabled` (a `Backoff` service's pending start simply never
      fires). A late exit report for the killed pid finds the service in
      `Disabled` and does nothing.
-  4. Reply `ok`.
+  4. If the name is `vendor-daemon`, remove the video heartbeat file
+     (§2.1). Best-effort: a failure here is logged, not fatal.
+  5. Reply `ok`.
 - **enable** (symmetric):
   1. `set_service_enabled(path, name, true)`; on failure `error`, nothing
      changes.
@@ -114,13 +136,38 @@ At boot, disabled services are never inserted into the vec
 cfg rule above — the shipped config already relies on this for
 dropbear.
 
-**wpa_supplicant caveat (documented, not special-cased):** the boot
-handover (`boot.rs::hand_over_supplicant`) may have stood the supervised
-supplicant down *for this boot only* (vendor owns the ctrl socket), having
-left the file untouched. A runtime re-enable in that situation can hit the
-exit-255 hazard until the next boot, where the handover re-probes and
-self-heals; the crash-loop cap is the backstop in the meantime. The
-wpa_supplicant warning text in the UI (section 6) carries this.
+## 2.1 The monitor is a second reboot authority
+
+`decide()` is not the only thing that can reboot this camera. `monitor.rs`
+runs its own thread with two escalation ladders that call `sys.reboot()`
+**directly**, without consulting the supervisor:
+
+- **video** (`monitor.rs:150`): `read_heartbeat` compares consecutive counter
+  values from `[monitor] video_heartbeat_path`. Kill `vendor-daemon` and the
+  file survives in `/tmp` holding its last value, so every tick reads a
+  stalled counter → `RestartService` (2 ticks) → `KillService` (3) →
+  **reboot** (5).
+- **wifi** (`monitor.rs:80`): an unhealthy link escalates to
+  `RestartSupplicant` and then **reboot**, up to `wifi_reboot_cap` (3).
+
+Both would fire on a *deliberately* disabled service, rebooting the camera
+that the admin just stopped rebooting — the exact failure this feature
+exists to prevent, on the two services most likely to be crash-looping.
+
+**Resolutions:**
+
+- **vendor-daemon:** the disable path removes
+  `cfg.monitor.video_heartbeat_path`. `read_heartbeat` then returns `None`,
+  which the monitor already treats as "no signal yet, not a stall"
+  (`*ticks = 0`). One line, no new state, no monitor change.
+- **wpa_supplicant: not toggleable.** The wifi ladder is driven by link
+  health, not by a file, so there is no equivalent one-line fix — it would
+  need a disabled-set shared with the monitor thread. And the feature has no
+  user: on a Wi-Fi camera, disabling the supplicant loses the device whether
+  or not the monitor reboots it. The supervisor rejects
+  `enable`/`disable wpa_supplicant` with `unknown`, and the UI renders no
+  toggle for that row. This also deletes the boot-handover caveat that an
+  earlier draft of this design carried.
 
 ## 3. Config persistence (`config.rs`)
 
@@ -168,10 +215,14 @@ onvif -> {80, 554, 8080}
 
 i.e. **`ports = cfg.update.trial_ports ∩ ports_owned_by(enabled services)`**.
 
+`evaluate_trial` itself is **unchanged**: on an empty port list
+`ports.iter().all(..)` is already vacuously true, so it confirms after the
+normal hold. The filter is the whole change.
+
 - onvif enabled → the set is unchanged; behavior is byte-identical to
   today, including cameras whose config overrides `trial_ports`.
-- onvif disabled → the set is empty → the trial is satisfied immediately
-  (no hold) and the update commits. The admin who disabled onvif accepts
+- onvif disabled → the set is empty → the trial confirms after the hold
+  without probing anything, and the update commits. The admin who disabled onvif accepts
   that its new binary is unverified until they re-enable it; a broken
   re-enabled service crash-loops and reboots via the existing cap, exactly
   as any newly started broken service already does.
@@ -198,6 +249,12 @@ enabled)` mirroring `request_restart`, sending `enable <name>\n` /
 - reply `unknown` → **404**
 - reply `error`, or supervisor unreachable → **503**
 
+One consequence for the existing restart route: `status` now lists disabled
+services, so its "is this a known name" guard starts passing for them and a
+restart of a disabled service would return 202 while the supervisor logs
+"not running" and does nothing. It already has the status rows in hand, so
+it checks the matched row's state and returns **409** for `disabled`.
+
 ## 6. WebUI (`ProcessesCard`)
 
 - Each supervised-service row gains a **Disable** action; a disabled row
@@ -208,14 +265,15 @@ enabled)` mirroring `request_restart`, sending `enable <name>\n` /
     stays up and keeps streaming, but it is reachable only via FTP (or the
     deadman's telnet after a failed boot). Re-enabling requires FTP or an
     SD-card edit."
-  - **vendor-daemon** — "The video pipeline stops; the stream will show as
-    stalled until it is re-enabled."
-  - **wpa_supplicant** — "The Wi-Fi link may drop for the rest of this
-    boot. Only toggle this from a wired connection."
-  - **udhcpc** — "The address becomes static until the next renewal — this
-    is the documented way to use static addressing."
+  - **vendor-daemon** — "Video capture and encoding stop; streams go dead
+    until it is re-enabled. The camera does not reboot — the video watchdog
+    is stood down with it."
+  - **udhcpc** — "Stops DHCP renewals, so a configured static address is no
+    longer overwritten on renewal. Note the link watchdog still runs a
+    one-shot `udhcpc` if the default route disappears."
   - **snmp** — "SNMP polling stops."
   - **dropbear** — (shipped disabled; standard copy.)
+  - **wpa_supplicant** — no toggle is rendered (§2.1).
 - The 10 s poll picks up state changes automatically.
 - **onvif-disable flow:** unlike the restart-onvif flow, the card does
   **not** `waitForCameraBack` afterwards — the camera is not coming back on
@@ -228,11 +286,13 @@ enabled)` mirroring `request_restart`, sending `enable <name>\n` /
 
 | Case | Behavior |
 |---|---|
-| Disable while in backoff | State becomes `Disabled` in place; the pending start can never fire because the per-tick stepper no-ops on `Disabled` before reaching `decide()`. |
+| Disable while in backoff | State becomes `Disabled` in place; the pending start can never fire because `decide()` returns `Action::None` for it. |
 | Disable, then the SIGTERM'd process lingers | Its exit report finds the service in `Disabled` and records nothing: no `hist` entry, no backoff, no crash-loop counting. |
 | Config write fails mid-disable | `error` reply; in-memory state untouched; the service keeps running exactly as before. |
 | Toggle during an A/B apply/reboot window | The apply holds the state lock across its pointer writes; a concurrent toggle writes only `anyka.toml` (a different file) and its in-memory effect lands in whichever supervisor instance owns the process — the applier's instance re-reads nothing at runtime, and the next boot reads the file. No shared file is written by both. |
-| `wpa_supplicant` re-enabled after a vendor handover | May exit 255 until the next boot's handover re-probes (section 2). Crash-loop cap is the backstop. |
+| Toggle of `wpa_supplicant` | Rejected with `unknown` → 404; no toggle is offered in the UI (§2.1). |
+| vendor-daemon disabled, video watchdog | The heartbeat file is removed with it, so the monitor reads `None` and holds at zero ticks — no restart, no kill, no reboot (§2.1). |
+| Restart requested for a disabled service | 409 from the HTTP layer (§5); the UI does not offer Restart on a disabled row. |
 | onvif disabled, admin re-enables via FTP/SD later | Normal enable path; starts like a boot start. |
 | Payload push after toggles | Toggles reset to shipped defaults (`dropbear` disabled, the rest enabled) — declared fresh-setup semantics. |
 
@@ -250,25 +310,32 @@ the project's testing standards.
   nothing (no hist, no restart, no crash-loop count); disable in backoff →
   pending start never fires; enable → `Backoff { until: now, attempt: 0 }`
   then starts like a boot start; idempotent no-ops do not touch the file;
-  file-write failure → `error` with state unchanged; `status` lists enabled
-  + disabled services from cfg, including a boot-time disabled service
-  (never in the vec).
+  file-write failure → `error` with state unchanged; `wpa_supplicant` →
+  `unknown` with nothing written; disabling `vendor-daemon` removes the
+  heartbeat file; `status` lists enabled + disabled services from cfg,
+  including a boot-time disabled service (never in the vec).
 - **anyka-init — adaptive trial:** onvif enabled → port list unchanged;
-  onvif disabled → empty set → trial confirms immediately; custom
-  `trial_ports` filter correctly.
+  onvif disabled → empty set; custom `trial_ports` filter correctly.
 - **onvif-rust:** `request_toggle` round trip against the existing
   mock-server test harness (ok / unknown / error / unreachable); route
-  tests: 202 on ok, 404 on unknown, 503 on error, 403 for non-admin.
+  tests: 202 on ok, 404 on unknown, 503 on error, 403 for non-admin, 409
+  for a restart of a disabled service.
 - **WebUI (Vitest/RTL, `data-testid` only):** row shows Disable for an
-  enabled service and Enable (dimmed) for a disabled one; confirm dialog
-  shows the per-service copy; onvif disable does not enter the
-  reconnecting state.
+  enabled service and Enable (dimmed) for a disabled one; no toggle on the
+  `wpa_supplicant` row; confirm dialog shows the per-service copy; onvif
+  disable does not enter the reconnecting state.
 
 ## Out of scope
 
 - **Reactive auto-disable** (supervisor disables a service itself when the
   crash-loop cap trips, instead of rebooting). Natural follow-up; this
   design's manual disable is its prerequisite, not a substitute.
+- **Toggling `wpa_supplicant`** (§2.1). Would need a disabled-set shared
+  with the monitor thread, and has no user on a Wi-Fi-only camera.
+- **Gating `udhcpc` on `[wifi].dhcp`.** Nothing does this today, so a static
+  address set from the Network page is already overwritten on renewal — a
+  pre-existing bug this feature only gives the admin a lever against. Fix it
+  on its own branch, where it belongs.
 - Per-service runtime configuration beyond `enabled` (args, env).
 - Any change to the web/FTP/telnet auth model.
 - A second source of truth (override marker file) — rejected in
