@@ -144,8 +144,8 @@ CAMERA_PASS="$CAMERA_PASS" ./scripts/push_bundle.sh \
 # DEV ONLY — single binary, no versioning, no rollback. Not for upgrades.
 # Export the password; passing it positionally puts it in `ps` and shell history.
 export ANYKA_FTP_PASS="..."
-./scripts/deploy_onvif.sh [device_ip] [username]
-./scripts/run_onvif.sh [device_ip] [username] "" [release|debug]
+./scripts/push_binary_dev.sh [device_ip] [username]
+./scripts/run_binary_dev.sh [device_ip] [username] "" [release|debug]
 ```
 
 Debugging (see the `anyka-remote-debugging` skill):

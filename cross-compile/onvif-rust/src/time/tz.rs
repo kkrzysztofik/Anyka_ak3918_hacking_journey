@@ -191,7 +191,7 @@ fn split_name(s: &str) -> Result<(usize, &str), &'static str> {
         let end = rest.find('>').ok_or("unterminated <> zone name")?;
         return Ok((end, &rest[end + 1..]));
     }
-    let len = s.chars().take_while(|c| c.is_ascii_alphabetic()).count();
+    let len = s.chars().take_while(char::is_ascii_alphabetic).count();
     if len > 0 && len < 3 {
         return Err("zone name shorter than three characters");
     }
@@ -211,7 +211,7 @@ fn parse_offset(s: &str) -> Result<(FixedOffset, &str), &'static str> {
     let mut parts = [0i32; 3];
     let mut rest = s;
     for (i, part) in parts.iter_mut().enumerate() {
-        let len = rest.chars().take_while(|c| c.is_ascii_digit()).count();
+        let len = rest.chars().take_while(char::is_ascii_digit).count();
         if len == 0 {
             if i == 0 {
                 return Err("missing offset digits");

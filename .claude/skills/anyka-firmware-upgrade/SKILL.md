@@ -16,7 +16,7 @@ Canonical design: `docs/plans/2026-08-12-firmware-upgrade-path-design.md` (PR #7
 - Need to produce or upload `bundle.tar`
 - Post-upload verify, rollback diagnosis, or FTP spool recovery
 
-Do **not** use legacy `scripts/deploy_onvif.sh` (per-binary FTP) for this path.
+Do **not** use `scripts/push_binary_dev.sh` (per-binary FTP) for this path.
 
 ## Which path do I need?
 
@@ -27,7 +27,7 @@ This skill is the single entry point for getting code onto a camera.
 | Ship a versioned change to a running camera | `build_bundle.sh` → `push_bundle.sh` — A/B, auto-rollback. **The default.** |
 | Set up a fresh camera, or change `lib/` or Factory | `build_payload.sh` → `push_payload.sh` — see *Full SD payload* below |
 | Move a flat camera onto slots (once per camera) | `scripts/migrate_to_slots.sh` |
-| Iterate on one binary while debugging | `scripts/deploy_onvif.sh` + `scripts/run_onvif.sh` — dev only, never for upgrades |
+| Iterate on one binary while debugging | `scripts/push_binary_dev.sh` + `scripts/run_binary_dev.sh` — dev only, never for upgrades |
 
 There is no SSH on the camera: every path is FTP, a mounted SD card, or
 `PUT /api/update`. The old `anyka-embedded-build/scripts/deploy.sh` was
@@ -167,7 +167,7 @@ scripts/debugging/cam_exec.py --host <ip> 'ls -la /mnt/anyka_hack/slots /mnt/any
 
 - Hardcode passwords in scripts, commits, or skill examples with real secrets
 - Put `lib/` or live device config into the bundle
-- Use per-binary `deploy_onvif.sh` for A/B upgrades
+- Use per-binary `push_binary_dev.sh` for A/B upgrades
 - Re-upload while `spool/bundle.trigger` or `bundle.tar.part` exists (409)
 - Reach for ssh/scp — the camera runs no sshd; use FTP, SD card, or `PUT /api/update`
 

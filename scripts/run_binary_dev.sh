@@ -6,7 +6,10 @@
 #          no trial window, no rollback. To ship a change use
 #          ./scripts/build_bundle.sh then ./scripts/push_bundle.sh.
 #
-# Usage: ./run_onvif.sh [device_ip] [username] [password] [release|debug]
+# BEFORE:  ./scripts/push_binary_dev.sh <ip> <user>
+#
+# Usage: ./run_binary_dev.sh [device_ip] [username] [password] [release|debug]
+#        Prefer exporting ANYKA_FTP_PASS over passing the password positionally.
 #
 # The mode selects the config file (config.toml vs config_debug.toml).
 # Device output is saved to the debugging/logs/ directory for analysis.
@@ -20,12 +23,12 @@ PROJECT_ROOT="${ANYKA_REPO_ROOT}"
 
 # Anyone reaching this script from muscle memory has not necessarily read the
 # header. Warn and continue; refusing would break existing dev loops.
-log_warn "run_onvif.sh is DEV ONLY — no versioning, no A/B slot, no rollback."
+log_warn "run_binary_dev.sh is DEV ONLY — no versioning, no A/B slot, no rollback."
 log_warn "To ship a change: ./scripts/build_bundle.sh && ./scripts/push_bundle.sh"
 
 # Default values
 DEFAULT_IP="192.168.1.100"
-# Only echoed into the suggested deploy_onvif.sh command — telnet on :24 needs
+# Only echoed into the suggested push_binary_dev.sh command — telnet on :24 needs
 # no login. Password stays out of the repo; see ANYKA_FTP_PASS.
 DEFAULT_USER="root"
 DEFAULT_PASS="${ANYKA_FTP_PASS:-}"
@@ -68,14 +71,14 @@ anyka_check_commands telnet
 
 log_info "Connecting to device and starting $BINARY_NAME..."
 
-TELNET_SCRIPT=$(mktemp /tmp/telnet_run_onvif_rust.XXXXXX)
+TELNET_SCRIPT=$(mktemp /tmp/telnet_run_binary_dev.XXXXXX)
 cat > "$TELNET_SCRIPT" << EOF
 echo "Stopping any existing onvif-rust process..."
 killall onvif-rust onvif-rust.bin 2>/dev/null || true
 sleep 2
 
 if [ ! -f "$FULL_BINARY_PATH" ]; then
-    echo "ERROR: $FULL_BINARY_PATH not found. Deploy first: ./deploy_onvif.sh $DEVICE_IP $USERNAME"
+    echo "ERROR: $FULL_BINARY_PATH not found. Push first: ./scripts/push_binary_dev.sh $DEVICE_IP $USERNAME"
     exit 1
 fi
 
