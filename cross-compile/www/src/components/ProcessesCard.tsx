@@ -58,7 +58,8 @@ const DISABLE_COPY: Record<string, string> = {
   dropbear: 'The SSH daemon will not run until it is re-enabled.',
 };
 
-const DEFAULT_ENABLE_COPY = 'The service starts immediately under the normal supervisor backoff policy.';
+const DEFAULT_ENABLE_COPY =
+  'The service starts immediately under the normal supervisor backoff policy.';
 
 const ACTION_VERB: Record<ServiceAction, string> = {
   restart: 'Restart',
@@ -77,7 +78,9 @@ function actionDescription(p: NonNullable<PendingAction>): string {
   if (p.action === 'enable') {
     return DEFAULT_ENABLE_COPY;
   }
-  return DISABLE_COPY[p.service.name] ?? 'The service stops and will not run again until re-enabled.';
+  return (
+    DISABLE_COPY[p.service.name] ?? 'The service stops and will not run again until re-enabled.'
+  );
 }
 
 function ServiceStateBadge({ service }: Readonly<{ service: ServiceStatus }>) {
@@ -324,9 +327,7 @@ export default function ProcessesCard() {
                                   size="sm"
                                   variant="outline"
                                   data-testid={`diagnostics-processes-restart-${service.name}`}
-                                  onClick={() =>
-                                    setPending({ service, action: 'restart' })
-                                  }
+                                  onClick={() => setPending({ service, action: 'restart' })}
                                 >
                                   <RotateCw className="h-3.5 w-3.5" />
                                   Restart

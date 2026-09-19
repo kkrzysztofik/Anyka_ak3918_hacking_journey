@@ -210,7 +210,9 @@ describe('ProcessesCard service toggling', () => {
   });
 
   it('shows Disable for an enabled service and Enable (dimmed) for a disabled one', async () => {
-    vi.mocked(getProcesses).mockResolvedValue(supervisedFixture([SNMP, { ...OFF, name: 'dropbear' }]));
+    vi.mocked(getProcesses).mockResolvedValue(
+      supervisedFixture([SNMP, { ...OFF, name: 'dropbear' }]),
+    );
     renderWithProviders(<ProcessesCard />);
     await waitForPageLoad('diagnostics-processes-title');
     expect(await screen.findByTestId('diagnostics-processes-disable-snmp')).toBeInTheDocument();
@@ -225,11 +227,17 @@ describe('ProcessesCard service toggling', () => {
   });
 
   it('offers no toggle for wpa_supplicant', async () => {
-    vi.mocked(getProcesses).mockResolvedValue(supervisedFixture([{ ...SNMP, name: 'wpa_supplicant' }]));
+    vi.mocked(getProcesses).mockResolvedValue(
+      supervisedFixture([{ ...SNMP, name: 'wpa_supplicant' }]),
+    );
     renderWithProviders(<ProcessesCard />);
     await waitForPageLoad('diagnostics-processes-title');
-    expect(await screen.findByTestId('diagnostics-processes-restart-wpa_supplicant')).toBeInTheDocument();
-    expect(screen.queryByTestId('diagnostics-processes-disable-wpa_supplicant')).not.toBeInTheDocument();
+    expect(
+      await screen.findByTestId('diagnostics-processes-restart-wpa_supplicant'),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByTestId('diagnostics-processes-disable-wpa_supplicant'),
+    ).not.toBeInTheDocument();
   });
 
   it('disabling snmp goes through the confirm dialog', async () => {
@@ -258,7 +266,9 @@ describe('ProcessesCard service toggling', () => {
   });
 
   it('warns that disabling vendor-daemon stops video', async () => {
-    vi.mocked(getProcesses).mockResolvedValue(supervisedFixture([{ ...SNMP, name: 'vendor-daemon' }]));
+    vi.mocked(getProcesses).mockResolvedValue(
+      supervisedFixture([{ ...SNMP, name: 'vendor-daemon' }]),
+    );
     renderWithProviders(<ProcessesCard />);
     await waitForPageLoad('diagnostics-processes-title');
     const user = userEvent.setup();
