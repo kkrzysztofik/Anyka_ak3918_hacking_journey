@@ -225,7 +225,10 @@ mod tests {
             for (stream, reply) in listener.incoming().take(4).zip(replies) {
                 let Ok(mut stream) = stream else { continue };
                 let mut line = String::new();
-                if std::io::BufReader::new(&stream).read_line(&mut line).is_err() {
+                if std::io::BufReader::new(&stream)
+                    .read_line(&mut line)
+                    .is_err()
+                {
                     continue;
                 }
                 let _ = stream.write_all(reply);
@@ -233,21 +236,12 @@ mod tests {
         });
 
         let p = std::path::Path::new(&path);
-        assert_eq!(
-            request_toggle(p, "snmp", true),
-            ToggleReply::Accepted
-        );
-        assert_eq!(
-            request_toggle(p, "snmp", false),
-            ToggleReply::Unknown
-        );
+        assert_eq!(request_toggle(p, "snmp", true), ToggleReply::Accepted);
+        assert_eq!(request_toggle(p, "snmp", false), ToggleReply::Unknown);
         assert_eq!(request_toggle(p, "snmp", true), ToggleReply::Error);
         // Anything that is not one of the three words is a failure, not a
         // success.
-        assert_eq!(
-            request_toggle(p, "snmp", false),
-            ToggleReply::Error
-        );
+        assert_eq!(request_toggle(p, "snmp", false), ToggleReply::Error);
 
         server.join().expect("server thread");
         let _ = std::fs::remove_file(&path);

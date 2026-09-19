@@ -143,7 +143,11 @@ pub async fn handle_restart_service(AxumPath(name): AxumPath<String>) -> impl In
         // a 404 rather than a silently-ignored "ok". Costs one extra
         // round-trip on a path a human clicks, which is free.
         crate::diagnostics::services::query_status(sock)
-            .map(|rows| rows.iter().find(|r| r.name == name).map(|r| r.state.clone()))
+            .map(|rows| {
+                rows.iter()
+                    .find(|r| r.name == name)
+                    .map(|r| r.state.clone())
+            })
             .map(|state| (state, name))
     })
     .await;
