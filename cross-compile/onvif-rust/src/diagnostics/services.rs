@@ -1,0 +1,129 @@
+//! Client for the `anyka-init` control socket.
+
+use std::io::{BufRead, BufReader, Write};
+use std::os::unix::net::UnixStream;
+use std::path::Path;
+use std::time::Duration;
+
+use serde::Serialize;
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct ServiceStatus {
+    pub name: String,
+    pub state: String,
+    /// `None` when the service is not running.
+    pub pid: Option<i32>,
+    pub uptime_s: u64,
+    pub restarts: u64,
+    pub retry_in_s: u64,
+}
+
+/// Must match `anyka_init::control::SOCKET_PATH`.
+pub const SOCKET_PATH: &str = "/tmp/anyka-init.sock";
+
+const TIMEOUT: Duration = Duration::from_secs(2);
+
+/// Decode the TSV status frame. Malformed rows are dropped rather than
+/// failing the whole snapshot: one bad row must not blank the page.
+pub fn decode_status(text: &str) -> Vec<ServiceStatus> {
+    text.lines()
+        .filter(|l| !l.is_empty())
+        .filter_map(|l| {
+            let f: Vec<&str> = l.split('\t').collect();
+            if f.len() < 6 {
+                return None;
+            }
+            let pid: i32 = f[2].parse().ok()?;
+            Some(ServiceStatus {
+                name: f[0].to_owned(),
+                state: f[1].to_owned(),
+                pid: if pid > 0 { Some(pid) } else { None },
+                uptime_s: f[3].parse().ok()?,
+                restarts: f[4].parse().ok()?,
+                retry_in_s: f[5].parse().ok()?,
+            })
+        })
+        .collect()
+}
+
+fn round_trip(path: &Path, request: &str) -> Option<String> {
+    let mut stream = UnixStream::connect(path).ok()?;
+    stream.set_read_timeout(Some(TIMEOUT)).ok()?;
+    stream.set_write_timeout(Some(TIMEOUT)).ok()?;
+    stream.write_all(request.as_bytes()).ok()?;
+    let mut out = String::new();
+    let mut reader = BufReader::new(stream);
+    loop {
+        let mut line = String::new();
+        // EOF or the blank terminator line both end the frame.
+        if reader.read_line(&mut line).ok()? == 0 || line == "\n" {
+            break;
+        }
+        out.push_str(&line);
+    }
+    Some(out)
+}
+
+/// Blocking. `None` means the supervisor is unreachable — an older
+/// `anyka-init` in the other A/B slot, or a control thread that failed to
+/// bind. Callers render the raw process table anyway.
+pub fn query_status(path: &Path) -> Option<Vec<ServiceStatus>> {
+    round_trip(path, "status\n").map(|t| decode_status(&t))
+}
+
+/// Blocking. `true` means the restart was accepted, not that it completed.
+pub fn request_restart(path: &Path, name: &str) -> bool {
+    round_trip(path, &format!("restart {name}\n"))
+        .is_some_and(|r| r.trim() == "ok")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_decode_status_parses_tab_separated_rows() {
+        let got = decode_status("onvif\trunning\t42\t90\t3\t0\nsnmp\tbackoff\t0\t0\t7\t12\n\n");
+        assert_eq!(got.len(), 2);
+        assert_eq!(got[0].name, "onvif");
+        assert_eq!(got[0].pid, Some(42));
+        assert_eq!(got[0].uptime_s, 90);
+        assert_eq!(got[1].state, "backoff");
+        assert_eq!(got[1].retry_in_s, 12);
+    }
+
+    /// pid 0 on the wire means "not running" — JSON gets a real null so the
+    /// UI never renders a process that does not exist.
+    #[test]
+    fn test_decode_status_maps_pid_zero_to_none() {
+        let got = decode_status("snmp\tbackoff\t0\t0\t7\t12\n\n");
+        assert_eq!(got[0].pid, None);
+    }
+
+    #[test]
+    fn test_decode_status_of_an_empty_frame_is_empty() {
+        assert!(decode_status("\n").is_empty());
+    }
+
+    /// A malformed row must be dropped, not panic and not poison the rest.
+    #[test]
+    fn test_decode_status_skips_rows_with_too_few_fields() {
+        let got = decode_status("broken\trunning\nonvif\trunning\t42\t90\t3\t0\n\n");
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].name, "onvif");
+    }
+
+    /// The socket is absent on an older anyka-init in the other A/B slot.
+    /// That must read as "control unavailable", never as a 500.
+    #[test]
+    fn test_query_status_on_a_missing_socket_returns_none() {
+        let missing = std::path::Path::new("/tmp/definitely-not-a-socket-xyz.sock");
+        assert!(query_status(missing).is_none());
+    }
+
+    #[test]
+    fn test_request_restart_on_a_missing_socket_is_false() {
+        let missing = std::path::Path::new("/tmp/definitely-not-a-socket-xyz.sock");
+        assert!(!request_restart(missing, "onvif"));
+    }
+}
