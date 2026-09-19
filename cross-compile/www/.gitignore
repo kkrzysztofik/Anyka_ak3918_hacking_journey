@@ -6,6 +6,7 @@
 # Testing
 /coverage
 .tmp-analyze-bundle/
+.vitest/
 
 # Production
 /build

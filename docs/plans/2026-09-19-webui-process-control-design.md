@@ -110,7 +110,7 @@ Changes to `supervisor_loop.rs`:
 `Instant` is converted to seconds at snapshot time so nothing non-serializable
 crosses the socket.
 
-Socket path: **hardcoded** `/tmp/anyka-init.sock`, mode `0600`, unlinked before
+Socket path: **hardcoded** `/tmp/anyka-supervisor.sock`, mode `0600`, unlinked before
 bind so a stale socket from an unclean exit does not block bind permanently.
 
 No config key, deliberately. `Config` carries `#[serde(deny_unknown_fields)]`

@@ -18,8 +18,10 @@ pub struct ServiceStatus {
     pub retry_in_s: u64,
 }
 
-/// Must match `anyka_init::control::SOCKET_PATH`.
-pub const SOCKET_PATH: &str = "/tmp/anyka-init.sock";
+/// Must match `anyka_init::control::SOCKET_PATH` (anyka-init/src/control.rs):
+/// both sides of this Unix-socket contract are checked on-device, since the
+/// two crates do not share code.
+pub const SOCKET_PATH: &str = "/tmp/anyka-supervisor.sock";
 
 const TIMEOUT: Duration = Duration::from_secs(2);
 
@@ -91,12 +93,15 @@ mod tests {
         assert_eq!(got[1].retry_in_s, 12);
     }
 
-    /// pid 0 on the wire means "not running" — JSON gets a real null so the
-    /// UI never renders a process that does not exist.
+    /// A non-positive pid on the wire (the server sends -1, older drafts 0)
+    /// means "not running" — JSON gets a real null so the UI never renders a
+    /// process that does not exist.
     #[test]
     fn test_decode_status_maps_pid_zero_to_none() {
         let got = decode_status("snmp\tbackoff\t0\t0\t7\t12\n\n");
         assert_eq!(got[0].pid, None);
+        let neg = decode_status("snmp\tbackoff\t-1\t0\t7\t12\n\n");
+        assert_eq!(neg[0].pid, None);
     }
 
     #[test]
@@ -124,5 +129,58 @@ mod tests {
     fn test_request_restart_on_a_missing_socket_is_false() {
         let missing = std::path::Path::new("/tmp/definitely-not-a-socket-xyz.sock");
         assert!(!request_restart(missing, "onvif"));
+    }
+
+    /// Full round trip against a mock that speaks the anyka-init protocol
+    /// (TSV + blank-line terminator, `ok` for a restart). Catches drift in
+    /// the client's framing/parse; the cross-crate path contract is checked
+    /// on-device.
+    #[test]
+    fn test_round_trip_against_a_mock_control_server() {
+        use std::os::unix::net::UnixListener;
+
+        let path = format!("/tmp/onvif-svc-test-{}.sock", std::process::id());
+        let _ = std::fs::remove_file(&path);
+        let listener = UnixListener::bind(&path).expect("bind test socket");
+        let server_path = path.clone();
+        let server = std::thread::spawn(move || {
+            use std::io::{BufRead, Write};
+            // Exactly the two requests the test sends; then close up and exit
+            // so `join` below cannot wait on a listener that accepts forever.
+            for stream in listener.incoming().take(2) {
+                let Ok(mut stream) = stream else { break };
+                let mut line = String::new();
+                if std::io::BufReader::new(&stream)
+                    .read_line(&mut line)
+                    .is_err()
+                {
+                    continue;
+                }
+                if line.trim() == "status" {
+                    let _ = stream.write_all(
+                        b"onvif\trunning\t42\t90\t3\t0\nvendor-daemon\tbackoff\t-1\t0\t7\t12\n\n",
+                    );
+                } else if line.starts_with("restart ") {
+                    let _ = stream.write_all(b"ok\n");
+                } else {
+                    let _ = stream.write_all(b"unknown\n");
+                }
+            }
+            drop(listener);
+            let _ = std::fs::remove_file(&server_path);
+        });
+
+        let p = std::path::Path::new(&path);
+        let rows = query_status(p).expect("status round trip");
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].name, "onvif");
+        assert_eq!(rows[0].pid, Some(42));
+        assert_eq!(rows[1].name, "vendor-daemon");
+        assert_eq!(rows[1].pid, None);
+
+        assert!(request_restart(p, "onvif"));
+
+        server.join().expect("server thread");
+        let _ = std::fs::remove_file(&path);
     }
 }

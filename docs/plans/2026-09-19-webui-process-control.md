@@ -520,7 +520,7 @@ use std::sync::mpsc::Sender;
 /// `deny_unknown_fields`, so a `[control]` stanza in `anyka.toml` would be a
 /// hard parse error for the older binary in the other A/B slot after a
 /// rollback. A cosmetic tunable is not worth that.
-pub const SOCKET_PATH: &str = "/tmp/anyka-init.sock";
+pub const SOCKET_PATH: &str = "/tmp/anyka-supervisor.sock";
 
 /// How long to wait for the supervisor loop to answer a snapshot request.
 /// Bounded so a wedged loop surfaces as an error instead of hanging the
@@ -938,8 +938,10 @@ use std::os::unix::net::UnixStream;
 use std::path::Path;
 use std::time::Duration;
 
-/// Must match `anyka_init::control::SOCKET_PATH`.
-pub const SOCKET_PATH: &str = "/tmp/anyka-init.sock";
+/// Must match `anyka_init::control::SOCKET_PATH` (anyka-init/src/control.rs):
+/// both sides of this Unix-socket contract are checked on-device, since the
+/// two crates do not share code.
+pub const SOCKET_PATH: &str = "/tmp/anyka-supervisor.sock";
 
 const TIMEOUT: Duration = Duration::from_secs(2);
 
@@ -1487,8 +1489,8 @@ git commit -m "feat(webui): mount ProcessesCard on the diagnostics page"
 
 Not part of the automated plan. A human runs this after building and deploying a bundle with @anyka-firmware-upgrade.
 
-1. **Socket exists and is root-only.** Over telnet: `ls -l /tmp/anyka-init.sock` → `srw-------`.
-2. **Protocol answers by hand.** `echo status | nc -U /tmp/anyka-init.sock` → one TSV row per service. This is the payoff for choosing TSV over JSON.
+1. **Socket exists and is root-only.** Over telnet: `ls -l /tmp/anyka-supervisor.sock` → `srw-------`.
+2. **Protocol answers by hand.** `echo status | nc -U /tmp/anyka-supervisor.sock` → one TSV row per service. This is the payoff for choosing TSV over JSON.
 3. **Page renders.** Load Diagnostics; the supervised table lists the same services as `anyka.toml`, with plausible uptimes.
 4. **Restart a safe service.** Restart `snmp`; its uptime resets and `restarts` increments. Confirm from `rtk git`-independent evidence — the camera log, not just the UI.
 5. **Restart `onvif`.** Confirm the dialog warns about `vendor-daemon`, the page enters "reconnecting", and it recovers on its own. Expect video to drop and return.

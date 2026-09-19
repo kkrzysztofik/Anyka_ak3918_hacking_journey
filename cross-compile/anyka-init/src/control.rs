@@ -5,6 +5,10 @@
 use crate::supervise::{RestartHistory, SvcState};
 use std::time::Instant;
 
+/// Where `spawn_control_thread` binds the listener. The onvif-rust client in
+/// `diagnostics/services.rs` connects to this exact path; keep them in sync.
+pub const SOCKET_PATH: &str = "/tmp/anyka-supervisor.sock";
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ServiceStatus {
     pub name: String,

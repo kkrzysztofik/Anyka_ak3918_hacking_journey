@@ -349,7 +349,9 @@ fn handle_control_conn(mut stream: UnixStream, tx: &Sender<Msg>) -> std::io::Res
         }
         Some(control::Request::Restart(name)) => {
             let _ = tx.send(Msg::RestartService(name.clone()));
-            let _ = stream.write_all(format!("restarted {name}\n").as_bytes());
+            // The onvif-rust client treats exactly "ok" as accepted and anything
+            // else as a failure — keep the reply minimal, not chatty.
+            let _ = stream.write_all(b"ok\n");
         }
         None => {
             let _ = stream.write_all(b"unknown\n");
@@ -359,7 +361,7 @@ fn handle_control_conn(mut stream: UnixStream, tx: &Sender<Msg>) -> std::io::Res
 }
 
 pub fn spawn_control_thread(tx: Sender<Msg>) -> std::io::Result<()> {
-    let socket_path = "/tmp/anyka-supervisor.sock";
+    let socket_path = control::SOCKET_PATH;
     let _ = std::fs::remove_file(socket_path);
     let listener = UnixListener::bind(socket_path)?;
     let _ = std::fs::set_permissions(socket_path, std::fs::Permissions::from_mode(0o600));
