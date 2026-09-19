@@ -143,7 +143,10 @@ fn main() {
         let policy = anyka_init::update::Policy {
             hold_secs: cfg.update.trial_hold_sec,
             deadline_secs: cfg.update.trial_deadline_sec,
-            ports: cfg.update.trial_ports.clone(),
+            ports: anyka_init::update::effective_trial_ports(
+                &cfg.update.trial_ports,
+                cfg.services.get("onvif").is_some_and(|s| s.enabled),
+            ),
         };
         let lock = Arc::clone(&slot_lock);
         let _ = std::thread::Builder::new()
