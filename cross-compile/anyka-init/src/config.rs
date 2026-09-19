@@ -23,6 +23,12 @@ pub enum ConfigError {
     Parse(#[from] toml::de::Error),
     #[error("invalid configuration: {0}")]
     Invalid(String),
+    #[error("failed to write {path}: {source}")]
+    Write {
+        path: String,
+        #[source]
+        source: std::io::Error,
+    },
 }
 
 #[derive(Debug, Deserialize)]
@@ -383,6 +389,39 @@ fn default_trial_ports() -> Vec<u16> {
     crate::update::TRIAL_PORTS.to_vec()
 }
 
+/// Line-level edit of `enabled =` under `[services.<name>]`.
+///
+/// Only the one boolean line changes — comments, ordering and formatting
+/// everywhere else survive byte-for-byte, which a TOML round-trip cannot
+/// guarantee. That matters because this file is the operator's: hand-edited,
+/// comment-rich, and holding the Wi-Fi credentials.
+pub fn set_enabled_in_text(text: &str, name: &str, enabled: bool) -> Result<String, ConfigError> {
+    let header = format!("[services.{name}]");
+    let value = if enabled { "true" } else { "false" };
+
+    let mut out: Vec<String> = text.split('\n').map(str::to_owned).collect();
+    let Some(hdr) = out.iter().position(|l| l.trim() == header) else {
+        return Err(ConfigError::Invalid(format!(
+            "no [services.{name}] stanza in config"
+        )));
+    };
+    // The stanza ends at the next `[`-prefixed line, or at end of file.
+    let end = out[hdr + 1..]
+        .iter()
+        .position(|l| l.trim_start().starts_with('['))
+        .map(|i| i + hdr + 1)
+        .unwrap_or(out.len());
+
+    let Some(i) = (hdr + 1..end).find(|&i| out[i].trim_start().starts_with("enabled")) else {
+        out.insert(hdr + 1, format!("enabled = {value}"));
+        return Ok(out.join("\n"));
+    };
+    // Preserve the line's indentation, change only the value.
+    let lead: String = out[i].chars().take_while(|c| c.is_whitespace()).collect();
+    out[i] = format!("{lead}enabled = {value}");
+    Ok(out.join("\n"))
+}
+
 impl Default for Update {
     fn default() -> Self {
         Self {
@@ -479,6 +518,42 @@ impl std::str::FromStr for Config {
 }
 
 impl Config {
+    /// Persist `enabled` for one service: line-level edit, then atomic
+    /// tmp+rename over the original (the same pattern `update.rs` uses for the
+    /// `active` pointer on this filesystem). On failure the original is
+    /// untouched.
+    ///
+    /// Associated, not a method: this writes the file, and the in-memory
+    /// `Config` is updated separately by the caller so the two steps stay
+    /// visibly ordered.
+    pub fn set_service_enabled(
+        path: &std::path::Path,
+        name: &str,
+        enabled: bool,
+    ) -> Result<(), ConfigError> {
+        let text = std::fs::read_to_string(path).map_err(|source| ConfigError::Read {
+            path: path.display().to_string(),
+            source,
+        })?;
+        let new_text = set_enabled_in_text(&text, name, enabled)?;
+
+        let tmp = path.with_extension("toml.tmp");
+        let write = |p: &std::path::Path| -> Result<(), std::io::Error> {
+            let mut f = std::fs::File::create(p)?;
+            std::io::Write::write_all(&mut f, new_text.as_bytes())?;
+            f.sync_all()
+        };
+        write(&tmp).map_err(|source| ConfigError::Write {
+            path: tmp.display().to_string(),
+            source,
+        })?;
+        std::fs::rename(&tmp, path).map_err(|source| ConfigError::Write {
+            path: path.display().to_string(),
+            source,
+        })?;
+        Ok(())
+    }
+
     pub fn load(path: &str) -> Result<Self, ConfigError> {
         Self::load_with_overlay(
             path,
@@ -1133,5 +1208,77 @@ password = "overlaypass"
             "valid overlay must not be quarantined for a baseline fault"
         );
         assert!(!dir.path().join("network.toml.bad").exists());
+    }
+
+    const SAMPLE: &str = concat!(
+        "title = \"anyka\"\n",
+        "[services.onvif]\n",
+        "enabled = true\n",
+        "exec = \"/mnt/anyka_hack/slots/a/bin/onvif-rust.bin\"\n",
+        "# keep this comment alive\n",
+        "[services.snmp]\n",
+        "exec = \"/usr/sbin/snmpd\"\n",
+        "[services.dropbear]\n",
+        "enabled = false\n",
+    );
+
+    #[test]
+    fn test_set_enabled_in_text_replaces_an_existing_line() {
+        let got = set_enabled_in_text(SAMPLE, "onvif", false).expect("edit");
+        assert!(got.contains("[services.onvif]\nenabled = false\nexec ="));
+    }
+
+    #[test]
+    fn test_set_enabled_in_text_preserves_everything_else() {
+        let got = set_enabled_in_text(SAMPLE, "snmp", true).expect("edit");
+        // The only byte-level change: one inserted line.
+        assert_eq!(
+            got,
+            SAMPLE.replace(
+                "[services.snmp]\nexec =",
+                "[services.snmp]\nenabled = true\nexec =",
+            )
+        );
+        assert!(got.contains("# keep this comment alive"));
+    }
+
+    #[test]
+    fn test_set_enabled_in_text_inserts_under_the_header_when_absent() {
+        // A hand-edited config may omit `enabled` entirely (it defaults true),
+        // so "disable" has to be able to create the line.
+        let got = set_enabled_in_text(SAMPLE, "snmp", false).expect("edit");
+        assert!(got.contains("[services.snmp]\nenabled = false\nexec ="));
+    }
+
+    #[test]
+    fn test_set_enabled_in_text_does_not_escape_the_stanza() {
+        // dropbear's line must be untouched when onvif is edited.
+        let got = set_enabled_in_text(SAMPLE, "onvif", false).expect("edit");
+        assert!(got.contains("[services.dropbear]\nenabled = false\n"));
+    }
+
+    #[test]
+    fn test_set_enabled_in_text_unknown_stanza_is_an_error() {
+        match set_enabled_in_text(SAMPLE, "nope", true) {
+            Err(ConfigError::Invalid(_)) => {}
+            other => panic!("expected Invalid, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_set_service_enabled_writes_atomically_and_preserves_the_file() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("anyka.toml");
+        std::fs::write(&path, SAMPLE).expect("seed");
+
+        Config::set_service_enabled(&path, "onvif", false).expect("persist");
+
+        let after = std::fs::read_to_string(&path).expect("read back");
+        assert!(after.contains("[services.onvif]\nenabled = false"));
+        assert!(after.contains("# keep this comment alive"));
+        // No temp file left behind.
+        assert!(!path.with_extension("toml.tmp").exists());
+        // Still parses.
+        Config::load_without_overlay(path.to_str().expect("utf8")).ok();
     }
 }
