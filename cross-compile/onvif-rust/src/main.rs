@@ -190,9 +190,12 @@ fn install_validation_panic_hook() {
                 "validation mode panic at {}: {}\n{}",
                 location, message, backtrace
             );
+            // Not `message = ...`: that is tracing's own field for the trailing
+            // literal below, so the panic text would be recorded twice under
+            // one name and subscribers pick whichever they see last.
             tracing::error!(
                 location = %location,
-                message = %message,
+                panic_message = %message,
                 backtrace = %backtrace,
                 "validation mode panic"
             );

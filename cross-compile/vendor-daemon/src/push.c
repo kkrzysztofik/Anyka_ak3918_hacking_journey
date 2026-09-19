@@ -4,6 +4,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <time.h>
 #include <pthread.h>
 #include <unistd.h>
@@ -466,10 +467,21 @@ static void *push_frame_thread(void *arg)
             /* Only the main stream drives liveness: if it stalls we are
              * broken regardless of what the sub stream is doing. */
             if (state->stream_id == 0) {
-                FILE *hb = fopen(PUSH_HEARTBEAT_PATH, "w");
-                if (hb) {
-                    fprintf(hb, "%llu\n", (unsigned long long)frames_pushed);
-                    fclose(hb);
+                /* Not fopen(): that creates 0666 in a shared /tmp, so any
+                 * process could rewrite the heartbeat, and would follow a
+                 * pre-planted symlink at the path. */
+                int hb_fd = open(PUSH_HEARTBEAT_PATH,
+                                 O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW,
+                                 0644);
+                if (hb_fd >= 0) {
+                    FILE *hb = fdopen(hb_fd, "w");
+                    if (hb) {
+                        fprintf(hb, "%llu\n",
+                                (unsigned long long)frames_pushed);
+                        fclose(hb);
+                    } else {
+                        close(hb_fd);
+                    }
                 }
             }
         }
