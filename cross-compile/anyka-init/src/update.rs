@@ -1507,20 +1507,29 @@ mod tests {
 
     #[test]
     fn test_effective_trial_ports_unchanged_when_onvif_enabled() {
-        assert_eq!(effective_trial_ports(&TRIAL_PORTS, true), TRIAL_PORTS.to_vec());
+        assert_eq!(
+            effective_trial_ports(&TRIAL_PORTS, true),
+            TRIAL_PORTS.to_vec()
+        );
         // A camera with a custom trial_ports override is unaffected either way.
         assert_eq!(effective_trial_ports(&[2000], true), vec![2000]);
     }
 
     #[test]
     fn test_effective_trial_ports_drops_onvif_ports_when_onvif_disabled() {
-        assert_eq!(effective_trial_ports(&TRIAL_PORTS, false), Vec::<u16>::new());
+        assert_eq!(
+            effective_trial_ports(&TRIAL_PORTS, false),
+            Vec::<u16>::new()
+        );
     }
 
     #[test]
     fn test_effective_trial_ports_keeps_ports_of_unknown_ownership() {
         // Only ports we know belong to onvif are dropped; a custom port could
         // belong to anything, and a too-lax trial is worse than a strict one.
-        assert_eq!(effective_trial_ports(&[80, 554, 8080, 2000], false), vec![2000]);
+        assert_eq!(
+            effective_trial_ports(&[80, 554, 8080, 2000], false),
+            vec![2000]
+        );
     }
 }

@@ -63,8 +63,14 @@ impl RestartHistory {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SvcState {
-    Running { pid: Pid, since: Instant },
-    Backoff { until: Instant, attempt: u32 },
+    Running {
+        pid: Pid,
+        since: Instant,
+    },
+    Backoff {
+        until: Instant,
+        attempt: u32,
+    },
     /// Disabled at runtime via the control socket. The service stays in the
     /// `services` vec (so `by_pid` indices never shift) but is inert: `decide`
     /// never acts on it and never records history for it.
@@ -463,7 +469,13 @@ mod decide_tests {
         }
         let before = hist.len();
 
-        let d = decide(&SvcState::Disabled, &mut hist, Event::Exited, now, &policy());
+        let d = decide(
+            &SvcState::Disabled,
+            &mut hist,
+            Event::Exited,
+            now,
+            &policy(),
+        );
 
         assert_eq!(d.action, Action::None);
         assert_eq!(d.next, SvcState::Disabled);

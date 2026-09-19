@@ -323,14 +323,12 @@ fn handle_query_status(cfg: &Config, services: &[Service], reply_tx: &Sender<Con
         .iter()
         .map(|(name, entry)| {
             match services.iter().find(|s| s.name == *name) {
-                _ if !entry.enabled => {
-                    control::ServiceStatus::from_svc_state(
-                        name,
-                        &SvcState::Disabled,
-                        &RestartHistory::default(),
-                        now,
-                    )
-                }
+                _ if !entry.enabled => control::ServiceStatus::from_svc_state(
+                    name,
+                    &SvcState::Disabled,
+                    &RestartHistory::default(),
+                    now,
+                ),
                 Some(svc) => {
                     control::ServiceStatus::from_svc_state(&svc.name, &svc.state, &svc.hist, now)
                 }
@@ -501,12 +499,7 @@ fn handle_control_conn(mut stream: UnixStream, tx: &Sender<Msg>) -> std::io::Res
 /// The 1 s budget is deliberately below the client's 2 s socket timeout
 /// (`onvif-rust/src/diagnostics/services.rs`): if we answered later than the
 /// client waits, an applied-and-persisted toggle would surface as a 503.
-fn send_toggle<W: std::io::Write>(
-    writer: &mut W,
-    tx: &Sender<Msg>,
-    name: String,
-    enabled: bool,
-) {
+fn send_toggle<W: std::io::Write>(writer: &mut W, tx: &Sender<Msg>, name: String, enabled: bool) {
     let (reply_tx, reply_rx) = channel();
     let sent = tx.send(Msg::ToggleService {
         name,
@@ -588,7 +581,11 @@ fn dispatch_msg(
             handle_query_status(ctx.cfg, services, &reply_tx);
             false
         }
-        Ok(Msg::ToggleService { name, enabled, reply }) => {
+        Ok(Msg::ToggleService {
+            name,
+            enabled,
+            reply,
+        }) => {
             handle_toggle_service(ctx, services, name, enabled, &reply);
             false
         }
@@ -636,7 +633,13 @@ pub fn run(sys: Arc<dyn Sys>, cfg: &mut Config, config_path: &Path, rx: Receiver
             slots: &slots,
             policy: &policy,
         };
-        if dispatch_msg(&mut ctx, &mut services, &mut by_pid, &rx, rx.recv_timeout(timeout)) {
+        if dispatch_msg(
+            &mut ctx,
+            &mut services,
+            &mut by_pid,
+            &rx,
+            rx.recv_timeout(timeout),
+        ) {
             return;
         }
     }
@@ -1078,10 +1081,7 @@ mod run_tests {
         let mut c = ctx(&sys, &mut cfg, &cfg_path, dir.path(), &slots, &policy);
         handle_toggle_service(&mut c, &mut svcs, "snmp".into(), false, &rtx);
 
-        assert_eq!(
-            rrx.recv().expect("reply"),
-            control::ToggleOutcome::Ok
-        );
+        assert_eq!(rrx.recv().expect("reply"), control::ToggleOutcome::Ok);
         // File first.
         assert!(
             std::fs::read_to_string(&cfg_path)
@@ -1117,10 +1117,7 @@ mod run_tests {
         let mut c = ctx(&sys, &mut cfg, &cfg_path, dir.path(), &slots, &policy);
         handle_toggle_service(&mut c, &mut svcs, "dropbear".into(), true, &rtx);
 
-        assert_eq!(
-            rrx.recv().expect("reply"),
-            control::ToggleOutcome::Ok
-        );
+        assert_eq!(rrx.recv().expect("reply"), control::ToggleOutcome::Ok);
         assert!(
             std::fs::read_to_string(&cfg_path)
                 .expect("read")
@@ -1139,8 +1136,7 @@ mod run_tests {
     fn test_toggle_unknown_service_replies_unknown_and_writes_nothing() {
         let dir = tempfile::tempdir().expect("tempdir");
         let cfg_path = dir.path().join("anyka.toml");
-        let before =
-            "[services.snmp]\nenabled = true\nexec = \"/bin/true\"\n".to_string();
+        let before = "[services.snmp]\nenabled = true\nexec = \"/bin/true\"\n".to_string();
         std::fs::write(&cfg_path, &before).expect("seed");
 
         let mut sys = MockSys::new();
@@ -1165,10 +1161,7 @@ mod run_tests {
         let mut c = ctx(&sys, &mut cfg, &cfg_path, dir.path(), &slots, &policy);
         handle_toggle_service(&mut c, &mut svcs, "nope".into(), false, &rtx);
 
-        assert_eq!(
-            rrx.recv().expect("reply"),
-            control::ToggleOutcome::Unknown
-        );
+        assert_eq!(rrx.recv().expect("reply"), control::ToggleOutcome::Unknown);
         assert_eq!(std::fs::read_to_string(&cfg_path).expect("read"), before);
     }
 
@@ -1204,10 +1197,7 @@ mod run_tests {
         let mut c = ctx(&sys, &mut cfg, &cfg_path, dir.path(), &slots, &policy);
         handle_toggle_service(&mut c, &mut svcs, "wpa_supplicant".into(), false, &rtx);
 
-        assert_eq!(
-            rrx.recv().expect("reply"),
-            control::ToggleOutcome::Unknown
-        );
+        assert_eq!(rrx.recv().expect("reply"), control::ToggleOutcome::Unknown);
         assert_eq!(std::fs::read_to_string(&cfg_path).expect("read"), before);
         assert!(cfg.services["wpa_supplicant"].enabled);
     }
@@ -1216,8 +1206,7 @@ mod run_tests {
     fn test_toggle_is_an_idempotent_noop_when_already_in_that_state() {
         let dir = tempfile::tempdir().expect("tempdir");
         let cfg_path = dir.path().join("anyka.toml");
-        let before =
-            "[services.snmp]\nenabled = false\nexec = \"/bin/true\"\n".to_string();
+        let before = "[services.snmp]\nenabled = false\nexec = \"/bin/true\"\n".to_string();
         std::fs::write(&cfg_path, &before).expect("seed");
 
         // MockSys with no kill expectation — calling it would fail the test.
@@ -1234,10 +1223,7 @@ mod run_tests {
         let mut c = ctx(&sys, &mut cfg, &cfg_path, dir.path(), &slots, &policy);
         handle_toggle_service(&mut c, &mut svcs, "snmp".into(), false, &rtx);
 
-        assert_eq!(
-            rrx.recv().expect("reply"),
-            control::ToggleOutcome::Ok
-        );
+        assert_eq!(rrx.recv().expect("reply"), control::ToggleOutcome::Ok);
         assert_eq!(std::fs::read_to_string(&cfg_path).expect("read"), before);
     }
 
@@ -1271,10 +1257,7 @@ mod run_tests {
         let mut c = ctx(&sys, &mut cfg, &cfg_path, dir.path(), &slots, &policy);
         handle_toggle_service(&mut c, &mut svcs, "snmp".into(), false, &rtx);
 
-        assert_eq!(
-            rrx.recv().expect("reply"),
-            control::ToggleOutcome::Error
-        );
+        assert_eq!(rrx.recv().expect("reply"), control::ToggleOutcome::Error);
         assert!(cfg.services["snmp"].enabled); // in-memory untouched
         assert!(matches!(svcs[0].state, SvcState::Running { .. }));
     }
@@ -1321,10 +1304,7 @@ mod run_tests {
         let mut c = ctx(&sys, &mut cfg, &cfg_path, dir.path(), &slots, &policy);
         handle_toggle_service(&mut c, &mut svcs, "vendor-daemon".into(), false, &rtx);
 
-        assert_eq!(
-            rrx.recv().expect("reply"),
-            control::ToggleOutcome::Ok
-        );
+        assert_eq!(rrx.recv().expect("reply"), control::ToggleOutcome::Ok);
         assert!(!hb.exists());
     }
 

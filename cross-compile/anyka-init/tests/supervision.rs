@@ -89,8 +89,15 @@ impl Harness {
         let (tx, rx) = supervisor_loop::make_channel();
         let stop = Arc::new(AtomicBool::new(false));
         let reaper = supervisor_loop::spawn_reaper(Arc::clone(&sys), tx.clone(), Arc::clone(&stop));
-        let cfg = Arc::new(cfg);
-        let handle = std::thread::spawn(move || supervisor_loop::run(sys, &cfg, rx));
+        let handle = std::thread::spawn(move || {
+            let mut cfg = cfg;
+            supervisor_loop::run(
+                sys,
+                &mut cfg,
+                std::path::Path::new("/nonexistent/anyka.toml"),
+                rx,
+            )
+        });
         Self {
             tx,
             handle,
