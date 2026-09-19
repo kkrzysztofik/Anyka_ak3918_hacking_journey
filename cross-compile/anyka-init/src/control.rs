@@ -43,6 +43,14 @@ impl ServiceStatus {
                 restarts: *attempt as u64,
                 retry_in_s: until.saturating_duration_since(now).as_secs(),
             },
+            SvcState::Disabled => Self {
+                name: name.to_owned(),
+                state: "disabled",
+                pid: None,
+                uptime_s: 0,
+                restarts: 0,
+                retry_in_s: 0,
+            },
         }
     }
 
@@ -119,6 +127,20 @@ mod tests {
         assert_eq!(got.uptime_s, 0);
         assert_eq!(got.restarts, 3);
         assert_eq!(got.retry_in_s, 12);
+    }
+
+    #[test]
+    fn test_from_svc_state_disabled() {
+        let got = ServiceStatus::from_svc_state(
+            "dropbear",
+            &SvcState::Disabled,
+            &RestartHistory::default(),
+            Instant::now(),
+        );
+        assert_eq!(got.state, "disabled");
+        assert_eq!(got.pid, None);
+        assert_eq!(got.restarts, 0);
+        assert_eq!(got.retry_in_s, 0);
     }
 
     #[test]
