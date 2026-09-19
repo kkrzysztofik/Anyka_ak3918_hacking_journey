@@ -73,8 +73,7 @@ pub fn query_status(path: &Path) -> Option<Vec<ServiceStatus>> {
 
 /// Blocking. `true` means the restart was accepted, not that it completed.
 pub fn request_restart(path: &Path, name: &str) -> bool {
-    round_trip(path, &format!("restart {name}\n"))
-        .is_some_and(|r| r.trim() == "ok")
+    round_trip(path, &format!("restart {name}\n")).is_some_and(|r| r.trim() == "ok")
 }
 
 #[cfg(test)]
