@@ -1436,11 +1436,13 @@ impl ProfileManager {
             .as_ref()
             .map(|c| c.read().ptz.enabled)
             .unwrap_or(true);
+        // Match the config path: when PTZ is enabled, every profile gets the default
+        // PTZ configuration, even if a persisted `profiles.toml` (seeded while the
+        // feature was off, or written by an older build) has no `ptz_config` token.
+        // Requiring the stored token would permanently strand profiles without PTZ
+        // after re-enabling, and the storage path short-circuits the config path.
         let ptz_configuration = if ptz_enabled {
-            stored
-                .ptz_config
-                .as_ref()
-                .map(|_| Self::create_default_ptz_configuration())
+            Some(Self::create_default_ptz_configuration())
         } else {
             None
         };
@@ -1790,6 +1792,51 @@ mod tests {
     // ========================================================================
     // Parsing Helper Tests
     // ========================================================================
+
+    /// Regression test: a `profiles.toml` seeded while `ptz.enabled=false` persists
+    /// `ptz_config = None`. Re-enabling `[ptz]` must still attach the default PTZ
+    /// configuration, otherwise the storage path (which short-circuits the config path)
+    /// would leave the profiles permanently PTZ-less and the WebUI would keep showing
+    /// "PTZ is disabled" even though the feature is on.
+    #[test]
+    fn test_storage_restore_ptz_enabled_recovers_after_disabled_seeding() {
+        let dir = tempfile::tempdir().unwrap();
+        let storage = Arc::new(ProfileStorage::new(dir.path().join("profiles.toml")));
+
+        // First boot with PTZ disabled: the seeded file ends up with no PTZ tokens.
+        let disabled = Arc::new(ConfigRuntime::new(Default::default()));
+        disabled.write().ptz.enabled = false;
+        let _seeded = ProfileManager::with_storage(
+            Arc::clone(&disabled),
+            Arc::clone(&storage),
+            Resolution::new(1920, 1080),
+        );
+        assert!(
+            storage
+                .snapshot()
+                .profiles
+                .iter()
+                .all(|p| p.ptz_config.is_none()),
+            "seeding while disabled must persist ptz_config=None"
+        );
+
+        // Re-enable PTZ and reload: the storage path must still attach the default PTZ config.
+        let enabled = Arc::new(ConfigRuntime::new(Default::default()));
+        let restored = ProfileManager::with_storage(
+            Arc::clone(&enabled),
+            Arc::clone(&storage),
+            Resolution::new(1920, 1080),
+        );
+        let profiles = restored.get_profiles();
+        assert!(!profiles.is_empty());
+        for profile in profiles {
+            assert!(
+                profile.ptz_configuration.is_some(),
+                "restored profile must regain a PTZConfiguration when ptz.enabled is true, \
+                 even if the stored file lacks a token"
+            );
+        }
+    }
 
     #[test]
     fn test_parse_video_encoding_h264() {
