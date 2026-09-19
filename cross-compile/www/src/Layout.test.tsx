@@ -325,6 +325,12 @@ describe('Layout', () => {
       const main = screen.getByTestId('layout-main-content');
       expect(main).toBeInTheDocument();
     });
+
+    it('should position main so absolute descendants cannot stretch the document', () => {
+      renderLayout();
+      // Without `relative`, `sr-only` legends resolve against the viewport and add dead scroll.
+      expect(screen.getByTestId('layout-main-content')).toHaveClass('relative');
+    });
   });
 
   describe('User Display', () => {

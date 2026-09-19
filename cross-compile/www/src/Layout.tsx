@@ -456,8 +456,13 @@ export default function Layout() {
       </aside>
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <Header />
+        {/*
+          `relative` keeps absolutely positioned descendants (e.g. `sr-only`) inside this
+          scroller; without it their containing block is the viewport and they stretch the
+          document, adding dead scroll below the app shell.
+        */}
         <main
-          className="min-h-0 flex-1 overflow-y-auto p-6 md:p-8"
+          className="relative min-h-0 flex-1 overflow-y-auto p-6 md:p-8"
           aria-label="Page content"
           data-testid="layout-main-content"
         >
