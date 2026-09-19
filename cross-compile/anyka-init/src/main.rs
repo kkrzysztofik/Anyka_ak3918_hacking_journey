@@ -6,6 +6,10 @@ use anyka_init::{
 use std::sync::Arc;
 use std::time::Duration;
 
+/// The operator's config file: one constant so the loader and the toggle
+/// writer cannot drift apart.
+const CONFIG_PATH: &str = "/mnt/anyka_hack/anyka.toml";
+
 fn main() {
     std::panic::set_hook(Box::new(|info| {
         let msg = info.to_string();
@@ -15,7 +19,7 @@ fn main() {
 
     // P1: config. Never fall back to defaults — a wrong wifi_ssid or
     // sensor_module is worse than parking with recovery telnet up.
-    let mut cfg = match config::Config::load("/mnt/anyka_hack/anyka.toml") {
+    let mut cfg = match config::Config::load(CONFIG_PATH) {
         Ok(c) => c,
         Err(e) => {
             logging::console(&format!("config load failed: {e}"));
@@ -63,7 +67,7 @@ fn main() {
     // P2
     boot::protect_from_oom_killer(std::path::Path::new("/proc/self/oom_score_adj"));
     boot::write_panic_sysctls(std::path::Path::new("/proc/sys"));
-    let baseline_cfg = match config::Config::load_without_overlay("/mnt/anyka_hack/anyka.toml") {
+    let baseline_cfg = match config::Config::load_without_overlay(CONFIG_PATH) {
         Ok(c) => c,
         Err(e) => {
             logging::console(&format!("baseline config load failed: {e}"));
@@ -184,7 +188,7 @@ fn main() {
             });
     }
 
-    supervisor_loop::run(sysimpl, &cfg, rx);
+    supervisor_loop::run(sysimpl, &mut cfg, std::path::Path::new(CONFIG_PATH), rx);
     stop.store(true, std::sync::atomic::Ordering::Relaxed);
 }
 
