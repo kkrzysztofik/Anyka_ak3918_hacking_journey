@@ -1,9 +1,10 @@
 //! Machine-owned network overlay.
 //!
 //! `anyka.toml` is the operator's file: hand-edited, comment-rich, and holding
-//! the Wi-Fi credentials. The only writer in this codebase is
-//! `Config::set_service_enabled`, which rewrites a single `enabled =` line in
-//! place. Runtime *network* changes made from the WebUI land here instead, in
+//! the Wi-Fi credentials. The only writers in this codebase are
+//! `Config::set_service_enabled` (a `[services.X]` `enabled =` line) and
+//! `Config::set_system_telnet` (the `[system]` `telnet =` line), both
+//! rewriting a single boolean line in place. Runtime *network* changes made from the WebUI land here instead, in
 //! a file that has no comments to lose and no operator intent to clobber, and
 //! that a support engineer can neutralise with a single `rm`.
 //!

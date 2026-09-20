@@ -395,14 +395,18 @@ fn default_trial_ports() -> Vec<u16> {
 /// everywhere else survive byte-for-byte, which a TOML round-trip cannot
 /// guarantee. That matters because this file is the operator's: hand-edited,
 /// comment-rich, and holding the Wi-Fi credentials.
-pub fn set_enabled_in_text(text: &str, name: &str, enabled: bool) -> Result<String, ConfigError> {
-    let header = format!("[services.{name}]");
+pub fn set_bool_in_text(
+    text: &str,
+    section: &str,
+    key: &str,
+    enabled: bool,
+) -> Result<String, ConfigError> {
     let value = if enabled { "true" } else { "false" };
 
     let mut out: Vec<String> = text.split('\n').map(str::to_owned).collect();
-    let Some(hdr) = out.iter().position(|l| l.trim() == header) else {
+    let Some(hdr) = out.iter().position(|l| l.trim() == section) else {
         return Err(ConfigError::Invalid(format!(
-            "no [services.{name}] stanza in config"
+            "no {section} stanza in config"
         )));
     };
     // The stanza ends at the next `[`-prefixed line, or at end of file.
@@ -412,14 +416,45 @@ pub fn set_enabled_in_text(text: &str, name: &str, enabled: bool) -> Result<Stri
         .map(|i| i + hdr + 1)
         .unwrap_or(out.len());
 
-    let Some(i) = (hdr + 1..end).find(|&i| out[i].trim_start().starts_with("enabled")) else {
-        out.insert(hdr + 1, format!("enabled = {value}"));
+    let Some(i) = (hdr + 1..end).find(|&i| out[i].trim_start().starts_with(key)) else {
+        out.insert(hdr + 1, format!("{key} = {value}"));
         return Ok(out.join("\n"));
     };
     // Preserve the line's indentation, change only the value.
     let lead: String = out[i].chars().take_while(|c| c.is_whitespace()).collect();
-    out[i] = format!("{lead}enabled = {value}");
+    out[i] = format!("{lead}{key} = {value}");
     Ok(out.join("\n"))
+}
+
+fn read_config_text(path: &std::path::Path) -> Result<String, ConfigError> {
+    std::fs::read_to_string(path).map_err(|source| ConfigError::Read {
+        path: path.display().to_string(),
+        source,
+    })
+}
+
+/// Write `new_text` to a temp file next to `path`, fsync it, then rename over
+/// the original, so an interrupted write never leaves a half-written operator
+/// config behind (the same pattern `update.rs` uses for the `active` pointer
+/// on this filesystem).
+fn persist_text(path: &std::path::Path, new_text: &str) -> Result<(), ConfigError> {
+    let tmp = path.with_extension("toml.tmp");
+    let write = |f: &mut std::fs::File| -> Result<(), std::io::Error> {
+        std::io::Write::write_all(f, new_text.as_bytes())?;
+        f.sync_all()
+    };
+    let mut f = std::fs::File::create(&tmp).map_err(|source| ConfigError::Write {
+        path: tmp.display().to_string(),
+        source,
+    })?;
+    write(&mut f).map_err(|source| ConfigError::Write {
+        path: tmp.display().to_string(),
+        source,
+    })?;
+    std::fs::rename(&tmp, path).map_err(|source| ConfigError::Write {
+        path: path.display().to_string(),
+        source,
+    })
 }
 
 impl Default for Update {
@@ -531,27 +566,19 @@ impl Config {
         name: &str,
         enabled: bool,
     ) -> Result<(), ConfigError> {
-        let text = std::fs::read_to_string(path).map_err(|source| ConfigError::Read {
-            path: path.display().to_string(),
-            source,
-        })?;
-        let new_text = set_enabled_in_text(&text, name, enabled)?;
+        let text = read_config_text(path)?;
+        let new_text = set_bool_in_text(&text, &format!("[services.{name}]"), "enabled", enabled)?;
+        persist_text(path, &new_text)
+    }
 
-        let tmp = path.with_extension("toml.tmp");
-        let write = |p: &std::path::Path| -> Result<(), std::io::Error> {
-            let mut f = std::fs::File::create(p)?;
-            std::io::Write::write_all(&mut f, new_text.as_bytes())?;
-            f.sync_all()
-        };
-        write(&tmp).map_err(|source| ConfigError::Write {
-            path: tmp.display().to_string(),
-            source,
-        })?;
-        std::fs::rename(&tmp, path).map_err(|source| ConfigError::Write {
-            path: path.display().to_string(),
-            source,
-        })?;
-        Ok(())
+    /// Persist `[system].telnet` — the recovery-telnet switch. Same file-first
+    /// atomic-write discipline as `set_service_enabled`; the in-memory `Config`
+    /// and the runtime side (spawn/killall) are the caller's, in the same
+    /// visible order.
+    pub fn set_system_telnet(path: &std::path::Path, enabled: bool) -> Result<(), ConfigError> {
+        let text = read_config_text(path)?;
+        let new_text = set_bool_in_text(&text, "[system]", "telnet", enabled)?;
+        persist_text(path, &new_text)
     }
 
     pub fn load(path: &str) -> Result<Self, ConfigError> {
@@ -1223,14 +1250,14 @@ password = "overlaypass"
     );
 
     #[test]
-    fn test_set_enabled_in_text_replaces_an_existing_line() {
-        let got = set_enabled_in_text(SAMPLE, "onvif", false).expect("edit");
+    fn test_set_bool_in_text_replaces_an_existing_line() {
+        let got = set_bool_in_text(SAMPLE, "[services.onvif]", "enabled", false).expect("edit");
         assert!(got.contains("[services.onvif]\nenabled = false\nexec ="));
     }
 
     #[test]
-    fn test_set_enabled_in_text_preserves_everything_else() {
-        let got = set_enabled_in_text(SAMPLE, "snmp", true).expect("edit");
+    fn test_set_bool_in_text_preserves_everything_else() {
+        let got = set_bool_in_text(SAMPLE, "[services.snmp]", "enabled", true).expect("edit");
         // The only byte-level change: one inserted line.
         assert_eq!(
             got,
@@ -1243,26 +1270,58 @@ password = "overlaypass"
     }
 
     #[test]
-    fn test_set_enabled_in_text_inserts_under_the_header_when_absent() {
+    fn test_set_bool_in_text_inserts_under_the_header_when_absent() {
         // A hand-edited config may omit `enabled` entirely (it defaults true),
         // so "disable" has to be able to create the line.
-        let got = set_enabled_in_text(SAMPLE, "snmp", false).expect("edit");
+        let got = set_bool_in_text(SAMPLE, "[services.snmp]", "enabled", false).expect("edit");
         assert!(got.contains("[services.snmp]\nenabled = false\nexec ="));
     }
 
     #[test]
-    fn test_set_enabled_in_text_does_not_escape_the_stanza() {
+    fn test_set_bool_in_text_does_not_escape_the_stanza() {
         // dropbear's line must be untouched when onvif is edited.
-        let got = set_enabled_in_text(SAMPLE, "onvif", false).expect("edit");
+        let got = set_bool_in_text(SAMPLE, "[services.onvif]", "enabled", false).expect("edit");
         assert!(got.contains("[services.dropbear]\nenabled = false\n"));
     }
 
     #[test]
-    fn test_set_enabled_in_text_unknown_stanza_is_an_error() {
-        match set_enabled_in_text(SAMPLE, "nope", true) {
+    fn test_set_bool_in_text_unknown_stanza_is_an_error() {
+        match set_bool_in_text(SAMPLE, "[services.nope]", "enabled", true) {
             Err(ConfigError::Invalid(_)) => {}
             other => panic!("expected Invalid, got {other:?}"),
         }
+    }
+
+    const SYSTEM_SAMPLE: &str = "\n[system]\nsensor_module = \"/data/sensor/sensor_gc1084.ko\"\ntelnet = false\nftp = true\n\n[wifi]\n";
+
+    #[test]
+    fn test_set_bool_in_text_system_telnet_replaces_the_line_only() {
+        let got = set_bool_in_text(SYSTEM_SAMPLE, "[system]", "telnet", true).expect("edit");
+        assert!(got.contains(
+            "[system]\nsensor_module = \"/data/sensor/sensor_gc1084.ko\"\ntelnet = true\nftp = true"
+        ));
+    }
+
+    #[test]
+    fn test_set_bool_in_text_system_telnet_inserts_when_absent() {
+        let sample = "[system]\nftp = true\n";
+        let got = set_bool_in_text(sample, "[system]", "telnet", false).expect("edit");
+        assert!(got.contains("[system]\ntelnet = false\nftp = true"));
+    }
+
+    #[test]
+    fn test_set_system_telnet_writes_atomically_and_preserves_the_file() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("anyka.toml");
+        std::fs::write(&path, SYSTEM_SAMPLE).expect("seed");
+
+        Config::set_system_telnet(&path, true).expect("persist");
+
+        let after = std::fs::read_to_string(&path).expect("read back");
+        assert!(after.contains("telnet = true\nftp = true"));
+        assert!(after.contains("sensor_module = \"/data/sensor/sensor_gc1084.ko\""));
+        // No temp file left behind.
+        assert!(!path.with_extension("toml.tmp").exists());
     }
 
     #[test]

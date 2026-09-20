@@ -236,6 +236,61 @@ fn try_start_service(
     }
 }
 
+/// The recovery telnet (port 24). Deliberately *outside* the supervised
+/// table: the P0 wrapper starts it **before** anyka-init exists, and a kill
+/// must stay final — a supervisor would just resurrect it. So this (1)
+/// persists `[system].telnet` (file first, like every other toggle) and
+/// (2) makes the live process match: spawn the P0-equivalent
+/// `telnetd -p 24 -l /bin/sh`, or killall it. Reboots follow the persisted
+/// flag through the existing P0 (always start) and P2 (kill iff false) steps
+/// — no boot-code change. Safe mode force-enables the flag at boot, which is
+/// the documented escape hatch, not a bug this should fight.
+fn handle_toggle_telnet(
+    ctx: &mut LoopCtx<'_>,
+    enabled: bool,
+    reply: &Sender<control::ToggleOutcome>,
+) {
+    if let Err(e) = Config::set_system_telnet(ctx.config_path, enabled) {
+        tracing::error!(error = %e, "telnet toggle: config write failed; not applied");
+        let _ = reply.send(control::ToggleOutcome::Error);
+        return;
+    }
+    ctx.cfg.system.telnet = enabled;
+
+    if enabled {
+        // pidof exits non-zero when the process is absent: port 24 is
+        // single-instance, so spawn only when nothing holds it.
+        let running = matches!(
+            ctx.sys.run_to_completion("pidof", &["telnetd".to_string()]),
+            Ok(status) if status.success()
+        );
+        if !running
+            && let Err(e) = ctx.sys.spawn_detached(
+                "telnetd",
+                &[
+                    "-p".to_string(),
+                    "24".to_string(),
+                    "-l".to_string(),
+                    "/bin/sh".to_string(),
+                ],
+            )
+        {
+            tracing::warn!(error = %e, "telnet toggle: telnetd spawn failed");
+        }
+    } else {
+        // killall exits non-zero when nothing matched — that is success here;
+        // only a spawn/wait failure is worth a warning.
+        if let Err(e) = ctx
+            .sys
+            .run_to_completion("killall", &["telnetd".to_string()])
+        {
+            tracing::warn!(error = %e, "telnet toggle: killall failed");
+        }
+    }
+    tracing::info!(enabled, "recovery telnet toggled");
+    let _ = reply.send(control::ToggleOutcome::Ok);
+}
+
 fn tick_services(
     sys: &dyn Sys,
     cfg: &Config,
@@ -359,6 +414,10 @@ const NON_TOGGLEABLE: [&str; 1] = ["wpa_supplicant"];
 /// in-memory cfg, then state/kill. A failed write means nothing changes — a
 /// "disabled" service that silently re-enabled itself on reboot would defeat
 /// the crash-loop escape hatch this exists for.
+///
+/// `telnetd` is special-cased before any service lookup: it is not a
+/// supervised service, it is the `[system].telnet` switch (see
+/// `handle_toggle_telnet`).
 fn handle_toggle_service(
     ctx: &mut LoopCtx<'_>,
     services: &mut Vec<Service>,
@@ -366,6 +425,10 @@ fn handle_toggle_service(
     enabled: bool,
     reply: &Sender<control::ToggleOutcome>,
 ) {
+    if name == "telnetd" {
+        handle_toggle_telnet(ctx, enabled, reply);
+        return;
+    }
     if NON_TOGGLEABLE.contains(&name.as_str()) {
         tracing::warn!(service = %name, "toggle refused: service is not toggleable");
         let _ = reply.send(control::ToggleOutcome::Unknown);
@@ -1355,5 +1418,144 @@ mod run_tests {
         let ControlMsg::Status(rows) = rx.recv().expect("status");
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].state, "backoff");
+    }
+
+    #[test]
+    fn test_toggle_telnet_enable_persists_then_spawns() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let cfg_path = dir.path().join("anyka.toml");
+        std::fs::write(&cfg_path, "[system]\ntelnet = false\n").expect("seed");
+
+        let mut sys = MockSys::new();
+        sys.expect_run_to_completion()
+            .times(1)
+            .returning(|prog, _args| {
+                assert_eq!(prog, "pidof");
+                // pidof exits non-zero when the process is absent.
+                Ok(crate::sys::ExitStatus::Code(1))
+            });
+        sys.expect_spawn_detached()
+            .times(1)
+            .returning(|prog, args| {
+                assert_eq!(prog, "telnetd");
+                assert_eq!(
+                    args,
+                    &[
+                        "-p".to_string(),
+                        "24".to_string(),
+                        "-l".to_string(),
+                        "/bin/sh".to_string()
+                    ]
+                );
+                Ok(77)
+            });
+
+        let mut cfg = test_config(BTreeMap::new());
+        let slots = crate::update::Slots::new(dir.path());
+        let policy = test_policy();
+        let mut svcs: Vec<Service> = Vec::new();
+
+        let (rtx, rrx) = channel();
+        let mut c = ctx(&sys, &mut cfg, &cfg_path, dir.path(), &slots, &policy);
+        handle_toggle_service(&mut c, &mut svcs, "telnetd".into(), true, &rtx);
+
+        assert_eq!(rrx.recv().expect("reply"), control::ToggleOutcome::Ok);
+        // File first, then memory — and never a supervised service.
+        assert!(
+            std::fs::read_to_string(&cfg_path)
+                .expect("read")
+                .contains("telnet = true")
+        );
+        assert!(cfg.system.telnet);
+        assert_eq!(svcs.len(), 0);
+    }
+
+    #[test]
+    fn test_toggle_telnet_enable_is_idempotent_when_already_running() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let cfg_path = dir.path().join("anyka.toml");
+        std::fs::write(&cfg_path, "[system]\ntelnet = false\n").expect("seed");
+
+        let mut sys = MockSys::new();
+        sys.expect_run_to_completion()
+            .times(1)
+            .returning(|prog, _| {
+                assert_eq!(prog, "pidof");
+                // pidof found it: port 24 already held, do not double-spawn.
+                Ok(crate::sys::ExitStatus::Code(0))
+            });
+        sys.expect_spawn_detached().times(0);
+
+        let mut cfg = test_config(BTreeMap::new());
+        let slots = crate::update::Slots::new(dir.path());
+        let policy = test_policy();
+        let mut svcs: Vec<Service> = Vec::new();
+
+        let (rtx, rrx) = channel();
+        let mut c = ctx(&sys, &mut cfg, &cfg_path, dir.path(), &slots, &policy);
+        handle_toggle_service(&mut c, &mut svcs, "telnetd".into(), true, &rtx);
+
+        assert_eq!(rrx.recv().expect("reply"), control::ToggleOutcome::Ok);
+        assert!(cfg.system.telnet);
+    }
+
+    #[test]
+    fn test_toggle_telnet_disable_persists_then_killalls() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let cfg_path = dir.path().join("anyka.toml");
+        std::fs::write(&cfg_path, "[system]\ntelnet = true\n").expect("seed");
+
+        let mut sys = MockSys::new();
+        sys.expect_run_to_completion()
+            .times(1)
+            .returning(|prog, _| {
+                assert_eq!(prog, "killall");
+                // killall exits non-zero when nothing matched — success here.
+                Ok(crate::sys::ExitStatus::Code(1))
+            });
+        sys.expect_spawn_detached().times(0);
+
+        let mut cfg = test_config(BTreeMap::new());
+        cfg.system.telnet = true;
+        let slots = crate::update::Slots::new(dir.path());
+        let policy = test_policy();
+        let mut svcs: Vec<Service> = Vec::new();
+
+        let (rtx, rrx) = channel();
+        let mut c = ctx(&sys, &mut cfg, &cfg_path, dir.path(), &slots, &policy);
+        handle_toggle_service(&mut c, &mut svcs, "telnetd".into(), false, &rtx);
+
+        assert_eq!(rrx.recv().expect("reply"), control::ToggleOutcome::Ok);
+        assert!(
+            std::fs::read_to_string(&cfg_path)
+                .expect("read")
+                .contains("telnet = false")
+        );
+        assert!(!cfg.system.telnet);
+    }
+
+    #[test]
+    fn test_toggle_telnet_write_failure_changes_nothing() {
+        // A directory where the config file should be: the read fails, so
+        // neither the file, the memory, nor any process may change.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let cfg_path = dir.path().join("anyka.toml");
+        std::fs::create_dir(&cfg_path).expect("mkdir");
+
+        let mut sys = MockSys::new();
+        sys.expect_run_to_completion().times(0);
+        sys.expect_spawn_detached().times(0);
+
+        let mut cfg = test_config(BTreeMap::new());
+        let slots = crate::update::Slots::new(dir.path());
+        let policy = test_policy();
+        let mut svcs: Vec<Service> = Vec::new();
+
+        let (rtx, rrx) = channel();
+        let mut c = ctx(&sys, &mut cfg, &cfg_path, dir.path(), &slots, &policy);
+        handle_toggle_service(&mut c, &mut svcs, "telnetd".into(), true, &rtx);
+
+        assert_eq!(rrx.recv().expect("reply"), control::ToggleOutcome::Error);
+        assert!(!cfg.system.telnet);
     }
 }
