@@ -2120,3 +2120,36 @@ rtk git push
 **Type consistency:** `ToggleOutcome` (anyka-init) and `ToggleReply` (onvif-rust) are deliberately distinct — two crates, no shared code, each named for its own side. `SvcState::Disabled` is fieldless and used identically in Tasks 2/4/5. State strings are `"running" | "backoff" | "disabled"` on both sides of the socket and in the TS doc. `handle_query_status(cfg, services, reply_tx)` matches its call-site update in Task 5. `serviceAction`'s three action values match the three route segments exactly.
 
 **Ordering:** 2 → 3 → 4 depend on each other's declarations. Task 3's temporary `dispatch_msg` arm must be **replaced** by Task 4's, not duplicated. Task 4's `LoopCtx` refactor is its own green checkpoint before the handler lands — if the argument-count gate is going to fail, it fails there, cheaply.
+
+---
+
+## Field Notes — 192.168.2.198 (2026-09-20)
+
+**Telnet row, on-device.** `GET /api/processes` shows the synthesized row
+(`telnetd disabled` on a healthy boot, `running` with a real pid after
+enable). `POST /api/services/telnetd/enable` → 202, port 24 opens,
+`[system].telnet = true` in `/mnt/anyka_hack/anyka.toml`; disable → 202,
+port closes, file back to `false`. The choice survived a full reboot plus
+slot flip (the bundle never touches `anyka.toml`), so it is durable across
+upgrades and reverts. Camera left at shipped defaults (telnet disabled).
+
+**One unplanned fix shipped in the same bundle (8fd0643a).** The
+deployment reboot dead-booted the camera for ~30 min: on that boot our
+P2 bring-up won the wifi race ("recovered on the baseline config"), so
+the P3 handover killed the bring-up supplicant — but the vendor
+`wifi_run.sh` respawn loop refilled it within a second, and the
+supervised `wpa_supplicant` then exited 255 on every restart against the
+held ctrl socket until the wifi deadman restored the vendor boot path.
+Fix: the supervised service now exec's `/mnt/anyka_hack/kill-wpa.sh`
+(re-runs both killalls — supplicant and respawn loop — then exec's the
+real binary), the handover kills `wifi_run.sh` before the supplicant,
+and `patch_driver_arg` accepts the combined `-Dnl80211` form used by
+older on-device `anyka.toml` files. Boot is now stable on both arms of
+the race; the camera recovered without further intervention.
+
+**One access wrinkle worth keeping.** The deployed build at the time
+(`beca7e48`) still carried the pre-review-finding toggle handler that
+pre-flights the name against the supervised snapshot, so
+`POST /api/services/telnetd/enable` 404'd there — the telnet special
+case in anyka-init was unreachable through onvif-rust. It works from
+`8fd0643a` (the review fix that made the toggle a single round-trip).
