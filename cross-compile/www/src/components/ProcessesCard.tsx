@@ -33,7 +33,6 @@ import {
   type ServiceAction,
   type ServiceStatus,
   getProcesses,
-  restartService,
   serviceAction,
 } from '@/services/processesService';
 import { formatDuration } from '@/utils/formatDuration';
@@ -63,10 +62,8 @@ const DISABLE_COPY: Record<string, string> = {
 
 // telnetd is the one non-supervised row: the default enable copy ("supervisor
 // backoff policy") is a lie for it, so it gets its own.
-const ENABLE_COPY: Record<string, string> = {
-  telnetd:
-    'The recovery telnet (port 24) starts now and stays up across reboots. It hands a root shell to anything on the LAN — enable only while you need it.',
-};
+const TELNET_ENABLE_COPY =
+  'The recovery telnet (port 24) starts now and stays up across reboots. It hands a root shell to anything on the LAN — enable only while you need it.';
 
 const DEFAULT_ENABLE_COPY =
   'The service starts immediately under the normal supervisor backoff policy.';
@@ -86,27 +83,27 @@ function actionDescription(p: NonNullable<PendingAction>): string {
       : 'The supervisor sends SIGTERM; the service is restarted under its normal backoff policy.';
   }
   if (p.action === 'enable') {
-    return ENABLE_COPY[p.service.name] ?? DEFAULT_ENABLE_COPY;
+    return p.service.name === 'telnetd' ? TELNET_ENABLE_COPY : DEFAULT_ENABLE_COPY;
   }
   return (
     DISABLE_COPY[p.service.name] ?? 'The service stops and will not run again until re-enabled.'
   );
 }
 
+// Anything that is neither running nor disabled is backoff — amber.
+const STATE_TONE: Record<string, string> = {
+  running: 'border-transparent bg-green-500/10 text-green-500',
+  disabled: 'border-transparent bg-zinc-500/10 text-zinc-400',
+};
+const BACKOFF_TONE = 'border-transparent bg-amber-500/10 text-amber-500';
+
 function ServiceStateBadge({ service }: Readonly<{ service: ServiceStatus }>) {
-  const state = service.state;
   return (
     <Badge
-      className={
-        state === 'running'
-          ? 'border-transparent bg-green-500/10 text-green-500'
-          : state === 'disabled'
-            ? 'border-transparent bg-zinc-500/10 text-zinc-400'
-            : 'border-transparent bg-amber-500/10 text-amber-500'
-      }
+      className={STATE_TONE[service.state] ?? BACKOFF_TONE}
       data-testid={`diagnostics-processes-status-${service.name}`}
     >
-      {state}
+      {service.state}
     </Badge>
   );
 }
@@ -140,7 +137,7 @@ export default function ProcessesCard() {
     async (service: ServiceStatus) => {
       if (service.name !== 'onvif') {
         try {
-          await restartService(service.name);
+          await serviceAction(service.name, 'restart');
           toast.success(`Restart requested for ${service.name}`);
           invalidate();
         } catch (err) {
@@ -159,7 +156,7 @@ export default function ProcessesCard() {
       setReconnecting(true);
       try {
         try {
-          await restartService(service.name);
+          await serviceAction(service.name, 'restart');
         } catch (err) {
           if (err instanceof Error && isAbortError(err)) throw err;
           if (err instanceof Error && err.name === 'ApiError') {
@@ -185,44 +182,42 @@ export default function ProcessesCard() {
     [invalidate],
   );
 
-  const handleConfirm = useCallback(
-    async (e: React.MouseEvent) => {
-      e.preventDefault();
-      const p = pending;
-      if (!p) return;
-      setPending(null);
+  // The caller's onClick already preventDefault()s to keep the dialog open
+  // until the request settles.
+  const handleConfirm = useCallback(async () => {
+    const p = pending;
+    if (!p) return;
+    setPending(null);
 
-      if (p.action === 'restart') {
-        await runRestart(p.service);
-        return;
-      }
+    if (p.action === 'restart') {
+      await runRestart(p.service);
+      return;
+    }
 
-      // Disable/enable involves no reboot — except disabling onvif, which
-      // takes down the very HTTP server serving this page.
-      const isOnvifOff = p.action === 'disable' && p.service.name === 'onvif';
-      const reportOnvifOff = () => {
-        setOnvifOff(true);
-        toast.success('onvif disabled — the camera is reachable via FTP only');
-      };
-      try {
-        await serviceAction(p.service.name, p.action);
-        if (isOnvifOff) reportOnvifOff();
-        else toast.success(`${p.service.name} ${p.action === 'enable' ? 'enabled' : 'disabled'}`);
-        invalidate();
-      } catch (err) {
-        if (err instanceof Error && err.name === 'ApiError') {
-          toast.error(err.message);
-        } else if (isOnvifOff) {
-          // Network-level failure on an onvif disable: the only cause is the
-          // camera killing our own connection — i.e. it worked.
-          reportOnvifOff();
-        } else {
-          toast.error(err instanceof Error ? err.message : 'Toggle failed');
-        }
+    // Disable/enable involves no reboot — except disabling onvif, which
+    // takes down the very HTTP server serving this page.
+    const isOnvifOff = p.action === 'disable' && p.service.name === 'onvif';
+    const reportOnvifOff = () => {
+      setOnvifOff(true);
+      toast.success('onvif disabled — the camera is reachable via FTP only');
+    };
+    try {
+      await serviceAction(p.service.name, p.action);
+      if (isOnvifOff) reportOnvifOff();
+      else toast.success(`${p.service.name} ${p.action === 'enable' ? 'enabled' : 'disabled'}`);
+      invalidate();
+    } catch (err) {
+      if (err instanceof Error && err.name === 'ApiError') {
+        toast.error(err.message);
+      } else if (isOnvifOff) {
+        // Network-level failure on an onvif disable: the only cause is the
+        // camera killing our own connection — i.e. it worked.
+        reportOnvifOff();
+      } else {
+        toast.error(err instanceof Error ? err.message : 'Toggle failed');
       }
-    },
-    [invalidate, pending, runRestart],
-  );
+    }
+  }, [invalidate, pending, runRestart]);
 
   const supervised = data?.supervised ?? null;
 
@@ -299,6 +294,7 @@ export default function ProcessesCard() {
                     {supervised.map((service) => {
                       const isDisabled = service.state === 'disabled';
                       const toggleable = !NON_TOGGLEABLE.has(service.name);
+                      const toggle: ServiceAction = isDisabled ? 'enable' : 'disable';
                       return (
                         <tr
                           key={service.name}
@@ -352,26 +348,16 @@ export default function ProcessesCard() {
                                   Restart
                                 </Button>
                               )}
-                              {toggleable &&
-                                (isDisabled ? (
-                                  <Button
-                                    size="sm"
-                                    variant="outline"
-                                    data-testid={`diagnostics-processes-enable-${service.name}`}
-                                    onClick={() => setPending({ service, action: 'enable' })}
-                                  >
-                                    Enable
-                                  </Button>
-                                ) : (
-                                  <Button
-                                    size="sm"
-                                    variant="outline"
-                                    data-testid={`diagnostics-processes-disable-${service.name}`}
-                                    onClick={() => setPending({ service, action: 'disable' })}
-                                  >
-                                    Disable
-                                  </Button>
-                                ))}
+                              {toggleable && (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  data-testid={`diagnostics-processes-${toggle}-${service.name}`}
+                                  onClick={() => setPending({ service, action: toggle })}
+                                >
+                                  {ACTION_VERB[toggle]}
+                                </Button>
+                              )}
                             </div>
                           </td>
                         </tr>
@@ -472,7 +458,7 @@ export default function ProcessesCard() {
               data-testid="diagnostics-processes-action-confirm"
               onClick={(e) => {
                 e.preventDefault();
-                void handleConfirm(e);
+                void handleConfirm();
               }}
             >
               {pending ? ACTION_VERB[pending.action] : ''}

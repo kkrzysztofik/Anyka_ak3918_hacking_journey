@@ -325,6 +325,18 @@ const SUPPLICANT_BIN: &str = "/tmp/wpa_supplicant";
 /// Clears every ctrl-socket squatter, including the vendor wifi_run.sh
 /// respawn loop, before exec-ing the real supplicant.
 pub const KILL_WPA_SHIM: &str = "/mnt/anyka_hack/kill-wpa.sh";
+
+/// Rewire the supervised supplicant service through the shim, so it clears
+/// every remaining ctrl-socket squatter at its *own* start.
+///
+/// This closes the seconds-long gap between the handover's killall and the
+/// supervisor's spawn, in which the vendor respawn loop refills a killed wpa
+/// and the second instance exits 255 forever — the 192.168.2.198 outage of
+/// 2026-09-20.
+pub fn wire_kill_shim(svc: &mut crate::config::ServiceCfg) {
+    svc.exec = "/bin/sh".into();
+    svc.args.insert(0, KILL_WPA_SHIM.into());
+}
 pub const DRIVER_PROBE_ORDER: [&str; 2] = ["nl80211", "wext"];
 const BUSYBOX: &str = "/bin/busybox";
 const SYS_CLASS_NET: &str = "/sys/class/net";

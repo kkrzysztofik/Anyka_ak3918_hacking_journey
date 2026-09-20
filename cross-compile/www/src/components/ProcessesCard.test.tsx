@@ -11,7 +11,6 @@ import {
   type ProcessesResponse,
   type ServiceStatus,
   getProcesses,
-  restartService,
   serviceAction,
 } from '@/services/processesService';
 import { mockToast, renderWithProviders, waitForPageLoad } from '@/test/componentTestHelpers';
@@ -20,7 +19,6 @@ import ProcessesCard from './ProcessesCard';
 
 vi.mock('@/services/processesService', () => ({
   getProcesses: vi.fn(),
-  restartService: vi.fn(),
   serviceAction: vi.fn(),
 }));
 
@@ -126,9 +124,9 @@ describe('ProcessesCard', () => {
     expect(screen.getByTestId('diagnostics-processes-action-title')).toHaveTextContent('snmp');
   });
 
-  it('should call restartService with the service name on confirm', async () => {
+  it('should call serviceAction with restart on confirm', async () => {
     const user = userEvent.setup();
-    vi.mocked(restartService).mockResolvedValue(undefined);
+    vi.mocked(serviceAction).mockResolvedValue(undefined);
     renderWithProviders(<ProcessesCard />);
     await waitForPageLoad('diagnostics-processes-title');
     await waitFor(() =>
@@ -138,7 +136,7 @@ describe('ProcessesCard', () => {
     await user.click(screen.getByTestId('diagnostics-processes-restart-snmp'));
     await user.click(screen.getByTestId('diagnostics-processes-action-confirm'));
 
-    await waitFor(() => expect(restartService).toHaveBeenCalledWith('snmp'));
+    await waitFor(() => expect(serviceAction).toHaveBeenCalledWith('snmp', 'restart'));
     await waitFor(() =>
       expect(mockToast.success).toHaveBeenCalledWith('Restart requested for snmp'),
     );
@@ -166,7 +164,7 @@ describe('ProcessesCard', () => {
     vi.mocked(waitForCameraBack).mockReturnValue(
       pending as unknown as ReturnType<typeof waitForCameraBack>,
     );
-    vi.mocked(restartService).mockResolvedValue(undefined);
+    vi.mocked(serviceAction).mockResolvedValue(undefined);
     renderWithProviders(<ProcessesCard />);
     await waitForPageLoad('diagnostics-processes-title');
     await waitFor(() =>
@@ -265,27 +263,21 @@ describe('ProcessesCard service toggling', () => {
     await waitFor(() => expect(serviceAction).toHaveBeenCalledWith('snmp', 'enable'));
   });
 
-  it('warns that disabling vendor-daemon stops video', async () => {
-    vi.mocked(getProcesses).mockResolvedValue(
-      supervisedFixture([{ ...SNMP, name: 'vendor-daemon' }]),
-    );
+  // Every branch of actionDescription, including the default enable copy.
+  it.each([
+    ['vendor-daemon', 'disable', 'running', 'streams go dead'],
+    ['onvif', 'disable', 'running', 'only reachable via FTP'],
+    ['telnetd', 'disable', 'running', 'recovery telnet (port 24)'],
+    ['telnetd', 'enable', 'disabled', 'root shell'],
+    ['snmp', 'enable', 'disabled', 'normal supervisor backoff policy'],
+  ] as const)('%s / %s names its consequence', async (name, action, state, expected) => {
+    vi.mocked(getProcesses).mockResolvedValue(supervisedFixture([{ ...SNMP, name, state }]));
     renderWithProviders(<ProcessesCard />);
     await waitForPageLoad('diagnostics-processes-title');
     const user = userEvent.setup();
-    await user.click(await screen.findByTestId('diagnostics-processes-disable-vendor-daemon'));
+    await user.click(await screen.findByTestId(`diagnostics-processes-${action}-${name}`));
     expect(screen.getByTestId('diagnostics-processes-action-description')).toHaveTextContent(
-      'streams go dead',
-    );
-  });
-
-  it('shows the onvif consequence copy when disabling onvif', async () => {
-    vi.mocked(getProcesses).mockResolvedValue(supervisedFixture([{ ...SNMP, name: 'onvif' }]));
-    renderWithProviders(<ProcessesCard />);
-    await waitForPageLoad('diagnostics-processes-title');
-    const user = userEvent.setup();
-    await user.click(await screen.findByTestId('diagnostics-processes-disable-onvif'));
-    expect(screen.getByTestId('diagnostics-processes-action-description')).toHaveTextContent(
-      'only reachable via FTP',
+      expected,
     );
   });
 
@@ -369,34 +361,21 @@ describe('ProcessesCard telnet row', () => {
     expect(screen.getByTestId('diagnostics-processes-row-telnetd')).toHaveClass('opacity-50');
   });
 
-  it('disabling telnetd shows the recovery-channel consequence and calls serviceAction', async () => {
-    vi.mocked(getProcesses).mockResolvedValue(supervisedFixture([SNMP, TELNET_ON]));
+  // The consequence copy for both directions is covered by the table above.
+  it.each([
+    ['disable', TELNET_ON],
+    ['enable', TELNET_OFF],
+  ] as const)('%s telnetd routes to serviceAction', async (action, row) => {
+    vi.mocked(getProcesses).mockResolvedValue(supervisedFixture([SNMP, row]));
     vi.mocked(serviceAction).mockResolvedValue(undefined);
     renderWithProviders(<ProcessesCard />);
     await waitForPageLoad('diagnostics-processes-title');
     const user = userEvent.setup();
-    await user.click(await screen.findByTestId('diagnostics-processes-disable-telnetd'));
+    await user.click(await screen.findByTestId(`diagnostics-processes-${action}-telnetd`));
     expect(screen.getByTestId('diagnostics-processes-action-title')).toHaveTextContent(
-      'Disable telnetd?',
-    );
-    expect(screen.getByTestId('diagnostics-processes-action-description')).toHaveTextContent(
-      'recovery telnet (port 24)',
+      `${action === 'disable' ? 'Disable' : 'Enable'} telnetd?`,
     );
     await user.click(screen.getByTestId('diagnostics-processes-action-confirm'));
-    await waitFor(() => expect(serviceAction).toHaveBeenCalledWith('telnetd', 'disable'));
-  });
-
-  it('enabling telnetd warns that it is a root shell on the LAN', async () => {
-    vi.mocked(getProcesses).mockResolvedValue(supervisedFixture([SNMP, TELNET_OFF]));
-    vi.mocked(serviceAction).mockResolvedValue(undefined);
-    renderWithProviders(<ProcessesCard />);
-    await waitForPageLoad('diagnostics-processes-title');
-    const user = userEvent.setup();
-    await user.click(await screen.findByTestId('diagnostics-processes-enable-telnetd'));
-    expect(screen.getByTestId('diagnostics-processes-action-description')).toHaveTextContent(
-      'root shell',
-    );
-    await user.click(screen.getByTestId('diagnostics-processes-action-confirm'));
-    await waitFor(() => expect(serviceAction).toHaveBeenCalledWith('telnetd', 'enable'));
+    await waitFor(() => expect(serviceAction).toHaveBeenCalledWith('telnetd', action));
   });
 });

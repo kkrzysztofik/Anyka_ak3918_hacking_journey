@@ -137,17 +137,3 @@ export async function serviceAction(name: string, action: ServiceAction): Promis
     text,
   );
 }
-
-/**
- * Request a supervised-service restart.
- *
- * 202 means accepted, not completed: the supervisor SIGTERMs and the normal
- * exit path restarts under backoff. A 404 (unknown service), 409 (service is
- * disabled) or 503 (supervisor unreachable) throws. A network-level failure —
- * the camera dropping the connection as it goes down, expected for `onvif` —
- * surfaces as a TypeError from fetch, not an ApiError, so callers can tell
- * the two apart.
- */
-export async function restartService(name: string): Promise<void> {
-  return serviceAction(name, 'restart');
-}

@@ -178,8 +178,7 @@ pub fn hand_over_supplicant(sys: &dyn Sys, cfg: &mut Config, probed: SupplicantO
             if let Some(svc) = cfg.services.get_mut("wpa_supplicant")
                 && svc.enabled
             {
-                svc.exec = "/bin/sh".into();
-                svc.args.insert(0, crate::wifi::KILL_WPA_SHIM.into());
+                crate::wifi::wire_kill_shim(svc);
             }
         }
     }
@@ -230,14 +229,7 @@ fn take_over_supplicant(sys: &dyn Sys, cfg: &mut Config, driver: &'static str) {
              wpa_supplicant this boot"
         );
     } else {
-        // The service clears every remaining squatter at its own start: the
-        // shim re-runs both killalls (including the respawn loop) and only
-        // then exec's the real supplicant. This closes the seconds-long gap
-        // between this killall and the supervisor's spawn, in which the
-        // vendor loop refills a killed wpa and the second instance exits 255
-        // forever — the 192.168.2.198 outage of 2026-09-20.
-        svc.exec = "/bin/sh".into();
-        svc.args.insert(0, crate::wifi::KILL_WPA_SHIM.into());
+        crate::wifi::wire_kill_shim(svc);
     }
 }
 

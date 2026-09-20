@@ -1232,266 +1232,218 @@ mod run_tests {
         handle.join().expect("run() must not panic");
     }
 
-    #[test]
-    fn test_toggle_disable_persists_then_kills_and_inerts() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let cfg_path = dir.path().join("anyka.toml");
-        std::fs::write(
-            &cfg_path,
-            "[services.snmp]\nenabled = true\nexec = \"/bin/true\"\n",
-        )
-        .expect("seed");
+    /// Everything a `handle_toggle_service` call needs, owned so the tempdir
+    /// outlives the borrow. Ten tests differed only in the seed, the
+    /// configured services and which ones were running.
+    struct ToggleFixture {
+        dir: tempfile::TempDir,
+        cfg_path: std::path::PathBuf,
+        cfg: Config,
+        slots: crate::update::Slots,
+        policy: Policy,
+        svcs: Vec<Service>,
+    }
 
+    impl ToggleFixture {
+        fn build(
+            cfg_path: std::path::PathBuf,
+            dir: tempfile::TempDir,
+            configured: &[(&str, bool)],
+            running: &[(&str, i32)],
+        ) -> Self {
+            let mut services = BTreeMap::new();
+            for (name, enabled) in configured {
+                services.insert((*name).to_string(), svc_cfg("/bin/true", *enabled));
+            }
+            let slots = crate::update::Slots::new(dir.path());
+            Self {
+                cfg: test_config(services),
+                svcs: running
+                    .iter()
+                    .map(|(name, pid)| Service {
+                        name: (*name).into(),
+                        spec: dummy_spec(),
+                        state: SvcState::Running {
+                            pid: *pid,
+                            since: Instant::now(),
+                        },
+                        hist: RestartHistory::default(),
+                    })
+                    .collect(),
+                policy: test_policy(),
+                slots,
+                cfg_path,
+                dir,
+            }
+        }
+
+        fn new(seed: &str, configured: &[(&str, bool)], running: &[(&str, i32)]) -> Self {
+            let dir = tempfile::tempdir().expect("tempdir");
+            let cfg_path = dir.path().join("anyka.toml");
+            std::fs::write(&cfg_path, seed).expect("seed");
+            Self::build(cfg_path, dir, configured, running)
+        }
+
+        /// A fixture whose config cannot be read: the path sits in a directory
+        /// that does not exist, so the read fails before anything is touched.
+        /// (chmod is not a reliable lever: CI may run as root.)
+        fn unreadable(configured: &[(&str, bool)], running: &[(&str, i32)]) -> Self {
+            let dir = tempfile::tempdir().expect("tempdir");
+            let cfg_path = dir.path().join("no-such-dir").join("anyka.toml");
+            Self::build(cfg_path, dir, configured, running)
+        }
+
+        fn toggle(&mut self, sys: &dyn Sys, name: &str, enabled: bool) -> control::ToggleOutcome {
+            let (rtx, rrx) = channel();
+            let mut c = ctx(
+                sys,
+                &mut self.cfg,
+                &self.cfg_path,
+                self.dir.path(),
+                &self.slots,
+                &self.policy,
+            );
+            handle_toggle_service(&mut c, &mut self.svcs, name.into(), enabled, &rtx);
+            rrx.recv().expect("reply")
+        }
+
+        fn text(&self) -> String {
+            std::fs::read_to_string(&self.cfg_path).expect("read")
+        }
+    }
+
+    /// A MockSys that only knows what time it is.
+    fn clock_only_sys() -> MockSys {
         let mut sys = MockSys::new();
         sys.expect_now().returning(Instant::now);
+        sys
+    }
+
+    #[test]
+    fn test_toggle_disable_persists_then_kills_and_inerts() {
+        let mut sys = clock_only_sys();
         sys.expect_kill()
             .withf(|pid, sig| *pid == 55 && *sig == libc::SIGTERM)
             .times(1)
             .returning(|_, _| Ok(()));
 
-        let mut services = BTreeMap::new();
-        services.insert("snmp".to_string(), svc_cfg("/bin/true", true));
-        let mut cfg = test_config(services);
-        let slots = crate::update::Slots::new(dir.path());
-        let policy = test_policy();
-        let mut svcs = vec![Service {
-            name: "snmp".into(),
-            spec: dummy_spec(),
-            state: SvcState::Running {
-                pid: 55,
-                since: Instant::now(),
-            },
-            hist: RestartHistory::default(),
-        }];
-
-        let (rtx, rrx) = channel();
-        let mut c = ctx(&sys, &mut cfg, &cfg_path, dir.path(), &slots, &policy);
-        handle_toggle_service(&mut c, &mut svcs, "snmp".into(), false, &rtx);
-
-        assert_eq!(rrx.recv().expect("reply"), control::ToggleOutcome::Ok);
-        // File first.
-        assert!(
-            std::fs::read_to_string(&cfg_path)
-                .expect("read")
-                .contains("enabled = false")
+        let mut fx = ToggleFixture::new(
+            "[services.snmp]\nenabled = true\nexec = \"/bin/true\"\n",
+            &[("snmp", true)],
+            &[("snmp", 55)],
         );
-        assert!(!cfg.services["snmp"].enabled);
-        assert_eq!(svcs[0].state, SvcState::Disabled);
+
+        assert_eq!(fx.toggle(&sys, "snmp", false), control::ToggleOutcome::Ok);
+        // File first.
+        assert!(fx.text().contains("enabled = false"));
+        assert!(!fx.cfg.services["snmp"].enabled);
+        assert_eq!(fx.svcs[0].state, SvcState::Disabled);
     }
 
     #[test]
     fn test_toggle_enable_a_boot_time_disabled_service_inserts_it() {
         // dropbear is the shipped case: disabled in the file, never in the vec.
-        let dir = tempfile::tempdir().expect("tempdir");
-        let cfg_path = dir.path().join("anyka.toml");
-        std::fs::write(
-            &cfg_path,
+        let sys = clock_only_sys();
+        let mut fx = ToggleFixture::new(
             "[services.dropbear]\nenabled = false\nexec = \"/bin/true\"\n",
-        )
-        .expect("seed");
-
-        let mut sys = MockSys::new();
-        sys.expect_now().returning(Instant::now);
-
-        let mut services = BTreeMap::new();
-        services.insert("dropbear".to_string(), svc_cfg("/bin/true", false));
-        let mut cfg = test_config(services);
-        let slots = crate::update::Slots::new(dir.path());
-        let policy = test_policy();
-        let mut svcs: Vec<Service> = Vec::new();
-
-        let (rtx, rrx) = channel();
-        let mut c = ctx(&sys, &mut cfg, &cfg_path, dir.path(), &slots, &policy);
-        handle_toggle_service(&mut c, &mut svcs, "dropbear".into(), true, &rtx);
-
-        assert_eq!(rrx.recv().expect("reply"), control::ToggleOutcome::Ok);
-        assert!(
-            std::fs::read_to_string(&cfg_path)
-                .expect("read")
-                .contains("enabled = true")
+            &[("dropbear", false)],
+            &[],
         );
+
+        assert_eq!(
+            fx.toggle(&sys, "dropbear", true),
+            control::ToggleOutcome::Ok
+        );
+        assert!(fx.text().contains("enabled = true"));
         // Inserted exactly as build_enabled_services would: boot-start state.
-        assert_eq!(svcs.len(), 1);
-        assert_eq!(svcs[0].name, "dropbear");
+        assert_eq!(fx.svcs.len(), 1);
+        assert_eq!(fx.svcs[0].name, "dropbear");
         assert!(matches!(
-            svcs[0].state,
+            fx.svcs[0].state,
             SvcState::Backoff { attempt: 0, .. }
         ));
     }
 
     #[test]
     fn test_toggle_unknown_service_replies_unknown_and_writes_nothing() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let cfg_path = dir.path().join("anyka.toml");
-        let before = "[services.snmp]\nenabled = true\nexec = \"/bin/true\"\n".to_string();
-        std::fs::write(&cfg_path, &before).expect("seed");
+        let sys = clock_only_sys();
+        let before = "[services.snmp]\nenabled = true\nexec = \"/bin/true\"\n";
+        let mut fx = ToggleFixture::new(before, &[("snmp", true)], &[("snmp", 55)]);
 
-        let mut sys = MockSys::new();
-        sys.expect_now().returning(Instant::now);
-
-        let mut services = BTreeMap::new();
-        services.insert("snmp".to_string(), svc_cfg("/bin/true", true));
-        let mut cfg = test_config(services);
-        let slots = crate::update::Slots::new(dir.path());
-        let policy = test_policy();
-        let mut svcs = vec![Service {
-            name: "snmp".into(),
-            spec: dummy_spec(),
-            state: SvcState::Running {
-                pid: 55,
-                since: Instant::now(),
-            },
-            hist: RestartHistory::default(),
-        }];
-
-        let (rtx, rrx) = channel();
-        let mut c = ctx(&sys, &mut cfg, &cfg_path, dir.path(), &slots, &policy);
-        handle_toggle_service(&mut c, &mut svcs, "nope".into(), false, &rtx);
-
-        assert_eq!(rrx.recv().expect("reply"), control::ToggleOutcome::Unknown);
-        assert_eq!(std::fs::read_to_string(&cfg_path).expect("read"), before);
+        assert_eq!(
+            fx.toggle(&sys, "nope", false),
+            control::ToggleOutcome::Unknown
+        );
+        assert_eq!(fx.text(), before);
     }
 
     #[test]
     fn test_toggle_of_wpa_supplicant_is_refused() {
         // Configured and enabled, but not toggleable: disabling it would let the
         // monitor's wifi ladder reboot the camera, and there is no way back in.
-        let dir = tempfile::tempdir().expect("tempdir");
-        let cfg_path = dir.path().join("anyka.toml");
-        let before =
-            "[services.wpa_supplicant]\nenabled = true\nexec = \"/bin/true\"\n".to_string();
-        std::fs::write(&cfg_path, &before).expect("seed");
+        let sys = clock_only_sys();
+        let before = "[services.wpa_supplicant]\nenabled = true\nexec = \"/bin/true\"\n";
+        let mut fx = ToggleFixture::new(
+            before,
+            &[("wpa_supplicant", true)],
+            &[("wpa_supplicant", 55)],
+        );
 
-        let mut sys = MockSys::new();
-        sys.expect_now().returning(Instant::now);
-
-        let mut services = BTreeMap::new();
-        services.insert("wpa_supplicant".to_string(), svc_cfg("/bin/true", true));
-        let mut cfg = test_config(services);
-        let slots = crate::update::Slots::new(dir.path());
-        let policy = test_policy();
-        let mut svcs = vec![Service {
-            name: "wpa_supplicant".into(),
-            spec: dummy_spec(),
-            state: SvcState::Running {
-                pid: 55,
-                since: Instant::now(),
-            },
-            hist: RestartHistory::default(),
-        }];
-
-        let (rtx, rrx) = channel();
-        let mut c = ctx(&sys, &mut cfg, &cfg_path, dir.path(), &slots, &policy);
-        handle_toggle_service(&mut c, &mut svcs, "wpa_supplicant".into(), false, &rtx);
-
-        assert_eq!(rrx.recv().expect("reply"), control::ToggleOutcome::Unknown);
-        assert_eq!(std::fs::read_to_string(&cfg_path).expect("read"), before);
-        assert!(cfg.services["wpa_supplicant"].enabled);
+        assert_eq!(
+            fx.toggle(&sys, "wpa_supplicant", false),
+            control::ToggleOutcome::Unknown
+        );
+        assert_eq!(fx.text(), before);
+        assert!(fx.cfg.services["wpa_supplicant"].enabled);
     }
 
     #[test]
     fn test_toggle_is_an_idempotent_noop_when_already_in_that_state() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let cfg_path = dir.path().join("anyka.toml");
-        let before = "[services.snmp]\nenabled = false\nexec = \"/bin/true\"\n".to_string();
-        std::fs::write(&cfg_path, &before).expect("seed");
-
         // MockSys with no kill expectation — calling it would fail the test.
         let sys = MockSys::new();
+        let before = "[services.snmp]\nenabled = false\nexec = \"/bin/true\"\n";
+        let mut fx = ToggleFixture::new(before, &[("snmp", false)], &[]);
 
-        let mut services = BTreeMap::new();
-        services.insert("snmp".to_string(), svc_cfg("/bin/true", false));
-        let mut cfg = test_config(services);
-        let slots = crate::update::Slots::new(dir.path());
-        let policy = test_policy();
-        let mut svcs: Vec<Service> = Vec::new();
-
-        let (rtx, rrx) = channel();
-        let mut c = ctx(&sys, &mut cfg, &cfg_path, dir.path(), &slots, &policy);
-        handle_toggle_service(&mut c, &mut svcs, "snmp".into(), false, &rtx);
-
-        assert_eq!(rrx.recv().expect("reply"), control::ToggleOutcome::Ok);
-        assert_eq!(std::fs::read_to_string(&cfg_path).expect("read"), before);
+        assert_eq!(fx.toggle(&sys, "snmp", false), control::ToggleOutcome::Ok);
+        assert_eq!(fx.text(), before);
     }
 
     #[test]
     fn test_toggle_replies_error_and_changes_nothing_when_the_write_fails() {
-        // Force the failure with a config_path inside a directory that does not
-        // exist, so the read fails before anything is touched. (chmod is not a
-        // reliable lever: CI may run as root.)
-        let dir = tempfile::tempdir().expect("tempdir");
-        let cfg_path = dir.path().join("no-such-dir").join("anyka.toml");
+        let sys = clock_only_sys();
+        let mut fx = ToggleFixture::unreadable(&[("snmp", true)], &[("snmp", 55)]);
 
-        let mut sys = MockSys::new();
-        sys.expect_now().returning(Instant::now);
-
-        let mut services = BTreeMap::new();
-        services.insert("snmp".to_string(), svc_cfg("/bin/true", true));
-        let mut cfg = test_config(services);
-        let slots = crate::update::Slots::new(dir.path());
-        let policy = test_policy();
-        let mut svcs = vec![Service {
-            name: "snmp".into(),
-            spec: dummy_spec(),
-            state: SvcState::Running {
-                pid: 55,
-                since: Instant::now(),
-            },
-            hist: RestartHistory::default(),
-        }];
-
-        let (rtx, rrx) = channel();
-        let mut c = ctx(&sys, &mut cfg, &cfg_path, dir.path(), &slots, &policy);
-        handle_toggle_service(&mut c, &mut svcs, "snmp".into(), false, &rtx);
-
-        assert_eq!(rrx.recv().expect("reply"), control::ToggleOutcome::Error);
-        assert!(cfg.services["snmp"].enabled); // in-memory untouched
-        assert!(matches!(svcs[0].state, SvcState::Running { .. }));
+        assert_eq!(
+            fx.toggle(&sys, "snmp", false),
+            control::ToggleOutcome::Error
+        );
+        assert!(fx.cfg.services["snmp"].enabled); // in-memory untouched
+        assert!(matches!(fx.svcs[0].state, SvcState::Running { .. }));
     }
 
     #[test]
     fn test_disabling_vendor_daemon_removes_the_video_heartbeat() {
         // Without this the monitor keeps reading a stale counter and reboots
         // the camera five ticks later — the exact thing disabling is meant to stop.
-        let dir = tempfile::tempdir().expect("tempdir");
-        let hb = dir.path().join("video.heartbeat");
-        std::fs::write(&hb, "12345\n").expect("seed heartbeat");
-
-        let cfg_path = dir.path().join("anyka.toml");
-        std::fs::write(
-            &cfg_path,
-            "[services.vendor-daemon]\nenabled = true\nexec = \"/bin/true\"\n",
-        )
-        .expect("seed");
-
-        let mut sys = MockSys::new();
-        sys.expect_now().returning(Instant::now);
+        let mut sys = clock_only_sys();
         sys.expect_kill()
             .withf(|pid, sig| *pid == 77 && *sig == libc::SIGTERM)
             .times(1)
             .returning(|_, _| Ok(()));
 
-        let mut services = BTreeMap::new();
-        services.insert("vendor-daemon".to_string(), svc_cfg("/bin/true", true));
-        let mut cfg = test_config(services);
-        cfg.monitor.video_heartbeat_path = hb.display().to_string();
-        let slots = crate::update::Slots::new(dir.path());
-        let policy = test_policy();
-        let mut svcs = vec![Service {
-            name: "vendor-daemon".into(),
-            spec: dummy_spec(),
-            state: SvcState::Running {
-                pid: 77,
-                since: Instant::now(),
-            },
-            hist: RestartHistory::default(),
-        }];
+        let mut fx = ToggleFixture::new(
+            "[services.vendor-daemon]\nenabled = true\nexec = \"/bin/true\"\n",
+            &[("vendor-daemon", true)],
+            &[("vendor-daemon", 77)],
+        );
+        let hb = fx.dir.path().join("video.heartbeat");
+        std::fs::write(&hb, "12345\n").expect("seed heartbeat");
+        fx.cfg.monitor.video_heartbeat_path = hb.display().to_string();
 
-        let (rtx, rrx) = channel();
-        let mut c = ctx(&sys, &mut cfg, &cfg_path, dir.path(), &slots, &policy);
-        handle_toggle_service(&mut c, &mut svcs, "vendor-daemon".into(), false, &rtx);
-
-        assert_eq!(rrx.recv().expect("reply"), control::ToggleOutcome::Ok);
+        assert_eq!(
+            fx.toggle(&sys, "vendor-daemon", false),
+            control::ToggleOutcome::Ok
+        );
         assert!(!hb.exists());
     }
 
@@ -1546,10 +1498,6 @@ mod run_tests {
 
     #[test]
     fn test_toggle_telnet_enable_persists_then_spawns() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let cfg_path = dir.path().join("anyka.toml");
-        std::fs::write(&cfg_path, "[system]\ntelnet = false\n").expect("seed");
-
         let mut sys = MockSys::new();
         sys.expect_run_to_completion()
             .times(1)
@@ -1574,32 +1522,17 @@ mod run_tests {
                 Ok(77)
             });
 
-        let mut cfg = test_config(BTreeMap::new());
-        let slots = crate::update::Slots::new(dir.path());
-        let policy = test_policy();
-        let mut svcs: Vec<Service> = Vec::new();
+        let mut fx = ToggleFixture::new("[system]\ntelnet = false\n", &[], &[]);
 
-        let (rtx, rrx) = channel();
-        let mut c = ctx(&sys, &mut cfg, &cfg_path, dir.path(), &slots, &policy);
-        handle_toggle_service(&mut c, &mut svcs, "telnetd".into(), true, &rtx);
-
-        assert_eq!(rrx.recv().expect("reply"), control::ToggleOutcome::Ok);
+        assert_eq!(fx.toggle(&sys, "telnetd", true), control::ToggleOutcome::Ok);
         // File first, then memory — and never a supervised service.
-        assert!(
-            std::fs::read_to_string(&cfg_path)
-                .expect("read")
-                .contains("telnet = true")
-        );
-        assert!(cfg.system.telnet);
-        assert_eq!(svcs.len(), 0);
+        assert!(fx.text().contains("telnet = true"));
+        assert!(fx.cfg.system.telnet);
+        assert_eq!(fx.svcs.len(), 0);
     }
 
     #[test]
     fn test_toggle_telnet_enable_is_idempotent_when_already_running() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let cfg_path = dir.path().join("anyka.toml");
-        std::fs::write(&cfg_path, "[system]\ntelnet = false\n").expect("seed");
-
         let mut sys = MockSys::new();
         sys.expect_run_to_completion()
             .times(1)
@@ -1610,25 +1543,14 @@ mod run_tests {
             });
         sys.expect_spawn_detached().times(0);
 
-        let mut cfg = test_config(BTreeMap::new());
-        let slots = crate::update::Slots::new(dir.path());
-        let policy = test_policy();
-        let mut svcs: Vec<Service> = Vec::new();
+        let mut fx = ToggleFixture::new("[system]\ntelnet = false\n", &[], &[]);
 
-        let (rtx, rrx) = channel();
-        let mut c = ctx(&sys, &mut cfg, &cfg_path, dir.path(), &slots, &policy);
-        handle_toggle_service(&mut c, &mut svcs, "telnetd".into(), true, &rtx);
-
-        assert_eq!(rrx.recv().expect("reply"), control::ToggleOutcome::Ok);
-        assert!(cfg.system.telnet);
+        assert_eq!(fx.toggle(&sys, "telnetd", true), control::ToggleOutcome::Ok);
+        assert!(fx.cfg.system.telnet);
     }
 
     #[test]
     fn test_toggle_telnet_disable_persists_then_killalls() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let cfg_path = dir.path().join("anyka.toml");
-        std::fs::write(&cfg_path, "[system]\ntelnet = true\n").expect("seed");
-
         let mut sys = MockSys::new();
         sys.expect_run_to_completion()
             .times(1)
@@ -1639,47 +1561,31 @@ mod run_tests {
             });
         sys.expect_spawn_detached().times(0);
 
-        let mut cfg = test_config(BTreeMap::new());
-        cfg.system.telnet = true;
-        let slots = crate::update::Slots::new(dir.path());
-        let policy = test_policy();
-        let mut svcs: Vec<Service> = Vec::new();
+        let mut fx = ToggleFixture::new("[system]\ntelnet = true\n", &[], &[]);
+        fx.cfg.system.telnet = true;
 
-        let (rtx, rrx) = channel();
-        let mut c = ctx(&sys, &mut cfg, &cfg_path, dir.path(), &slots, &policy);
-        handle_toggle_service(&mut c, &mut svcs, "telnetd".into(), false, &rtx);
-
-        assert_eq!(rrx.recv().expect("reply"), control::ToggleOutcome::Ok);
-        assert!(
-            std::fs::read_to_string(&cfg_path)
-                .expect("read")
-                .contains("telnet = false")
+        assert_eq!(
+            fx.toggle(&sys, "telnetd", false),
+            control::ToggleOutcome::Ok
         );
-        assert!(!cfg.system.telnet);
+        assert!(fx.text().contains("telnet = false"));
+        assert!(!fx.cfg.system.telnet);
     }
 
     #[test]
     fn test_toggle_telnet_write_failure_changes_nothing() {
-        // A directory where the config file should be: the read fails, so
-        // neither the file, the memory, nor any process may change.
-        let dir = tempfile::tempdir().expect("tempdir");
-        let cfg_path = dir.path().join("anyka.toml");
-        std::fs::create_dir(&cfg_path).expect("mkdir");
-
+        // The config cannot be read, so neither the file, the memory, nor any
+        // process may change.
         let mut sys = MockSys::new();
         sys.expect_run_to_completion().times(0);
         sys.expect_spawn_detached().times(0);
 
-        let mut cfg = test_config(BTreeMap::new());
-        let slots = crate::update::Slots::new(dir.path());
-        let policy = test_policy();
-        let mut svcs: Vec<Service> = Vec::new();
+        let mut fx = ToggleFixture::unreadable(&[], &[]);
 
-        let (rtx, rrx) = channel();
-        let mut c = ctx(&sys, &mut cfg, &cfg_path, dir.path(), &slots, &policy);
-        handle_toggle_service(&mut c, &mut svcs, "telnetd".into(), true, &rtx);
-
-        assert_eq!(rrx.recv().expect("reply"), control::ToggleOutcome::Error);
-        assert!(!cfg.system.telnet);
+        assert_eq!(
+            fx.toggle(&sys, "telnetd", true),
+            control::ToggleOutcome::Error
+        );
+        assert!(!fx.cfg.system.telnet);
     }
 }

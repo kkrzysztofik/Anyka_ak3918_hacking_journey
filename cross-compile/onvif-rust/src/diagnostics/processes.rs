@@ -256,14 +256,19 @@ async fn toggle_service(name: String, enabled: bool) -> impl IntoResponse {
     }
 }
 
-/// POST /api/services/{name}/enable
-pub async fn handle_enable_service(AxumPath(name): AxumPath<String>) -> impl IntoResponse {
-    toggle_service(name, true).await
-}
-
-/// POST /api/services/{name}/disable
-pub async fn handle_disable_service(AxumPath(name): AxumPath<String>) -> impl IntoResponse {
-    toggle_service(name, false).await
+/// POST /api/services/{name}/enable and .../disable
+///
+/// One route for both: they differ by a bool. A path segment cannot be
+/// constrained to two words, so anything else is a 404 here — the same answer
+/// the route would have given when it did not exist.
+pub async fn handle_toggle_service(
+    AxumPath((name, action)): AxumPath<(String, String)>,
+) -> impl IntoResponse {
+    match action.as_str() {
+        "enable" => toggle_service(name, true).await.into_response(),
+        "disable" => toggle_service(name, false).await.into_response(),
+        _ => (StatusCode::NOT_FOUND, "unknown action").into_response(),
+    }
 }
 
 #[cfg(test)]

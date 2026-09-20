@@ -4,7 +4,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ApiError, authorizedFetch } from '@/services/api';
-import { getProcesses, restartService, serviceAction } from '@/services/processesService';
+import { getProcesses, serviceAction } from '@/services/processesService';
 
 vi.mock('@/services/api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/services/api')>();
@@ -102,39 +102,6 @@ describe('processesService', () => {
       vi.mocked(authorizedFetch).mockResolvedValueOnce(new Response('nope', { status: 503 }));
 
       await expect(getProcesses()).rejects.toThrow(ApiError);
-    });
-  });
-
-  describe('restartService', () => {
-    it('should resolve on 202 and POST to the service path', async () => {
-      vi.mocked(authorizedFetch).mockResolvedValueOnce(new Response('', { status: 202 }));
-
-      await expect(restartService('onvif')).resolves.toBeUndefined();
-
-      expect(authorizedFetch).toHaveBeenCalledWith(
-        '/api/services/onvif/restart',
-        expect.objectContaining({ method: 'POST' }),
-      );
-    });
-
-    it('should throw ApiError on 404 (unknown service)', async () => {
-      vi.mocked(authorizedFetch).mockResolvedValueOnce(
-        new Response('unknown service', {
-          status: 404,
-        }),
-      );
-
-      await expect(restartService('nope')).rejects.toThrow(ApiError);
-    });
-
-    it('should throw ApiError on 503 (supervisor unreachable)', async () => {
-      vi.mocked(authorizedFetch).mockResolvedValueOnce(
-        new Response('unreachable', {
-          status: 503,
-        }),
-      );
-
-      await expect(restartService('onvif')).rejects.toThrow(ApiError);
     });
   });
 
