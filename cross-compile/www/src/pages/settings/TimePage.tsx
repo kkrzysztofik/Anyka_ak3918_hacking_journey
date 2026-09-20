@@ -28,7 +28,12 @@ import {
   SettingsCardTitle,
 } from '@/components/ui/settings-card';
 import { Switch } from '@/components/ui/switch';
-import { type DateTimeConfig, getDateTime, setDateTime, setNTP } from '@/services/timeService';
+import {
+  type DateTimeConfig,
+  getDateTime,
+  setDateTime,
+  setSystemDateAndTime,
+} from '@/services/timeService';
 import { TIMEZONES } from '@/utils/timezones';
 
 // Validation Schema
@@ -46,7 +51,14 @@ type TimeFormData = z.infer<typeof timeSchema>;
 
 export default function TimePage() {
   const queryClient = useQueryClient();
-  const [deviceTime, setDeviceTime] = useState<Date | null>(null);
+
+  // The camera's clock, not ours. Capturing the offset once and ticking from
+  // it is what makes a camera stuck at 1970 visible instead of showing the
+  // operator their own correct browser clock. Prefer the camera's own
+  // local time; it already has the camera's zone applied, which Intl cannot
+  // reproduce from a POSIX TZ string.
+  const [offsetMs, setOffsetMs] = useState<number | null>(null);
+  const [now, setNow] = useState(() => Date.now());
 
   // Fetch Time Config
   const { data: config, isLoading } = useQuery<DateTimeConfig>({
@@ -54,23 +66,21 @@ export default function TimePage() {
     queryFn: getDateTime,
   });
 
-  // Simulated live clock for "Current Device Time"
   useEffect(() => {
     if (config) {
-      // Initialize with fetched time (parsing simplified for demo)
-      // In reality, we'd offset this by local execution time
-      const now = new Date();
+      const src = config.localDateTime ?? config.utcDateTime;
       // eslint-disable-next-line react-hooks/set-state-in-effect
-      setDeviceTime(now);
+      setOffsetMs(src.getTime() - Date.now());
     }
   }, [config]);
 
   useEffect(() => {
-    const timer = setInterval(() => {
-      setDeviceTime(new Date());
-    }, 1000);
+    const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
   }, []);
+
+  const deviceTime = offsetMs === null ? null : new Date(now + offsetMs);
+  const clockIsStale = deviceTime !== null && deviceTime.getUTCFullYear() < 2020;
 
   const form = useForm<TimeFormData>({
     resolver: zodResolver(timeSchema),
@@ -93,7 +103,7 @@ export default function TimePage() {
     if (config) {
       form.reset({
         mode: config.ntp.enabled ? 'ntp' : 'manual',
-        ntpFromDHCP: config.ntp.fromDHCP,
+        ntpFromDHCP: false,
         ntpServer1: 'pool.ntp.org', // Stub as API generally doesn't return server list easily in simple calls
         ntpServer2: 'time.google.com',
         timezone: config.timezone || 'UTC',
@@ -110,16 +120,17 @@ export default function TimePage() {
 
       // 2. Set Mode
       if (values.mode === 'ntp') {
-        await setNTP(values.ntpFromDHCP);
-        // If we supported setting custom NTP servers, we'd do it here
+        // ponytail: until the server-list work lands, NTP only clears the
+        // manual-clock marker; the supervisor keeps its own [time].servers.
+        await setSystemDateAndTime('NTP', config?.daylightSavings ?? false, values.timezone);
       } else if (values.mode === 'computer') {
         const now = new Date();
-        await setDateTime('manual', now.toISOString(), values.timezone);
+        await setDateTime(now.toISOString(), values.timezone, config?.daylightSavings ?? false);
       } else {
         // Manual
         const dateStr = `${values.manualDate}T${values.manualTime}`;
         const date = new Date(dateStr);
-        await setDateTime('manual', date.toISOString(), values.timezone);
+        await setDateTime(date.toISOString(), values.timezone, config?.daylightSavings ?? false);
       }
     },
     onSuccess: () => {
@@ -177,16 +188,22 @@ export default function TimePage() {
             >
               Device Time
             </div>
-            <div className="font-mono text-[32px] font-medium tracking-tight text-white">
-              {deviceTime ? deviceTime.toLocaleTimeString() : '--:--:--'}
+            <div
+              className="font-mono text-[32px] font-medium tracking-tight text-white"
+              data-testid="time-device-clock"
+            >
+              {deviceTime
+                ? deviceTime.toLocaleTimeString('en-GB', { hour12: false, timeZone: 'UTC' })
+                : '--:--:--'}
             </div>
             <div className="text-[14px] text-[#a1a1a6]">
               {deviceTime
-                ? deviceTime.toLocaleDateString(undefined, {
+                ? deviceTime.toLocaleDateString('en-GB', {
                     weekday: 'long',
                     year: 'numeric',
                     month: 'long',
                     day: 'numeric',
+                    timeZone: 'UTC',
                   })
                 : 'Loading...'}
             </div>
@@ -195,6 +212,15 @@ export default function TimePage() {
             <Clock className="size-6 text-[#0a84ff]" />
           </div>
         </div>
+
+        {clockIsStale && (
+          <div
+            className="mb-[24px] rounded-[12px] border border-[#ff453a] bg-[#ff453a]/10 p-[16px] text-[14px] text-[#ff453a]"
+            data-testid="time-clock-stale"
+          >
+            The camera's clock is not set. Authenticated requests will fail until NTP syncs.
+          </div>
+        )}
 
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-[24px]">

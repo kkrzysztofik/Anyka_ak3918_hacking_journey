@@ -1,11 +1,11 @@
 /**
  * TimePage Tests
  */
-import { screen, waitFor } from '@testing-library/react';
+import { act, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { getDateTime, setNTP } from '@/services/timeService';
+import { getDateTime, setDateTime, setNtp, setSystemDateAndTime } from '@/services/timeService';
 import {
   mockToast,
   renderWithProviders,
@@ -24,7 +24,9 @@ import TimePage from './TimePage';
 vi.mock('@/services/timeService', () => ({
   getDateTime: vi.fn(),
   setDateTime: vi.fn(),
-  setNTP: vi.fn(),
+  setNtp: vi.fn(),
+  setSystemDateAndTime: vi.fn(),
+  getNtp: vi.fn(),
 }));
 
 // Note: Timer mocking will be handled per test
@@ -39,18 +41,87 @@ describe('TimePage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(getDateTime).mockResolvedValue(mockTimeConfig);
-    vi.mocked(setNTP).mockResolvedValue(undefined);
+    vi.mocked(setDateTime).mockResolvedValue(undefined);
+    vi.mocked(setNtp).mockResolvedValue(undefined);
+    vi.mocked(setSystemDateAndTime).mockResolvedValue(undefined);
   });
 
   const mockTimeConfig = {
     ntp: {
       enabled: true,
-      fromDHCP: false,
     },
-    timezone: 'UTC',
-    datetime: new Date(),
-    utcDateTime: new Date().toISOString(),
+    daylightSavings: false,
+    timezone: 'UTC0',
+    utcDateTime: new Date(),
   };
+
+  describe('camera clock', () => {
+    // waitFor in this project does not auto-advance fake timers, so each test
+    // flushes the initial query with a few explicit advances.
+    const flush = async () => {
+      await act(async () => {
+        vi.advanceTimersByTime(100);
+      });
+      await act(async () => {
+        vi.advanceTimersByTime(100);
+      });
+    };
+
+    // A failed test below may skip its own useRealTimers; never leak timers.
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('should display the camera time, not the browser time', async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2026-09-20T12:00:00Z'));
+      // Camera is three hours behind the browser.
+      vi.mocked(getDateTime).mockResolvedValue({
+        ...mockTimeConfig,
+        utcDateTime: new Date('2026-09-20T09:00:00Z'),
+      });
+
+      renderWithProviders(<TimePage />);
+      await flush();
+
+      // ±1s: the 1s tick interval can fire between mount and the first paint.
+      const shown = screen.getByTestId('time-device-clock').textContent;
+      expect(['08:59:59', '09:00:00']).toContain(shown);
+      vi.useRealTimers();
+    });
+
+    it('should keep ticking from the camera offset', async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2026-09-20T12:00:00Z'));
+      vi.mocked(getDateTime).mockResolvedValue({
+        ...mockTimeConfig,
+        utcDateTime: new Date('2026-09-20T09:00:00Z'),
+      });
+
+      renderWithProviders(<TimePage />);
+      await flush();
+      const before = screen.getByTestId('time-device-clock').textContent;
+      await act(async () => {
+        vi.advanceTimersByTime(3000);
+      });
+      const after = screen.getByTestId('time-device-clock').textContent;
+      // It advanced, and stayed on the camera's (09:xx) track, not the browser's.
+      expect(after > before).toBe(true);
+      expect(after).toMatch(/^09:0[01]:/);
+      vi.useRealTimers();
+    });
+
+    it('should warn when the camera clock is implausible', async () => {
+      vi.mocked(getDateTime).mockResolvedValue({
+        ...mockTimeConfig,
+        utcDateTime: new Date('1970-01-01T00:00:00Z'),
+      });
+
+      await renderTimePage();
+
+      expect(screen.getByTestId('time-clock-stale')).toBeInTheDocument();
+    });
+  });
 
   it('should render page with loading state', async () => {
     vi.mocked(getDateTime).mockImplementation(() => new Promise(() => {}));
@@ -113,10 +184,7 @@ describe('TimePage', () => {
   });
 
   it('should show NTP server fields when NTP mode is selected and not from DHCP', async () => {
-    vi.mocked(getDateTime).mockResolvedValue({
-      ...mockTimeConfig,
-      ntp: { enabled: true, fromDHCP: false },
-    });
+    vi.mocked(getDateTime).mockResolvedValue({ ...mockTimeConfig, ntp: { enabled: true } });
 
     renderWithProviders(<TimePage />);
 
@@ -285,13 +353,13 @@ describe('TimePage', () => {
     await testMutationWithSuccessToast(
       user,
       'time-page-save-button',
-      setNTP,
+      setSystemDateAndTime,
       'Time settings saved',
     );
   });
 
   it('should show error toast when mutation fails', async () => {
-    vi.mocked(setNTP).mockRejectedValue(new Error('Network error'));
+    vi.mocked(setSystemDateAndTime).mockRejectedValue(new Error('Network error'));
 
     const user = userEvent.setup();
     await renderTimePage();
@@ -310,7 +378,7 @@ describe('TimePage', () => {
     await testMutationWithErrorToast(
       user,
       'time-page-save-button',
-      setNTP,
+      setSystemDateAndTime,
       'Failed to save time settings',
       'Network error',
     );

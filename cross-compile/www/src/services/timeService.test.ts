@@ -65,6 +65,31 @@ describe('timeService', () => {
       expect(result.utcDateTime).toBeInstanceOf(Date);
     });
 
+    it('should parse the camera-local time when present', async () => {
+      const mockResponse = createMockSOAPResponse(`
+        <GetSystemDateAndTimeResponse>
+          <SystemDateAndTime>
+            <DateTimeType>NTP</DateTimeType>
+            <DaylightSavings>false</DaylightSavings>
+            <TimeZone><TZ>UTC+0</TZ></TimeZone>
+            <UTCDateTime>
+              <Time><Hour>9</Hour><Minute>0</Minute><Second>0</Second></Time>
+              <Date><Year>2026</Year><Month>9</Month><Day>20</Day></Date>
+            </UTCDateTime>
+            <LocalDateTime>
+              <Time><Hour>12</Hour><Minute>30</Minute><Second>45</Second></Time>
+              <Date><Year>2026</Year><Month>9</Month><Day>20</Day></Date>
+            </LocalDateTime>
+          </SystemDateAndTime>
+        </GetSystemDateAndTimeResponse>
+      `);
+
+      vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
+
+      const result = await getSystemDateAndTime();
+      expect(result.localDateTime?.toISOString()).toBe('2026-09-20T12:30:45.000Z');
+    });
+
     it('should parse Manual configuration', async () => {
       const mockResponse = createMockSOAPResponse(`
         <GetSystemDateAndTimeResponse>
@@ -310,7 +335,9 @@ describe('timeService', () => {
     });
 
     it('should return an empty list when the camera reports none', async () => {
-      const mockResponse = createMockSOAPResponse('<GetNTPResponse><NTPInformation /></GetNTPResponse>');
+      const mockResponse = createMockSOAPResponse(
+        '<GetNTPResponse><NTPInformation /></GetNTPResponse>',
+      );
 
       vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 

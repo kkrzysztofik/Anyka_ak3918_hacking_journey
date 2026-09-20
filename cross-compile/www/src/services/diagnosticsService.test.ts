@@ -140,7 +140,9 @@ describe('diagnosticsService', () => {
     });
 
     it('should accept a diagnostics payload with a null time block', async () => {
-      vi.mocked(authorizedFetch).mockResolvedValue(makeResponse({ ...MOCK_DIAGNOSTICS, time: null }));
+      vi.mocked(authorizedFetch).mockResolvedValue(
+        makeResponse({ ...MOCK_DIAGNOSTICS, time: null }),
+      );
       await expect(getDiagnostics()).resolves.toBeDefined();
     });
 

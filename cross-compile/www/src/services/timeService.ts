@@ -14,6 +14,8 @@ export interface SystemDateTime {
   daylightSavings: boolean;
   timezone: string;
   utcDateTime: Date;
+  /** Camera-local time as the camera computes it; null when absent. */
+  localDateTime: Date | null;
 }
 
 export interface DateTimeConfig {
@@ -23,6 +25,8 @@ export interface DateTimeConfig {
   daylightSavings: boolean;
   timezone: string;
   utcDateTime: Date;
+  /** Camera-local time; absent on firmware that does not report it. */
+  localDateTime?: Date | null;
 }
 
 /**
@@ -42,23 +46,31 @@ export async function getSystemDateAndTime(): Promise<SystemDateTime> {
   }
 
   const utcDateTime = sdt.UTCDateTime as Record<string, unknown> | undefined;
-  const time = utcDateTime?.Time as Record<string, unknown> | undefined;
-  const date = utcDateTime?.Date as Record<string, unknown> | undefined;
   const timezone = sdt.TimeZone as Record<string, unknown> | undefined;
 
-  // Build Date object from response
-  const year = Number(date?.Year || new Date().getFullYear());
-  const month = Number(date?.Month || 1) - 1; // JS months are 0-indexed
-  const day = Number(date?.Day || 1);
-  const hour = Number(time?.Hour || 0);
-  const minute = Number(time?.Minute || 0);
-  const second = Number(time?.Second || 0);
+  const toJsDate = (block: Record<string, unknown> | undefined): Date | null => {
+    const t = block?.Time as Record<string, unknown> | undefined;
+    const d = block?.Date as Record<string, unknown> | undefined;
+    if (!t && !d) return null;
+    // Partial blocks fall back the same way the old inline parser did.
+    return new Date(
+      Date.UTC(
+        Number(d?.Year || new Date().getFullYear()),
+        Number(d?.Month || 1) - 1,
+        Number(d?.Day || 1),
+        Number(t?.Hour || 0),
+        Number(t?.Minute || 0),
+        Number(t?.Second || 0),
+      ),
+    );
+  };
 
   return {
     dateTimeType: safeString(sdt.DateTimeType, 'NTP') as DateTimeType,
     daylightSavings: sdt.DaylightSavings === true || sdt.DaylightSavings === 'true',
     timezone: safeString(timezone?.TZ, 'UTC'),
-    utcDateTime: new Date(Date.UTC(year, month, day, hour, minute, second)),
+    utcDateTime: toJsDate(utcDateTime) ?? new Date(),
+    localDateTime: toJsDate(sdt.LocalDateTime as Record<string, unknown> | undefined),
   };
 }
 
@@ -118,6 +130,7 @@ export async function getDateTime(): Promise<DateTimeConfig> {
     daylightSavings: sys.daylightSavings,
     timezone: sys.timezone,
     utcDateTime: sys.utcDateTime,
+    localDateTime: sys.localDateTime,
   };
 }
 
@@ -135,7 +148,7 @@ export async function getNtp(): Promise<string[]> {
   );
 
   const raw = (data?.NTPInformation as Record<string, unknown> | undefined)?.NTPManual;
-  const entries = raw === undefined || raw === null ? [] : (Array.isArray(raw) ? raw : [raw]);
+  const entries = raw === undefined || raw === null ? [] : Array.isArray(raw) ? raw : [raw];
   return entries
     .map((entry) => {
       const e = entry as Record<string, unknown>;
