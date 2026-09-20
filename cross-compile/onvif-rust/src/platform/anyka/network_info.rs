@@ -359,24 +359,32 @@ impl AnykaNetworkInfo {
         dns_info
     }
 
-    /// Real servers come from the supervisor's status file.
-    ///
-    /// There were once `/etc/ntp.conf` and `timesyncd.conf` parsers here.
-    /// Neither file exists on this rootfs and nothing called them, so they are
-    /// gone; the stub platform returns its own canned `NtpInfo`.
+    #[cfg(test)]
     pub(super) fn read_ntp_config(&self) -> NtpInfo {
-        if let Ok(text) = std::fs::read_to_string(&self.ntp_status_path)
-            && let Some(status) = crate::time::ntp_status::parse(&text)
-        {
-            return NtpInfo {
-                // udhcpc here never supplies NTP; saying otherwise would be a lie.
-                from_dhcp: false,
-                ntp_from_dhcp: vec![],
-                ntp_manual: status.servers,
-            };
-        }
-        NtpInfo::default()
+        read_ntp_config_at(&self.ntp_status_path)
     }
+}
+
+/// Real servers come from the supervisor's status file.
+///
+/// There were once `/etc/ntp.conf` and `timesyncd.conf` parsers here. Neither
+/// file exists on this rootfs and nothing called them, so they are gone; the
+/// stub platform returns its own canned `NtpInfo`.
+///
+/// A free function so `get_ntp_info` can hand it to `off_runtime`, which needs
+/// `'static` work and cannot borrow `&self`.
+fn read_ntp_config_at(status_path: &std::path::Path) -> NtpInfo {
+    if let Ok(text) = std::fs::read_to_string(status_path)
+        && let Some(status) = crate::time::ntp_status::parse(&text)
+    {
+        return NtpInfo {
+            // udhcpc here never supplies NTP; saying otherwise would be a lie.
+            from_dhcp: false,
+            ntp_from_dhcp: vec![],
+            ntp_manual: status.servers,
+        };
+    }
+    NtpInfo::default()
 }
 
 /// Run a blocking `/proc` or sysfs read off the async runtime.
@@ -410,7 +418,10 @@ impl NetworkInfo for AnykaNetworkInfo {
     }
 
     async fn get_ntp_info(&self) -> PlatformResult<NtpInfo> {
-        Ok(self.read_ntp_config())
+        // Same rule as the readers above: `state/ntp.status` lives on the SD
+        // card, so the read must not happen on a runtime thread.
+        let path = self.ntp_status_path.clone();
+        off_runtime(move || read_ntp_config_at(&path)).await
     }
 
     async fn set_network_interface(
