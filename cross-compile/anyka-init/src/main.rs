@@ -221,11 +221,12 @@ fn spawn_optional_threads(
         let s = Arc::clone(sysimpl);
         let tcfg = cfg.time.clone();
         let ntp_marker = timesync::ntp_disabled_marker_path(std::path::Path::new(&cfg.update.root));
+        let config_path = std::path::PathBuf::from(CONFIG_PATH);
         let _ = std::thread::Builder::new()
             .name("timesync".into())
             .stack_size(supervisor_loop::thread_stack())
             .spawn(move || {
-                timesync::resync_loop(s.as_ref(), &tcfg, &ntp_marker);
+                timesync::resync_loop(s.as_ref(), &tcfg, &ntp_marker, &config_path);
             });
     }
 
