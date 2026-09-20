@@ -127,7 +127,12 @@ impl DiagnosticsState {
     ) -> Self {
         // No update root: the NTP status field reports `None` rather than
         // guessing at a path. Production uses `with_update_root`.
-        Self::with_update_root(started_at, platform, degraded_services, std::path::PathBuf::new())
+        Self::with_update_root(
+            started_at,
+            platform,
+            degraded_services,
+            std::path::PathBuf::new(),
+        )
     }
 
     /// Like [`new`](Self::new) with the update root that holds `state/`;

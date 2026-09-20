@@ -597,10 +597,12 @@ fn handle_control_conn(mut stream: UnixStream, tx: &Sender<Msg>) -> std::io::Res
         Some(control::Request::Disable(name)) => send_toggle(&mut stream, tx, name, false),
         Some(control::Request::SetNtp(servers)) => {
             let (reply_tx, reply_rx) = channel();
-            if tx.send(Msg::SetNtpServers {
-                servers,
-                reply: reply_tx,
-            }).is_err()
+            if tx
+                .send(Msg::SetNtpServers {
+                    servers,
+                    reply: reply_tx,
+                })
+                .is_err()
             {
                 let _ = stream.write_all(b"error\n");
                 return Ok(());

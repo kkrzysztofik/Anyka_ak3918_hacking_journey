@@ -246,9 +246,7 @@ pub fn handle_get_system_date_and_time(
                 SetDateTimeType::Manual
             },
             daylight_savings: tz.is_dst(now),
-            time_zone: Some(TimeZone {
-                tz: tz_string,
-            }),
+            time_zone: Some(TimeZone { tz: tz_string }),
             utc_date_time: Some(utc_date_time),
             local_date_time: Some(local_date_time),
             extension: None,

@@ -199,7 +199,10 @@ impl AnykaNetworkInfo {
 
     #[cfg(test)]
     pub(super) fn with_overlay_path(overlay_path: std::path::PathBuf) -> Self {
-        Self { overlay_path, ..Self::new() }
+        Self {
+            overlay_path,
+            ..Self::new()
+        }
     }
 
     #[cfg(test)]
@@ -752,9 +755,9 @@ wlan0\t007100CB\t00000000\t0001\t0\t0\t0\t00FFFFFF\t0\t0\t0
 
     #[test]
     fn test_read_ntp_config_is_empty_when_the_status_file_is_absent() {
-        let info = AnykaNetworkInfo::with_ntp_status_path(
-            std::path::PathBuf::from("/nonexistent/update-root/state/ntp.status"),
-        );
+        let info = AnykaNetworkInfo::with_ntp_status_path(std::path::PathBuf::from(
+            "/nonexistent/update-root/state/ntp.status",
+        ));
         assert!(info.read_ntp_config().ntp_manual.is_empty());
     }
 }

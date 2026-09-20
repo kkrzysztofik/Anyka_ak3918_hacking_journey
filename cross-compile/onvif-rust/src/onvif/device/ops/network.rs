@@ -18,12 +18,12 @@ use crate::onvif::types::device::{
     GetNTPResponse, GetNetworkDefaultGateway, GetNetworkDefaultGatewayResponse,
     GetNetworkInterfaces, GetNetworkInterfacesResponse, GetNetworkProtocols,
     GetNetworkProtocolsResponse, HostnameInformation, IPAddress, IPType, IPv4Configuration,
-    IPv4NetworkInterface, NTPInformation, NetworkGateway, NetworkHost, NetworkInterface,
-    NetworkInterfaceConnectionSetting, NetworkInterfaceInfo, NetworkInterfaceLink, NetworkProtocol,
-    NetworkProtocolType, NetworkHostType, PrefixedIPv4Address, SetDNS, SetDNSResponse, SetHostname,
-    SetHostnameResponse, SetNTP, SetNTPResponse, SetNetworkDefaultGateway,
-    SetNetworkDefaultGatewayResponse, SetNetworkInterfaces, SetNetworkInterfacesResponse,
-    SetNetworkProtocols, SetNetworkProtocolsResponse,
+    IPv4NetworkInterface, NTPInformation, NetworkGateway, NetworkHost, NetworkHostType,
+    NetworkInterface, NetworkInterfaceConnectionSetting, NetworkInterfaceInfo,
+    NetworkInterfaceLink, NetworkProtocol, NetworkProtocolType, PrefixedIPv4Address, SetDNS,
+    SetDNSResponse, SetHostname, SetHostnameResponse, SetNTP, SetNTPResponse,
+    SetNetworkDefaultGateway, SetNetworkDefaultGatewayResponse, SetNetworkInterfaces,
+    SetNetworkInterfacesResponse, SetNetworkProtocols, SetNetworkProtocolsResponse,
 };
 use crate::platform::{
     Platform, common::NetworkInterfaceInfo as PlatformInterfaceInfo, external_ip,
@@ -517,9 +517,9 @@ fn host_to_string(host: &NetworkHost) -> String {
 fn valid_ntp_server(s: &str) -> bool {
     !s.is_empty()
         && s.len() <= 255
-        && !s.chars().any(|c| {
-            c.is_whitespace() || c.is_control() || c == '"' || c == '\\' || c == '#'
-        })
+        && !s
+            .chars()
+            .any(|c| c.is_whitespace() || c.is_control() || c == '"' || c == '\\' || c == '#')
 }
 
 /// Handle SetNTP request.
@@ -527,7 +527,10 @@ fn valid_ntp_server(s: &str) -> bool {
 /// `from_dhcp` is refused: udhcpc on this camera never supplies NTP servers,
 /// so accepting it would silently do nothing. The server list is owned by
 /// `anyka.toml [time].servers` and written by the supervisor, never by us.
-pub async fn handle_set_ntp(socket_path: &std::path::Path, request: SetNTP) -> OnvifResult<SetNTPResponse> {
+pub async fn handle_set_ntp(
+    socket_path: &std::path::Path,
+    request: SetNTP,
+) -> OnvifResult<SetNTPResponse> {
     if request.from_dhcp {
         return Err(OnvifError::invalid_arg(
             "ter:InvalidArgVal",
@@ -556,9 +559,9 @@ pub async fn handle_set_ntp(socket_path: &std::path::Path, request: SetNTP) -> O
             tracing::info!(?servers, "NTP servers handed to the supervisor");
             Ok(SetNTPResponse {})
         }
-        crate::diagnostics::services::ToggleReply::Unreachable => Err(
-            OnvifError::HardwareFailure("supervisor control socket unreachable".to_string()),
-        ),
+        crate::diagnostics::services::ToggleReply::Unreachable => Err(OnvifError::HardwareFailure(
+            "supervisor control socket unreachable".to_string(),
+        )),
         other => Err(OnvifError::HardwareFailure(format!(
             "supervisor refused the NTP update: {other:?}"
         ))),
@@ -1348,9 +1351,7 @@ mod tests {
                 from_dhcp: false,
                 ntp_manual: vec![NetworkHost::dns(bad)],
             };
-            let err = handle_set_ntp(sock, req)
-                .await
-                .expect_err("must fault");
+            let err = handle_set_ntp(sock, req).await.expect_err("must fault");
             assert!(
                 matches!(err, OnvifError::InvalidArgVal { .. }),
                 "{bad:?} must be an InvalidArgVal fault, got {err:?}"
@@ -1409,7 +1410,10 @@ mod tests {
 
         let req = SetNTP {
             from_dhcp: false,
-            ntp_manual: vec![NetworkHost::dns("a.example"), NetworkHost::ipv4("192.168.2.1")],
+            ntp_manual: vec![
+                NetworkHost::dns("a.example"),
+                NetworkHost::ipv4("192.168.2.1"),
+            ],
         };
         let res = handle_set_ntp(std::path::Path::new(&path), req).await;
         assert!(res.is_ok(), "expected Ok, got {res:?}");

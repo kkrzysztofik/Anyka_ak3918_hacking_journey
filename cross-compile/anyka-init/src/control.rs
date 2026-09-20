@@ -255,7 +255,10 @@ mod tests {
         );
         assert_eq!(
             parse_request("set-ntp a.example 192.168.2.1\n"),
-            Some(Request::SetNtp(vec!["a.example".into(), "192.168.2.1".into()]))
+            Some(Request::SetNtp(vec![
+                "a.example".into(),
+                "192.168.2.1".into()
+            ]))
         );
     }
 
