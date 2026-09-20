@@ -52,6 +52,17 @@ export interface Diagnostics {
     /** Absent on firmware older than the 2026-08-18 quality field. */
     link_quality?: string | null;
   } | null;
+  /**
+   * NTP sync state published by the supervisor. `null` when NTP is disabled
+   * or the supervisor predates the status file; fields are null until the
+   * first successful sync.
+   */
+  time?: {
+    last_sync_unix: number | null;
+    last_server: string | null;
+    last_delta_s: number | null;
+    servers: string[];
+  } | null;
 }
 
 export type LogSource = 'onvif_rust' | 'vendor_daemon' | 'anyka_init' | 'wpa_supplicant';
@@ -172,11 +183,24 @@ function hasCoreDiagnosticsFields(value: Record<string, unknown>): boolean {
   );
 }
 
+function isTime(value: unknown): value is NonNullable<Diagnostics['time']> {
+  return (
+    isRecord(value) &&
+    (value.last_sync_unix === null || typeof value.last_sync_unix === 'number') &&
+    (value.last_server === null || typeof value.last_server === 'string') &&
+    (value.last_delta_s === null || typeof value.last_delta_s === 'number') &&
+    Array.isArray(value.servers) &&
+    value.servers.every((s) => typeof s === 'string')
+  );
+}
+
 function hasOptionalDiagnosticsFields(value: Record<string, unknown>): boolean {
   if (value.vision !== null && !isVision(value.vision)) return false;
   // Absent is fine — a snapshot from a build without PTZ reporting still validates.
   if (value.ptz !== null && value.ptz !== undefined && !isPtz(value.ptz)) return false;
   if (value.wifi !== null && value.wifi !== undefined && !isWifi(value.wifi)) return false;
+  // Optional: an older camera never sends the field at all.
+  if (value.time !== null && value.time !== undefined && !isTime(value.time)) return false;
   return true;
 }
 

@@ -229,13 +229,24 @@ pub fn handle_get_system_date_and_time(
         },
     };
 
+    // Clone both values out of the guard before use (this function's own doc
+    // comment warns about holding it): `update.root` feeds the NTP marker
+    // check, `time.timezone` the reply.
+    let (tz_string, update_root) = {
+        let guard = config.read();
+        (guard.time.timezone.clone(), guard.update.root.clone())
+    };
+    let ntp_enabled = crate::time::ntp_marker::NtpMarker::new(&update_root).ntp_enabled();
+
     Ok(GetSystemDateAndTimeResponse {
         system_date_and_time: SystemDateTime {
-            date_time_type: SetDateTimeType::Manual,
+            date_time_type: if ntp_enabled {
+                SetDateTimeType::NTP
+            } else {
+                SetDateTimeType::Manual
+            },
             daylight_savings: tz.is_dst(now),
-            time_zone: Some(TimeZone {
-                tz: config.read().time.timezone.clone(),
-            }),
+            time_zone: Some(TimeZone { tz: tz_string }),
             utc_date_time: Some(utc_date_time),
             local_date_time: Some(local_date_time),
             extension: None,
@@ -512,6 +523,12 @@ mod tests {
         Arc::new(ConfigRuntime::new(Default::default()))
     }
 
+    fn test_config_with_update_root(dir: &std::path::Path) -> Arc<ConfigRuntime> {
+        let mut cfg = crate::config::AppConfig::default();
+        cfg.update.root = dir.to_string_lossy().into_owned();
+        Arc::new(ConfigRuntime::new(cfg))
+    }
+
     fn mock_platform_with_serial(serial: &str) -> Arc<dyn crate::platform::Platform> {
         Arc::new(
             crate::platform::StubPlatformBuilder::new()
@@ -772,6 +789,33 @@ mod tests {
         assert!(!m.ntp_enabled());
         m.enable().unwrap();
         assert!(m.ntp_enabled());
+    }
+
+    #[test]
+    fn test_get_system_date_and_time_reports_ntp_when_the_marker_is_absent() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = test_config_with_update_root(dir.path());
+
+        let got = handle_get_system_date_and_time(&config, GetSystemDateAndTime {}).unwrap();
+        assert_eq!(
+            got.system_date_and_time.date_time_type,
+            SetDateTimeType::NTP
+        );
+    }
+
+    #[test]
+    fn test_get_system_date_and_time_reports_manual_when_the_marker_exists() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = test_config_with_update_root(dir.path());
+        crate::time::ntp_marker::NtpMarker::new(dir.path())
+            .disable()
+            .unwrap();
+
+        let got = handle_get_system_date_and_time(&config, GetSystemDateAndTime {}).unwrap();
+        assert_eq!(
+            got.system_date_and_time.date_time_type,
+            SetDateTimeType::Manual
+        );
     }
 
     #[test]

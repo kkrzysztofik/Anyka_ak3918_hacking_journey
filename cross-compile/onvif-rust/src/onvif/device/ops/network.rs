@@ -18,12 +18,12 @@ use crate::onvif::types::device::{
     GetNTPResponse, GetNetworkDefaultGateway, GetNetworkDefaultGatewayResponse,
     GetNetworkInterfaces, GetNetworkInterfacesResponse, GetNetworkProtocols,
     GetNetworkProtocolsResponse, HostnameInformation, IPAddress, IPType, IPv4Configuration,
-    IPv4NetworkInterface, NTPInformation, NetworkGateway, NetworkHost, NetworkInterface,
-    NetworkInterfaceConnectionSetting, NetworkInterfaceInfo, NetworkInterfaceLink, NetworkProtocol,
-    NetworkProtocolType, PrefixedIPv4Address, SetDNS, SetDNSResponse, SetHostname,
-    SetHostnameResponse, SetNTP, SetNTPResponse, SetNetworkDefaultGateway,
-    SetNetworkDefaultGatewayResponse, SetNetworkInterfaces, SetNetworkInterfacesResponse,
-    SetNetworkProtocols, SetNetworkProtocolsResponse,
+    IPv4NetworkInterface, NTPInformation, NetworkGateway, NetworkHost, NetworkHostType,
+    NetworkInterface, NetworkInterfaceConnectionSetting, NetworkInterfaceInfo,
+    NetworkInterfaceLink, NetworkProtocol, NetworkProtocolType, PrefixedIPv4Address, SetDNS,
+    SetDNSResponse, SetHostname, SetHostnameResponse, SetNTP, SetNTPResponse,
+    SetNetworkDefaultGateway, SetNetworkDefaultGatewayResponse, SetNetworkInterfaces,
+    SetNetworkInterfacesResponse, SetNetworkProtocols, SetNetworkProtocolsResponse,
 };
 use crate::platform::{
     Platform, common::NetworkInterfaceInfo as PlatformInterfaceInfo, external_ip,
@@ -501,17 +501,71 @@ pub async fn handle_get_ntp(
     })
 }
 
+/// The one string a `NetworkHost` carries: the field set for its type.
+/// Inverse of the `to_network_host` closure in `handle_get_ntp`.
+fn host_to_string(host: &NetworkHost) -> String {
+    match host.host_type {
+        NetworkHostType::IPv4 => host.ipv4_address.clone().unwrap_or_default(),
+        NetworkHostType::IPv6 => host.ipv6_address.clone().unwrap_or_default(),
+        NetworkHostType::DNS => host.dns_name.clone().unwrap_or_default(),
+    }
+}
+
+/// Reject anything that cannot go into a TOML basic string unescaped. The
+/// supervisor validates again before writing; this copy exists so the caller
+/// gets a precise ONVIF fault instead of a generic write failure.
+fn valid_ntp_server(s: &str) -> bool {
+    !s.is_empty()
+        && s.len() <= 255
+        && !s
+            .chars()
+            .any(|c| c.is_whitespace() || c.is_control() || c == '"' || c == '\\' || c == '#')
+}
+
 /// Handle SetNTP request.
 ///
-/// Not supported - returns ActionNotSupported error.
-pub async fn handle_set_ntp(request: SetNTP) -> OnvifResult<SetNTPResponse> {
-    tracing::debug!(
-        "SetNTP request: from_dhcp={}, {} manual servers (not supported)",
-        request.from_dhcp,
-        request.ntp_manual.len()
-    );
+/// `from_dhcp` is refused: udhcpc on this camera never supplies NTP servers,
+/// so accepting it would silently do nothing. The server list is owned by
+/// `anyka.toml [time].servers` and written by the supervisor, never by us.
+pub async fn handle_set_ntp(
+    socket_path: &std::path::Path,
+    request: SetNTP,
+) -> OnvifResult<SetNTPResponse> {
+    if request.from_dhcp {
+        return Err(OnvifError::invalid_arg(
+            "ter:InvalidArgVal",
+            "from_dhcp is not supported: this camera's DHCP client does not supply NTP servers",
+        ));
+    }
 
-    Err(OnvifError::ActionNotSupported("SetNTP".to_string()))
+    let servers: Vec<String> = request.ntp_manual.iter().map(host_to_string).collect();
+
+    if servers.is_empty() {
+        return Err(OnvifError::invalid_arg(
+            "ter:InvalidArgVal",
+            "at least one NTP server is required",
+        ));
+    }
+    if let Some(bad) = servers.iter().find(|s| !valid_ntp_server(s)) {
+        return Err(OnvifError::invalid_arg(
+            "ter:InvalidArgVal",
+            format!("rejected NTP server {bad:?}"),
+        ));
+    }
+
+    match crate::diagnostics::services::request_set_ntp(socket_path, &servers) {
+        crate::diagnostics::services::ToggleReply::Accepted
+        | crate::diagnostics::services::ToggleReply::Pending => {
+            tracing::info!(?servers, "NTP servers handed to the supervisor");
+            Ok(SetNTPResponse {})
+        }
+        crate::diagnostics::services::ToggleReply::Unreachable => Err(OnvifError::HardwareFailure(
+            "supervisor control socket unreachable".to_string(),
+        )),
+        other => Err(OnvifError::HardwareFailure(format!(
+            "supervisor refused the NTP update: {other:?}"
+        ))),
+    }
 }
 
 /// Handle GetNetworkDefaultGateway request.
@@ -1025,15 +1079,16 @@ mod tests {
     // ========================================================================
 
     #[tokio::test]
-    async fn test_set_ntp_not_supported() {
-        let result = handle_set_ntp(SetNTP {
-            from_dhcp: false,
-            ntp_manual: vec![NetworkHost::ipv4("pool.ntp.org")],
-        })
+    async fn test_set_ntp_on_an_unreachable_supervisor_faults() {
+        let result = handle_set_ntp(
+            std::path::Path::new("/nonexistent/anyka-supervisor.sock"),
+            SetNTP {
+                from_dhcp: false,
+                ntp_manual: vec![NetworkHost::dns("pool.ntp.org")],
+            },
+        )
         .await;
-
-        assert!(result.is_err());
-        assert!(matches!(result, Err(OnvifError::ActionNotSupported(_))));
+        assert!(matches!(result, Err(OnvifError::HardwareFailure(_))));
     }
 
     // ========================================================================
@@ -1286,6 +1341,85 @@ mod tests {
                 .await
                 .is_err()
         );
+    }
+
+    #[tokio::test]
+    async fn test_set_ntp_rejects_a_server_with_whitespace_or_quotes() {
+        let sock = std::path::Path::new("/nonexistent/anyka-supervisor.sock");
+        for bad in ["a b", "a\"b", "a\\b", "", "a\nb"] {
+            let req = SetNTP {
+                from_dhcp: false,
+                ntp_manual: vec![NetworkHost::dns(bad)],
+            };
+            let err = handle_set_ntp(sock, req).await.expect_err("must fault");
+            assert!(
+                matches!(err, OnvifError::InvalidArgVal { .. }),
+                "{bad:?} must be an InvalidArgVal fault, got {err:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_set_ntp_requires_at_least_one_server() {
+        let req = SetNTP {
+            from_dhcp: false,
+            ntp_manual: vec![],
+        };
+        let err = handle_set_ntp(std::path::Path::new("/nonexistent/sock"), req)
+            .await
+            .expect_err("must fault");
+        assert!(matches!(err, OnvifError::InvalidArgVal { .. }));
+    }
+
+    #[tokio::test]
+    async fn test_set_ntp_from_dhcp_is_refused() {
+        // udhcpc on this camera never supplies NTP servers; accepting the flag
+        // would silently do nothing, which is worse than a fault.
+        let req = SetNTP {
+            from_dhcp: true,
+            ntp_manual: vec![NetworkHost::dns("a.example")],
+        };
+        let err = handle_set_ntp(std::path::Path::new("/nonexistent/sock"), req)
+            .await
+            .expect_err("must fault");
+        assert!(matches!(err, OnvifError::InvalidArgVal { .. }));
+    }
+
+    #[tokio::test]
+    async fn test_set_ntp_hands_the_servers_to_the_supervisor() {
+        use std::os::unix::net::UnixListener;
+
+        let path = format!("/tmp/onvif-setntp-{}.sock", std::process::id());
+        let _ = std::fs::remove_file(&path);
+        let listener = UnixListener::bind(&path).expect("bind");
+        let server_path = path.clone();
+        let server = std::thread::spawn(move || {
+            use std::io::{BufRead, Write};
+            let mut seen = Vec::new();
+            for stream in listener.incoming().take(1) {
+                let Ok(mut stream) = stream else { break };
+                let mut line = String::new();
+                let _ = std::io::BufReader::new(&stream).read_line(&mut line);
+                seen.push(line);
+                let _ = stream.write_all(b"ok\n");
+            }
+            drop(listener);
+            let _ = std::fs::remove_file(&server_path);
+            seen
+        });
+
+        let req = SetNTP {
+            from_dhcp: false,
+            ntp_manual: vec![
+                NetworkHost::dns("a.example"),
+                NetworkHost::ipv4("192.168.2.1"),
+            ],
+        };
+        let res = handle_set_ntp(std::path::Path::new(&path), req).await;
+        assert!(res.is_ok(), "expected Ok, got {res:?}");
+        let seen = server.join().expect("server thread");
+        assert_eq!(seen, vec!["set-ntp a.example 192.168.2.1\n"]);
+        let _ = std::fs::remove_file(&path);
     }
 
     #[test]

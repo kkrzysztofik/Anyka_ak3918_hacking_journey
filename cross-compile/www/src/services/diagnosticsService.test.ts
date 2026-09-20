@@ -122,6 +122,37 @@ describe('diagnosticsService', () => {
       expect(result.wifi?.link_quality).toBeUndefined();
     });
 
+    it('should accept a diagnostics payload carrying a time block', async () => {
+      vi.mocked(authorizedFetch).mockResolvedValue(
+        makeResponse({
+          ...MOCK_DIAGNOSTICS,
+          time: {
+            last_sync_unix: 1760000000,
+            last_server: '192.168.2.1',
+            last_delta_s: -3,
+            servers: ['192.168.2.1', 'pool.example'],
+          },
+        }),
+      );
+      const result = await getDiagnostics();
+      expect(result.time?.last_server).toBe('192.168.2.1');
+      expect(result.time?.servers).toEqual(['192.168.2.1', 'pool.example']);
+    });
+
+    it('should accept a diagnostics payload with a null time block', async () => {
+      vi.mocked(authorizedFetch).mockResolvedValue(
+        makeResponse({ ...MOCK_DIAGNOSTICS, time: null }),
+      );
+      await expect(getDiagnostics()).resolves.toBeDefined();
+    });
+
+    it('should reject a time block with a non-array servers field', async () => {
+      vi.mocked(authorizedFetch).mockResolvedValue(
+        makeResponse({ ...MOCK_DIAGNOSTICS, time: { servers: 'pool.example' } }),
+      );
+      await expect(getDiagnostics()).rejects.toThrow(/unexpected shape/);
+    });
+
     it('should accept a diagnostics payload with no ptz key', async () => {
       vi.mocked(authorizedFetch).mockResolvedValue(makeResponse(MOCK_DIAGNOSTICS));
       await expect(getDiagnostics()).resolves.toBeDefined();

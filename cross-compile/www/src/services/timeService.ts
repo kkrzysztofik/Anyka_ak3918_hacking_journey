@@ -14,15 +14,19 @@ export interface SystemDateTime {
   daylightSavings: boolean;
   timezone: string;
   utcDateTime: Date;
+  /** Camera-local time as the camera computes it; null when absent. */
+  localDateTime: Date | null;
 }
 
 export interface DateTimeConfig {
   ntp: {
     enabled: boolean;
-    fromDHCP: boolean;
   };
+  daylightSavings: boolean;
   timezone: string;
-  datetime: Date;
+  utcDateTime: Date;
+  /** Camera-local time; absent on firmware that does not report it. */
+  localDateTime?: Date | null;
 }
 
 /**
@@ -42,23 +46,31 @@ export async function getSystemDateAndTime(): Promise<SystemDateTime> {
   }
 
   const utcDateTime = sdt.UTCDateTime as Record<string, unknown> | undefined;
-  const time = utcDateTime?.Time as Record<string, unknown> | undefined;
-  const date = utcDateTime?.Date as Record<string, unknown> | undefined;
   const timezone = sdt.TimeZone as Record<string, unknown> | undefined;
 
-  // Build Date object from response
-  const year = Number(date?.Year || new Date().getFullYear());
-  const month = Number(date?.Month || 1) - 1; // JS months are 0-indexed
-  const day = Number(date?.Day || 1);
-  const hour = Number(time?.Hour || 0);
-  const minute = Number(time?.Minute || 0);
-  const second = Number(time?.Second || 0);
+  const toJsDate = (block: Record<string, unknown> | undefined): Date | null => {
+    const t = block?.Time as Record<string, unknown> | undefined;
+    const d = block?.Date as Record<string, unknown> | undefined;
+    if (!t && !d) return null;
+    // Partial blocks fall back the same way the old inline parser did.
+    return new Date(
+      Date.UTC(
+        Number(d?.Year || new Date().getFullYear()),
+        Number(d?.Month || 1) - 1,
+        Number(d?.Day || 1),
+        Number(t?.Hour || 0),
+        Number(t?.Minute || 0),
+        Number(t?.Second || 0),
+      ),
+    );
+  };
 
   return {
     dateTimeType: safeString(sdt.DateTimeType, 'NTP') as DateTimeType,
     daylightSavings: sdt.DaylightSavings === true || sdt.DaylightSavings === 'true',
     timezone: safeString(timezone?.TZ, 'UTC'),
-    utcDateTime: new Date(Date.UTC(year, month, day, hour, minute, second)),
+    utcDateTime: toJsDate(utcDateTime) ?? new Date(),
+    localDateTime: toJsDate(sdt.LocalDateTime as Record<string, unknown> | undefined),
   };
 }
 
@@ -114,31 +126,71 @@ export async function getDateTime(): Promise<DateTimeConfig> {
   return {
     ntp: {
       enabled: sys.dateTimeType === 'NTP',
-      fromDHCP: true, // Stub
     },
+    daylightSavings: sys.daylightSavings,
     timezone: sys.timezone,
-    datetime: sys.utcDateTime,
+    utcDateTime: sys.utcDateTime,
+    localDateTime: sys.localDateTime,
   };
 }
 
 /**
- * Set NTP mode
+ * Get the NTP server list reported by the camera.
+ *
+ * fast-xml-parser collapses a one-element NTPManual list to a single object;
+ * tolerate both shapes.
  */
-export async function setNTP(_fromDHCP: boolean): Promise<void> {
-  // We preserve current timezone and assume NTP mode
-  const current = await getSystemDateAndTime();
-  await setSystemDateAndTime('NTP', current.daylightSavings, current.timezone);
-  // Note: fromDHCP logic might require lower-level network interface changes (DNS/NTP from DHCP)
-  // which might be handled in Network settings, but here we just enable NTP mode.
+export async function getNtp(): Promise<string[]> {
+  const data = await soapRequest<Record<string, unknown>>(
+    ENDPOINTS.device,
+    '<tds:GetNTP />',
+    'GetNTPResponse',
+  );
+
+  const raw = (data?.NTPInformation as Record<string, unknown> | undefined)?.NTPManual;
+  // fast-xml-parser collapses a one-element list to a bare object.
+  const present = raw ?? [];
+  const entries = Array.isArray(present) ? present : [present];
+  return entries
+    .map((entry) => {
+      const e = entry as Record<string, unknown>;
+      const value = e.DNSname ?? e.IPv4Address ?? e.IPv6Address;
+      return typeof value === 'string' ? value : '';
+    })
+    .filter((s) => s.length > 0);
+}
+
+// Octet-accurate on purpose: `\d{1,3}` alone accepts 999.999.999.999 and
+// would ship it as <tt:IPv4Address>, which the camera rejects, instead of
+// letting it through as a (also invalid, but correctly typed) DNS name.
+const IPV4_OCTET = String.raw`(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)`;
+const IPV4_RE = new RegExp(String.raw`^${IPV4_OCTET}(?:\.${IPV4_OCTET}){3}$`);
+
+/**
+ * Set the NTP server list. One `<tds:NTPManual>` per server; an IPv4 literal
+ * goes out as `<tt:IPv4Address>`, everything else as `<tt:DNSname>`.
+ */
+export async function setNtp(servers: string[]): Promise<void> {
+  const manual = servers
+    .map((s) => {
+      const escaped = escapeXml(s);
+      return IPV4_RE.test(s)
+        ? `<tds:NTPManual><tt:Type>IPv4</tt:Type><tt:IPv4Address>${escaped}</tt:IPv4Address></tds:NTPManual>`
+        : `<tds:NTPManual><tt:Type>DNS</tt:Type><tt:DNSname>${escaped}</tt:DNSname></tds:NTPManual>`;
+    })
+    .join('');
+
+  const body = `<tds:SetNTP><tds:FromDHCP>false</tds:FromDHCP>${manual}</tds:SetNTP>`;
+  await soapRequest(ENDPOINTS.device, body, 'SetNTPResponse');
 }
 
 /**
  * Set DateTime manual
  */
 export async function setDateTime(
-  mode: 'manual',
   isoDate: string,
   timezone: string,
+  daylightSavings: boolean,
 ): Promise<void> {
-  await setSystemDateAndTime('Manual', false, timezone, new Date(isoDate));
+  await setSystemDateAndTime('Manual', daylightSavings, timezone, new Date(isoDate));
 }

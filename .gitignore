@@ -283,3 +283,8 @@ SD_card_contents/anyka_hack/onvif/www/
 
 # Vitest's JSON reporter output: a run artifact, not source.
 .vitest/
+
+# Upgrade bundles staged by the firmware-upgrade skill: tens of MB of build
+# output that a fully-staged `git add` would otherwise sweep in.
+bundle.tar
+*.bundle.tar

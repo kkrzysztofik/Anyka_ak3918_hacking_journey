@@ -191,8 +191,54 @@ pub fn ntp_disabled_marker_path(update_root: &Path) -> PathBuf {
     update_root.join("state/ntp.disabled")
 }
 
+/// `{update_root}/state/ntp.status` — advisory sync state for the WebUI.
+///
+/// A sibling of `ntp.disabled` rather than a key in `anyka.toml`: adding a key
+/// there would be a hard parse error for an older anyka-init in the other A/B
+/// slot (`deny_unknown_fields`). Unlike the marker this one *is* parsed, which
+/// is safe because it is display-only — a garbled line shows "unknown", it
+/// never changes behaviour.
+pub fn ntp_status_path(update_root: &Path) -> PathBuf {
+    update_root.join("state/ntp.status")
+}
+
+/// One TSV line: `last_unix \t server \t delta_s \t s1,s2,…`.
+/// `last_unix` is 0 when no sync has succeeded yet.
+pub fn write_status(update_root: &Path, last: Option<(i64, &str, i64)>, servers: &[String]) {
+    let path = ntp_status_path(update_root);
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let (unix, server, delta) = last.unwrap_or((0, "", 0));
+    let line = format!("{unix}\t{server}\t{delta}\t{}\n", servers.join(","));
+    let _ = std::fs::write(&path, line);
+}
+
+/// Re-read `[time]` so a `set-ntp` (or a hand-edit) takes effect without a
+/// reboot. Any read or parse failure keeps `current` — a config being edited
+/// under us must not blank the server list.
+pub fn reload_time_cfg(config_path: &Path, current: &TimeCfg) -> TimeCfg {
+    match crate::config::Config::load_without_overlay(&config_path.to_string_lossy()) {
+        Ok(cfg) => cfg.time,
+        Err(e) => {
+            tracing::warn!(error = %e, "could not reload [time]; keeping the running value");
+            current.clone()
+        }
+    }
+}
+
+/// Current wall-clock time as unix seconds, the same conversion `delta_secs`
+/// uses for `sys.realtime()`.
+fn now_unix(sys: &dyn Sys) -> i64 {
+    sys.realtime()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+}
+
 /// Query each configured server in turn; step the clock on the first success.
-/// Returns the applied delta in seconds, or `None` if nothing was applied.
+/// Returns `(server, applied delta in seconds)` for the server that answered,
+/// or `None` if nothing was applied.
 ///
 /// When `budget` is `Some`, stop before starting a server query that cannot
 /// finish within the remaining time (socket timeout is capped to the budget).
@@ -204,7 +250,7 @@ pub fn sync_once(
     cfg: &TimeCfg,
     budget: Option<Duration>,
     ntp_disabled: &Path,
-) -> Option<i64> {
+) -> Option<(String, i64)> {
     // Manual clock mode (onvif-rust's `state/ntp.disabled`): do not step the
     // clock over the user's manual setting.
     if ntp_disabled.is_file() {
@@ -240,12 +286,12 @@ pub fn sync_once(
                 let delta = delta_secs(before, t);
                 if delta.unsigned_abs() < cfg.step_threshold_sec {
                     tracing::debug!(server, delta, "clock already within threshold");
-                    return Some(0);
+                    return Some((server.clone(), 0));
                 }
                 match sys.set_realtime(t) {
                     Ok(()) => {
                         tracing::info!(server, delta_sec = delta, "stepped system clock");
-                        return Some(delta);
+                        return Some((server.clone(), delta));
                     }
                     Err(e) => tracing::error!(server, error = %e, "clock_settime failed"),
                 }
@@ -299,19 +345,38 @@ pub fn first_sync(sys: &dyn Sys, cfg: &TimeCfg, ntp_disabled: &Path) -> bool {
 }
 
 /// Background resync loop, started after P3.
-pub fn resync_loop(sys: &dyn Sys, cfg: &TimeCfg, ntp_disabled: &Path) {
+pub fn resync_loop(
+    sys: &dyn Sys,
+    cfg: &TimeCfg,
+    ntp_disabled: &Path,
+    config_path: &Path,
+    update_root: &Path,
+) {
     // Until the clock has been set once, retry at `retry_interval_sec`, not
     // `resync_interval_sec`. P2.5 gives up after 15s so that boot is not held
     // hostage to the network, which means a slow wifi association routinely
     // lands here with the clock still at the epoch. Sleeping the full 6h resync
     // interval first would leave ws_security.rs:85 (clock_skew_seconds = 300)
     // rejecting every authenticated ONVIF request for those 6 hours.
+    let mut cfg = cfg.clone();
     let mut synced = false;
+    let mut last: Option<(i64, String, i64)> = None;
+
+    write_status(update_root, None, &cfg.servers);
+
     loop {
-        std::thread::sleep(Duration::from_secs(resync_wait_secs(synced, cfg)));
-        if sync_once(sys, cfg, None, ntp_disabled).is_some() {
+        std::thread::sleep(Duration::from_secs(resync_wait_secs(synced, &cfg)));
+        // ponytail: re-parsing the whole config once per resync (6h steady
+        // state) is the cheap way to pick up a `set-ntp`. If servers ever need
+        // to apply in seconds, share a TimeCfg cell with the supervisor loop
+        // instead of shortening this sleep.
+        cfg = reload_time_cfg(config_path, &cfg);
+        if let Some((server, delta)) = sync_once(sys, &cfg, None, ntp_disabled) {
             synced = true;
+            last = Some((now_unix(sys), server, delta));
         }
+        let borrowed = last.as_ref().map(|(u, s, d)| (*u, s.as_str(), *d));
+        write_status(update_root, borrowed, &cfg.servers);
     }
 }
 
@@ -575,6 +640,74 @@ mod build_request_tests {
 /// server that echoes the client's nonce back as the originate timestamp, as
 /// `parse_response` requires.
 #[cfg(test)]
+mod status_tests {
+    use super::*;
+
+    /// `[wifi]` is mandatory, so a `[time]`-only file does not parse.
+    fn minimal_cfg_with(servers: &str) -> String {
+        format!("[wifi]\nssid = \"t\"\npassword = \"p\"\n\n[time]\nservers = [{servers}]\n")
+    }
+
+    #[test]
+    fn test_reload_time_cfg_picks_up_a_changed_server_list() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("anyka.toml");
+        std::fs::write(&path, minimal_cfg_with("\"new.example\", \"pool.example\"")).unwrap();
+
+        let current = TimeCfg {
+            servers: vec!["old.example".into()],
+            ..TimeCfg::default()
+        };
+        let got = reload_time_cfg(&path, &current);
+        assert_eq!(
+            got.servers,
+            vec!["new.example".to_string(), "pool.example".to_string()]
+        );
+    }
+
+    #[test]
+    fn test_reload_time_cfg_keeps_the_current_value_on_a_broken_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("anyka.toml");
+        std::fs::write(&path, "this is not toml {{{").unwrap();
+
+        let current = TimeCfg {
+            servers: vec!["old.example".into()],
+            ..TimeCfg::default()
+        };
+        let got = reload_time_cfg(&path, &current);
+        assert_eq!(
+            got.servers,
+            vec!["old.example".to_string()],
+            "a hand-edit mid-flight must not blank the server list"
+        );
+    }
+
+    #[test]
+    fn test_write_status_round_trips() {
+        let dir = tempfile::tempdir().unwrap();
+        write_status(
+            dir.path(),
+            Some((1_760_000_000, "192.168.2.1", -3)),
+            &["192.168.2.1".to_string(), "pool.example".to_string()],
+        );
+        let text = std::fs::read_to_string(dir.path().join("state/ntp.status")).unwrap();
+        assert_eq!(
+            text.trim_end(),
+            "1760000000\t192.168.2.1\t-3\t192.168.2.1,pool.example"
+        );
+    }
+
+    #[test]
+    fn test_write_status_with_no_sync_yet() {
+        let dir = tempfile::tempdir().unwrap();
+        write_status(dir.path(), None, &["pool.example".to_string()]);
+        let text = std::fs::read_to_string(dir.path().join("state/ntp.status")).unwrap();
+        assert_eq!(text.trim_end(), "0\t\t0\tpool.example");
+    }
+}
+
+#[cfg(test)]
 mod query_tests {
     use super::*;
     use crate::sys::MockSys;
@@ -656,7 +789,7 @@ mod query_tests {
         let delta = sync_once(&sys, &cfg, None, &marker);
         handle.join().expect("server thread");
         assert!(
-            matches!(delta, Some(d) if d > 0),
+            matches!(delta, Some((_, d)) if d > 0),
             "expected a large positive step, got {delta:?}"
         );
     }
@@ -676,7 +809,7 @@ mod query_tests {
         let marker = marker_tests::absent_marker();
         let delta = sync_once(&sys, &cfg, None, &marker);
         handle.join().expect("server thread");
-        assert_eq!(delta, Some(0));
+        assert_eq!(delta.map(|(_, d)| d), Some(0));
     }
 
     #[test]
