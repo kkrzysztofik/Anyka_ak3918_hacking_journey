@@ -395,7 +395,7 @@ Deploy the rebuilt binary via the A/B slot flow (per anyka-firmware-upgrade skil
 
 ```bash
 ffprobe -v error -show_entries stream=codec_name,profile,width,height,r_frame_rate \
-  http://admin:admin@192.168.2.198:8080/live/main.flv
+  http://admin:$CAMERA_PASS@192.168.2.198:8080/live/main.flv
 ```
 
 Expected: `r_frame_rate` ~ `15/1` (or equivalent near-15 value). Additionally open the WebUI Live View: the Frame Rate stat must show ~15 (measured) and the Codec stat `H.264 Main@L4.0`.

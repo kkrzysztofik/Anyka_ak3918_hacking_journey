@@ -144,7 +144,7 @@ make -C cross-compile/vendor-daemon release install
 
 **Step 2: Force night**
 
-ONVIF `SetImagingSettings` `IrCutFilter=OFF` on token `VideoSource_1` (admin/admin).
+ONVIF `SetImagingSettings` `IrCutFilter=OFF` on token `VideoSource_1` (user `admin`, password from the secret store).
 
 Expect: `IR_LED=1`, stream looks IR/night (not day colour under IR glow).  
 Expect: no new `ISP day/night switch failed … isp=-1` while attached with live VI.

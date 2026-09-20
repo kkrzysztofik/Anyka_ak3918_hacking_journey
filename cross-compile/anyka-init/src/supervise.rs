@@ -63,8 +63,18 @@ impl RestartHistory {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SvcState {
-    Running { pid: Pid, since: Instant },
-    Backoff { until: Instant, attempt: u32 },
+    Running {
+        pid: Pid,
+        since: Instant,
+    },
+    Backoff {
+        until: Instant,
+        attempt: u32,
+    },
+    /// Disabled at runtime via the control socket. The service stays in the
+    /// `services` vec (so `by_pid` indices never shift) but is inert: `decide`
+    /// never acts on it and never records history for it.
+    Disabled,
 }
 
 impl SvcState {
@@ -72,6 +82,7 @@ impl SvcState {
         match self {
             Self::Running { pid, .. } => Some(*pid),
             Self::Backoff { .. } => None,
+            Self::Disabled => None,
         }
     }
 }
@@ -176,6 +187,13 @@ pub fn decide(
         (SvcState::Running { .. }, Event::Tick) => Decision {
             action: Action::None,
             next: *state,
+        },
+
+        // A disabled service never acts and never touches `hist`: re-enabling
+        // it later must not inherit a crash-loop it never had.
+        (SvcState::Disabled, _) => Decision {
+            action: Action::None,
+            next: SvcState::Disabled,
         },
     }
 }
@@ -439,5 +457,48 @@ mod decide_tests {
             &policy(),
         );
         assert!(matches!(d.action, Action::None));
+    }
+
+    #[test]
+    fn test_decide_never_acts_on_a_disabled_service() {
+        let now = Instant::now();
+        let mut hist = RestartHistory::default();
+        // Pre-load history so any other state would be deep in crash-loop logic.
+        for _ in 0..10 {
+            hist.record(now - Duration::from_secs(1));
+        }
+        let before = hist.len();
+
+        let d = decide(
+            &SvcState::Disabled,
+            &mut hist,
+            Event::Exited,
+            now,
+            &policy(),
+        );
+
+        assert_eq!(d.action, Action::None);
+        assert_eq!(d.next, SvcState::Disabled);
+        // A disabled service must not accumulate crash history: re-enabling it
+        // later must not inherit a crash-loop it never had.
+        assert_eq!(hist.len(), before);
+    }
+
+    #[test]
+    fn test_decide_does_not_start_a_disabled_service_on_a_tick() {
+        let now = Instant::now();
+        let d = decide(
+            &SvcState::Disabled,
+            &mut RestartHistory::default(),
+            Event::Tick,
+            now,
+            &policy(),
+        );
+        assert_eq!(d.action, Action::None);
+    }
+
+    #[test]
+    fn test_pid_of_disabled_is_none() {
+        assert_eq!(SvcState::Disabled.pid(), None);
     }
 }

@@ -1,11 +1,14 @@
 //! The P3 + P4 supervision loop.
 
 use crate::config::{Config, ServiceCfg};
+use crate::control;
 use crate::logging;
 use crate::storm::StormState;
 use crate::supervise::{Action, Event, Policy, RestartHistory, SvcState, decide};
 use crate::sys::{ExitStatus, Pid, SpawnSpec, Sys};
 use std::collections::BTreeMap;
+use std::os::unix::fs::PermissionsExt;
+use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -30,6 +33,10 @@ pub fn thread_stack() -> usize {
 /// by sending the process SIGCHLD.
 const REAP_POLL_INTERVAL: Duration = Duration::from_secs(1);
 
+pub enum ControlMsg {
+    Status(Vec<control::ServiceStatus>),
+}
+
 pub enum Msg {
     Exited(Pid, ExitStatus),
     Shutdown,
@@ -40,6 +47,14 @@ pub enum Msg {
     /// SIGKILL. A task wedged in D state will not die even from this — the
     /// monitor's next rung is a reboot, which does not need the process to die.
     KillService(String),
+    QueryStatus(Sender<ControlMsg>),
+    /// Runtime enable/disable of a configured service. The handler persists to
+    /// `anyka.toml` first, then transitions in-memory state.
+    ToggleService {
+        name: String,
+        enabled: bool,
+        reply: Sender<control::ToggleOutcome>,
+    },
 }
 
 struct Service {
@@ -221,6 +236,61 @@ fn try_start_service(
     }
 }
 
+/// The recovery telnet (port 24). Deliberately *outside* the supervised
+/// table: the P0 wrapper starts it **before** anyka-init exists, and a kill
+/// must stay final — a supervisor would just resurrect it. So this (1)
+/// persists `[system].telnet` (file first, like every other toggle) and
+/// (2) makes the live process match: spawn the P0-equivalent
+/// `telnetd -p 24 -l /bin/sh`, or killall it. Reboots follow the persisted
+/// flag through the existing P0 (always start) and P2 (kill iff false) steps
+/// — no boot-code change. Safe mode force-enables the flag at boot, which is
+/// the documented escape hatch, not a bug this should fight.
+fn handle_toggle_telnet(
+    ctx: &mut LoopCtx<'_>,
+    enabled: bool,
+    reply: &Sender<control::ToggleOutcome>,
+) {
+    if let Err(e) = Config::set_system_telnet(ctx.config_path, enabled) {
+        tracing::error!(error = %e, "telnet toggle: config write failed; not applied");
+        let _ = reply.send(control::ToggleOutcome::Error);
+        return;
+    }
+    ctx.cfg.system.telnet = enabled;
+
+    if enabled {
+        // pidof exits non-zero when the process is absent: port 24 is
+        // single-instance, so spawn only when nothing holds it.
+        let running = matches!(
+            ctx.sys.run_to_completion("pidof", &["telnetd".to_string()]),
+            Ok(status) if status.success()
+        );
+        if !running
+            && let Err(e) = ctx.sys.spawn_detached(
+                "telnetd",
+                &[
+                    "-p".to_string(),
+                    "24".to_string(),
+                    "-l".to_string(),
+                    "/bin/sh".to_string(),
+                ],
+            )
+        {
+            tracing::warn!(error = %e, "telnet toggle: telnetd spawn failed");
+        }
+    } else {
+        // killall exits non-zero when nothing matched — that is success here;
+        // only a spawn/wait failure is worth a warning.
+        if let Err(e) = ctx
+            .sys
+            .run_to_completion("killall", &["telnetd".to_string()])
+        {
+            tracing::warn!(error = %e, "telnet toggle: killall failed");
+        }
+    }
+    tracing::info!(enabled, "recovery telnet toggled");
+    let _ = reply.send(control::ToggleOutcome::Ok);
+}
+
 fn tick_services(
     sys: &dyn Sys,
     cfg: &Config,
@@ -267,6 +337,23 @@ fn handle_service_exited(
         tracing::debug!(pid, ?st, "reaped an unknown child");
         return;
     };
+    // Only the service's *current* pid may drive its state machine.
+    //
+    // `disable` SIGTERMs the child and marks the service inert, but the exit
+    // report arrives up to a reap-poll later. Re-enabling inside that window
+    // starts a fresh pid while the old mapping is still in `by_pid`; without
+    // this check the stale exit would be charged to the new instance —
+    // recording a restart it never had, knocking it into backoff, and letting
+    // the next tick spawn a second copy alongside the one already running.
+    if services[i].state.pid() != Some(pid) {
+        tracing::debug!(
+            service = %services[i].name,
+            pid,
+            ?st,
+            "ignoring an exit from a superseded pid"
+        );
+        return;
+    }
     tracing::warn!(service = %services[i].name, pid, ?st, "service exited");
     let now = sys.now();
     let state = services[i].state;
@@ -297,6 +384,147 @@ fn handle_restart_service(sys: &dyn Sys, services: &[Service], name: String) {
     }
 }
 
+/// One row per **configured** service, not per running one: a disabled
+/// service has to be listable or the UI has no way to offer re-enabling it.
+/// `cfg` is the single source of truth — both the boot path and the toggle
+/// handler write it before anything else.
+fn handle_query_status(cfg: &Config, services: &[Service], reply_tx: &Sender<ControlMsg>) {
+    let now = Instant::now();
+    let rows: Vec<control::ServiceStatus> = cfg
+        .services
+        .iter()
+        .map(|(name, entry)| {
+            match services.iter().find(|s| s.name == *name) {
+                _ if !entry.enabled => control::ServiceStatus::from_svc_state(
+                    name,
+                    &SvcState::Disabled,
+                    &RestartHistory::default(),
+                    now,
+                ),
+                Some(svc) => {
+                    control::ServiceStatus::from_svc_state(&svc.name, &svc.state, &svc.hist, now)
+                }
+                // Enabled but not yet in the vec: render as pending, never drop.
+                None => control::ServiceStatus {
+                    name: name.clone(),
+                    state: "backoff",
+                    pid: None,
+                    uptime_s: 0,
+                    restarts: 0,
+                    retry_in_s: 0,
+                },
+            }
+        })
+        .collect();
+    let _ = reply_tx.send(ControlMsg::Status(rows));
+}
+
+/// Services that may not be toggled at runtime.
+///
+/// `wpa_supplicant`: the monitor's wifi ladder reboots the camera on an
+/// unhealthy link (monitor.rs:80) and is driven by link health, not by a file
+/// we can stand down. Disabling the supplicant on a Wi-Fi camera also loses
+/// the device outright.
+const NON_TOGGLEABLE: [&str; 1] = ["wpa_supplicant"];
+
+/// Runtime enable/disable. Order is deliberate: **file first**, then
+/// in-memory cfg, then state/kill. A failed write means nothing changes — a
+/// "disabled" service that silently re-enabled itself on reboot would defeat
+/// the crash-loop escape hatch this exists for.
+///
+/// `telnetd` is special-cased before any service lookup: it is not a
+/// supervised service, it is the `[system].telnet` switch (see
+/// `handle_toggle_telnet`).
+fn handle_toggle_service(
+    ctx: &mut LoopCtx<'_>,
+    services: &mut Vec<Service>,
+    name: String,
+    enabled: bool,
+    reply: &Sender<control::ToggleOutcome>,
+) {
+    if name == "telnetd" {
+        handle_toggle_telnet(ctx, enabled, reply);
+        return;
+    }
+    if NON_TOGGLEABLE.contains(&name.as_str()) {
+        tracing::warn!(service = %name, "toggle refused: service is not toggleable");
+        let _ = reply.send(control::ToggleOutcome::Unknown);
+        return;
+    }
+    let Some(entry) = ctx.cfg.services.get(&name) else {
+        tracing::warn!(service = %name, "toggle for unknown service");
+        let _ = reply.send(control::ToggleOutcome::Unknown);
+        return;
+    };
+    if entry.enabled == enabled {
+        let _ = reply.send(control::ToggleOutcome::Ok);
+        return;
+    }
+
+    if let Err(e) = Config::set_service_enabled(ctx.config_path, &name, enabled) {
+        tracing::error!(service = %name, error = %e, "toggle: config write failed; not applied");
+        let _ = reply.send(control::ToggleOutcome::Error);
+        return;
+    }
+    if let Some(e) = ctx.cfg.services.get_mut(&name) {
+        e.enabled = enabled;
+    }
+
+    match services.iter_mut().find(|s| s.name == name) {
+        Some(svc) if !enabled => {
+            if let Some(pid) = svc.state.pid()
+                && let Err(e) = ctx.sys.kill(pid, libc::SIGTERM)
+            {
+                tracing::warn!(service = %name, error = %e, "toggle: SIGTERM failed");
+            }
+            svc.state = SvcState::Disabled;
+            tracing::info!(service = %name, "disabled");
+        }
+        Some(svc) => {
+            // The same initial state a boot start gets (build_enabled_services):
+            // the next tick starts it under normal backoff/crash-loop policy.
+            svc.state = SvcState::Backoff {
+                until: ctx.sys.now(),
+                attempt: 0,
+            };
+            tracing::info!(service = %name, "enabled");
+        }
+        None if enabled => {
+            // Not in the vec: disabled at boot, never started (the shipped
+            // dropbear case). Insert exactly as build_enabled_services would.
+            if let Some(s) = ctx.cfg.services.get(&name) {
+                services.push(Service {
+                    name: name.clone(),
+                    spec: spec_of_slot(s, ctx.update_root, ctx.slots),
+                    state: SvcState::Backoff {
+                        until: ctx.sys.now(),
+                        attempt: 0,
+                    },
+                    hist: RestartHistory::default(),
+                });
+                tracing::info!(service = %name, "enabled (inserted)");
+            }
+        }
+        None => {}
+    }
+
+    // Stand the video watchdog down with the daemon it watches. The heartbeat
+    // file survives in /tmp holding its last counter value, and the monitor
+    // reads a stalled counter as a crash: restart, kill, then reboot five
+    // ticks later (monitor.rs:150). An absent file reads as "no signal yet",
+    // which it already treats as not-a-stall.
+    if !enabled && name == "vendor-daemon" {
+        let hb = Path::new(&ctx.cfg.monitor.video_heartbeat_path);
+        if let Err(e) = std::fs::remove_file(hb)
+            && e.kind() != std::io::ErrorKind::NotFound
+        {
+            tracing::warn!(error = %e, "failed to clear the video heartbeat");
+        }
+    }
+
+    let _ = reply.send(control::ToggleOutcome::Ok);
+}
+
 fn handle_kill_service(sys: &dyn Sys, services: &[Service], name: String) {
     match services.iter().find(|s| s.name == name) {
         Some(svc) => match svc.state.pid() {
@@ -313,32 +541,162 @@ fn handle_kill_service(sys: &dyn Sys, services: &[Service], name: String) {
     }
 }
 
+fn handle_control_conn(mut stream: UnixStream, tx: &Sender<Msg>) -> std::io::Result<()> {
+    use std::io::{BufRead, Write};
+    let mut reader = std::io::BufReader::new(&stream);
+    let mut line = String::new();
+    if reader.read_line(&mut line)? == 0 {
+        return Ok(());
+    }
+    match control::parse_request(&line) {
+        Some(control::Request::Status) => {
+            let (reply_tx, reply_rx) = channel();
+            if tx.send(Msg::QueryStatus(reply_tx)).is_ok() {
+                // Bounded like `send_toggle`. This thread serves connections
+                // one at a time, so an unbounded wait on a wedged loop would
+                // not just hang this status call — every later status,
+                // restart, enable and disable would queue behind it forever.
+                let reply = reply_rx.recv_timeout(CONTROL_REPLY_TIMEOUT);
+                if let Ok(ControlMsg::Status(rows)) = reply {
+                    let _ = stream.write_all(control::encode_status(&rows).as_bytes());
+                }
+            }
+        }
+        Some(control::Request::Restart(name)) => {
+            let _ = tx.send(Msg::RestartService(name.clone()));
+            // The onvif-rust client treats exactly "ok" as accepted and anything
+            // else as a failure — keep the reply minimal, not chatty.
+            let _ = stream.write_all(b"ok\n");
+        }
+        Some(control::Request::Enable(name)) => send_toggle(&mut stream, tx, name, true),
+        Some(control::Request::Disable(name)) => send_toggle(&mut stream, tx, name, false),
+        None => {
+            let _ = stream.write_all(b"unknown\n");
+        }
+    }
+    Ok(())
+}
+
+/// How long the control thread waits for the supervisor loop to answer.
+///
+/// Deliberately below the client's 2 s socket timeout
+/// (`onvif-rust/src/diagnostics/services.rs`): answering later than the client
+/// waits turns every slow reply into a connection error.
+const CONTROL_REPLY_TIMEOUT: Duration = Duration::from_secs(1);
+
+/// Ask the loop to toggle a service and write its verdict back to the
+/// connection.
+fn send_toggle<W: std::io::Write>(writer: &mut W, tx: &Sender<Msg>, name: String, enabled: bool) {
+    let (reply_tx, reply_rx) = channel();
+    let sent = tx.send(Msg::ToggleService {
+        name,
+        enabled,
+        reply: reply_tx,
+    });
+    let reply = match sent {
+        // A timeout is NOT a failure. The message is still queued, and
+        // `handle_toggle_service` writes `anyka.toml` and updates state
+        // *before* it replies — dropping the receiver cancels nothing. Saying
+        // "error" here would tell an admin nothing changed while the toggle
+        // lands a moment later. `pending` says what is actually true: it was
+        // accepted, the outcome is unconfirmed, go look at the service list.
+        Ok(()) => match reply_rx.recv_timeout(CONTROL_REPLY_TIMEOUT) {
+            Ok(control::ToggleOutcome::Ok) => "ok\n",
+            Ok(control::ToggleOutcome::Unknown) => "unknown\n",
+            Ok(control::ToggleOutcome::Error) => "error\n",
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                tracing::warn!("toggle reply timed out; the change may still apply");
+                "pending\n"
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => "error\n",
+        },
+        // The loop is gone entirely (reboot in progress): nothing was queued.
+        Err(_) => "error\n",
+    };
+    let _ = writer.write_all(reply.as_bytes());
+}
+
+pub fn spawn_control_thread(tx: Sender<Msg>) -> std::io::Result<()> {
+    let socket_path = control::SOCKET_PATH;
+    let _ = std::fs::remove_file(socket_path);
+    let listener = UnixListener::bind(socket_path)?;
+    // Not best-effort: this socket accepts restart/enable/disable. If it stays
+    // world-writable the toggles are open to any local process, so a failure
+    // here has to be visible rather than swallowed.
+    if let Err(e) = std::fs::set_permissions(socket_path, std::fs::Permissions::from_mode(0o600)) {
+        tracing::error!(
+            error = %e,
+            path = socket_path,
+            "could not restrict the control socket; it may be reachable by other local users"
+        );
+    }
+
+    std::thread::Builder::new()
+        .name("supervisor-ctl".into())
+        .stack_size(thread_stack())
+        .spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(stream) = stream else { break };
+                if let Err(e) = handle_control_conn(stream, &tx) {
+                    tracing::warn!(error = %e, "control connection failed");
+                }
+            }
+        })
+        .map_err(std::io::Error::other)?;
+    Ok(())
+}
+
+/// Borrowed state the message handlers need. Exists because `dispatch_msg`
+/// was already at clippy's seven-argument limit before the toggle handler
+/// added a config path, an update root and the slot pointer.
+struct LoopCtx<'a> {
+    sys: &'a dyn Sys,
+    cfg: &'a mut Config,
+    config_path: &'a Path,
+    update_root: &'a Path,
+    slots: &'a crate::update::Slots,
+    policy: &'a Policy,
+}
+
 /// Returns `true` when the supervisor loop should exit.
+// `&mut Vec` deliberately: the enable path in `handle_toggle_service` pushes
+// a service that was disabled at boot; a slice cannot grow.
+#[allow(clippy::ptr_arg)]
 fn dispatch_msg(
-    sys: &Arc<dyn Sys>,
-    cfg: &Config,
-    services: &mut [Service],
+    ctx: &mut LoopCtx<'_>,
+    services: &mut Vec<Service>,
     by_pid: &mut BTreeMap<Pid, usize>,
-    policy: &Policy,
     rx: &Receiver<Msg>,
     msg: Result<Msg, std::sync::mpsc::RecvTimeoutError>,
 ) -> bool {
     match msg {
         Ok(Msg::Exited(pid, st)) => {
-            handle_service_exited(sys.as_ref(), cfg, services, by_pid, policy, pid, st);
+            handle_service_exited(ctx.sys, ctx.cfg, services, by_pid, ctx.policy, pid, st);
             false
         }
         Ok(Msg::RestartService(name)) => {
-            handle_restart_service(sys.as_ref(), services, name);
+            handle_restart_service(ctx.sys, services, name);
             false
         }
         Ok(Msg::KillService(name)) => {
-            handle_kill_service(sys.as_ref(), services, name);
+            handle_kill_service(ctx.sys, services, name);
+            false
+        }
+        Ok(Msg::QueryStatus(reply_tx)) => {
+            handle_query_status(ctx.cfg, services, &reply_tx);
+            false
+        }
+        Ok(Msg::ToggleService {
+            name,
+            enabled,
+            reply,
+        }) => {
+            handle_toggle_service(ctx, services, name, enabled, &reply);
             false
         }
         Ok(Msg::Shutdown) => {
             tracing::info!("shutdown requested");
-            shutdown(sys.as_ref(), by_pid, rx);
+            shutdown(ctx.sys, by_pid, rx);
             true
         }
         Err(std::sync::mpsc::RecvTimeoutError::Timeout) => false,
@@ -349,7 +707,7 @@ fn dispatch_msg(
     }
 }
 
-pub fn run(sys: Arc<dyn Sys>, cfg: &Config, rx: Receiver<Msg>) {
+pub fn run(sys: Arc<dyn Sys>, cfg: &mut Config, config_path: &Path, rx: Receiver<Msg>) {
     let policy = Policy {
         backoff_min: Duration::from_secs(cfg.supervisor.backoff_min_sec),
         backoff_max: Duration::from_secs(cfg.supervisor.backoff_max_sec),
@@ -357,10 +715,13 @@ pub fn run(sys: Arc<dyn Sys>, cfg: &Config, rx: Receiver<Msg>) {
         crashloop_window: Duration::from_secs(cfg.supervisor.crashloop_window_sec),
     };
 
-    let slots = crate::update::Slots::new(&cfg.update.root);
-    let update_root = Path::new(&cfg.update.root);
+    // Owned, not borrowed from `cfg`: `LoopCtx` holds `&mut Config`, so a
+    // live immutable borrow of `cfg.update.root` would conflict. Neither
+    // value changes at runtime.
+    let slots = crate::update::Slots::new(cfg.update.root.clone());
+    let update_root = std::path::PathBuf::from(&cfg.update.root);
 
-    let mut services = build_enabled_services(sys.as_ref(), cfg, update_root, &slots);
+    let mut services = build_enabled_services(sys.as_ref(), cfg, &update_root, &slots);
     let mut by_pid: BTreeMap<Pid, usize> = BTreeMap::new();
 
     loop {
@@ -369,12 +730,18 @@ pub fn run(sys: Arc<dyn Sys>, cfg: &Config, rx: Receiver<Msg>) {
             .map(|d| d.saturating_duration_since(sys.now()))
             .unwrap_or(Duration::from_secs(3600));
 
-        if dispatch_msg(
-            &sys,
+        let mut ctx = LoopCtx {
+            sys: sys.as_ref(),
             cfg,
+            config_path,
+            update_root: &update_root,
+            slots: &slots,
+            policy: &policy,
+        };
+        if dispatch_msg(
+            &mut ctx,
             &mut services,
             &mut by_pid,
-            &policy,
             &rx,
             rx.recv_timeout(timeout),
         ) {
@@ -661,15 +1028,151 @@ mod run_tests {
         }
     }
 
+    fn svc_cfg(exec: &str, enabled: bool) -> ServiceCfg {
+        ServiceCfg {
+            enabled,
+            exec: exec.into(),
+            args: Vec::new(),
+            env: BTreeMap::new(),
+            log: "/nonexistent/svc.log".into(),
+            core_dump: false,
+        }
+    }
+
+    fn dummy_spec() -> SpawnSpec {
+        SpawnSpec {
+            exec: "/bin/true".into(),
+            args: Vec::new(),
+            env: BTreeMap::new(),
+            tz: None,
+            log: "/nonexistent/svc.log".into(),
+            core_dump: false,
+        }
+    }
+
+    #[test]
+    fn test_handle_service_exited_ignores_a_superseded_pid() {
+        // The disable -> re-enable race: the old pid was SIGTERM'd and its
+        // mapping is still in by_pid when the service is already running again
+        // under a new pid. Charging that stale exit to the new instance would
+        // record a restart it never had, knock it into backoff, and let the
+        // next tick spawn a second copy beside the one already running.
+        let mut sys = MockSys::new();
+        sys.expect_now().returning(Instant::now);
+        let cfg = test_config(BTreeMap::new());
+
+        let running_since = Instant::now();
+        let mut services = vec![Service {
+            name: "snmp".into(),
+            spec: dummy_spec(),
+            state: SvcState::Running {
+                pid: 200,
+                since: running_since,
+            },
+            hist: RestartHistory::default(),
+        }];
+        let mut by_pid = BTreeMap::new();
+        by_pid.insert(100, 0); // the superseded pid
+        by_pid.insert(200, 0);
+
+        handle_service_exited(
+            &sys,
+            &cfg,
+            &mut services,
+            &mut by_pid,
+            &test_policy(),
+            100,
+            ExitStatus::Code(0),
+        );
+
+        // Still running under the new pid, no crash recorded, and the stale
+        // mapping is gone.
+        assert_eq!(
+            services[0].state,
+            SvcState::Running {
+                pid: 200,
+                since: running_since
+            }
+        );
+        assert_eq!(services[0].hist.len(), 0);
+        assert!(!by_pid.contains_key(&100));
+        assert_eq!(by_pid.get(&200), Some(&0));
+    }
+
+    #[test]
+    fn test_handle_service_exited_still_handles_the_current_pid() {
+        // The guard must not swallow the normal case.
+        let mut sys = MockSys::new();
+        sys.expect_now().returning(Instant::now);
+        let cfg = test_config(BTreeMap::new());
+
+        let mut services = vec![Service {
+            name: "snmp".into(),
+            spec: dummy_spec(),
+            state: SvcState::Running {
+                pid: 200,
+                since: Instant::now(),
+            },
+            hist: RestartHistory::default(),
+        }];
+        let mut by_pid = BTreeMap::new();
+        by_pid.insert(200, 0);
+
+        handle_service_exited(
+            &sys,
+            &cfg,
+            &mut services,
+            &mut by_pid,
+            &test_policy(),
+            200,
+            ExitStatus::Code(1),
+        );
+
+        assert!(matches!(services[0].state, SvcState::Backoff { .. }));
+        assert!(by_pid.is_empty());
+    }
+
+    /// Mirrors the `Policy` that `run` builds from `test_config`.
+    fn test_policy() -> Policy {
+        Policy {
+            backoff_min: Duration::from_secs(30),
+            backoff_max: Duration::from_secs(60),
+            crashloop_count: 100,
+            crashloop_window: Duration::from_secs(600),
+        }
+    }
+
+    /// A `LoopCtx` over test-owned parts. Returned by value so each test can
+    /// keep its tempdir alive.
+    fn ctx<'a>(
+        sys: &'a dyn Sys,
+        cfg: &'a mut Config,
+        config_path: &'a Path,
+        update_root: &'a Path,
+        slots: &'a crate::update::Slots,
+        policy: &'a Policy,
+    ) -> LoopCtx<'a> {
+        LoopCtx {
+            sys,
+            cfg,
+            config_path,
+            update_root,
+            slots,
+            policy,
+        }
+    }
+
     #[test]
     fn test_run_restart_message_for_unknown_service_is_ignored() {
         let mut sys = MockSys::new();
         sys.expect_now().returning(Instant::now);
 
-        let cfg = Arc::new(test_config(BTreeMap::new()));
+        let mut cfg = test_config(BTreeMap::new());
         let (tx, rx) = make_channel();
         let sys: Arc<dyn Sys> = Arc::new(sys);
-        let handle = std::thread::spawn(move || run(sys, &cfg, rx));
+        let handle = std::thread::spawn(move || {
+            run(sys, &mut cfg, Path::new("/nonexistent/anyka.toml"), rx)
+        });
 
         tx.send(Msg::RestartService("nope".into()))
             .expect("send restart");
@@ -697,10 +1200,12 @@ mod run_tests {
                 core_dump: false,
             },
         );
-        let cfg = Arc::new(test_config(services));
+        let mut cfg = test_config(services);
         let (tx, rx) = make_channel();
         let sys: Arc<dyn Sys> = Arc::new(sys);
-        let handle = std::thread::spawn(move || run(sys, &cfg, rx));
+        let handle = std::thread::spawn(move || {
+            run(sys, &mut cfg, Path::new("/nonexistent/anyka.toml"), rx)
+        });
 
         // Give the loop time to run its first tick (spawn fails, service goes
         // to a 30s backoff) before the restart request arrives.
@@ -716,12 +1221,371 @@ mod run_tests {
         let mut sys = MockSys::new();
         sys.expect_now().returning(Instant::now);
 
-        let cfg = Arc::new(test_config(BTreeMap::new()));
+        let mut cfg = test_config(BTreeMap::new());
         let (tx, rx) = make_channel();
         let sys: Arc<dyn Sys> = Arc::new(sys);
-        let handle = std::thread::spawn(move || run(sys, &cfg, rx));
+        let handle = std::thread::spawn(move || {
+            run(sys, &mut cfg, Path::new("/nonexistent/anyka.toml"), rx)
+        });
 
         tx.send(Msg::Shutdown).expect("send shutdown");
         handle.join().expect("run() must not panic");
+    }
+
+    /// Everything a `handle_toggle_service` call needs, owned so the tempdir
+    /// outlives the borrow. Ten tests differed only in the seed, the
+    /// configured services and which ones were running.
+    struct ToggleFixture {
+        dir: tempfile::TempDir,
+        cfg_path: std::path::PathBuf,
+        cfg: Config,
+        slots: crate::update::Slots,
+        policy: Policy,
+        svcs: Vec<Service>,
+    }
+
+    impl ToggleFixture {
+        fn build(
+            cfg_path: std::path::PathBuf,
+            dir: tempfile::TempDir,
+            configured: &[(&str, bool)],
+            running: &[(&str, i32)],
+        ) -> Self {
+            let mut services = BTreeMap::new();
+            for (name, enabled) in configured {
+                services.insert((*name).to_string(), svc_cfg("/bin/true", *enabled));
+            }
+            let slots = crate::update::Slots::new(dir.path());
+            Self {
+                cfg: test_config(services),
+                svcs: running
+                    .iter()
+                    .map(|(name, pid)| Service {
+                        name: (*name).into(),
+                        spec: dummy_spec(),
+                        state: SvcState::Running {
+                            pid: *pid,
+                            since: Instant::now(),
+                        },
+                        hist: RestartHistory::default(),
+                    })
+                    .collect(),
+                policy: test_policy(),
+                slots,
+                cfg_path,
+                dir,
+            }
+        }
+
+        fn new(seed: &str, configured: &[(&str, bool)], running: &[(&str, i32)]) -> Self {
+            let dir = tempfile::tempdir().expect("tempdir");
+            let cfg_path = dir.path().join("anyka.toml");
+            std::fs::write(&cfg_path, seed).expect("seed");
+            Self::build(cfg_path, dir, configured, running)
+        }
+
+        /// A fixture whose config cannot be read: the path sits in a directory
+        /// that does not exist, so the read fails before anything is touched.
+        /// (chmod is not a reliable lever: CI may run as root.)
+        fn unreadable(configured: &[(&str, bool)], running: &[(&str, i32)]) -> Self {
+            let dir = tempfile::tempdir().expect("tempdir");
+            let cfg_path = dir.path().join("no-such-dir").join("anyka.toml");
+            Self::build(cfg_path, dir, configured, running)
+        }
+
+        fn toggle(&mut self, sys: &dyn Sys, name: &str, enabled: bool) -> control::ToggleOutcome {
+            let (rtx, rrx) = channel();
+            let mut c = ctx(
+                sys,
+                &mut self.cfg,
+                &self.cfg_path,
+                self.dir.path(),
+                &self.slots,
+                &self.policy,
+            );
+            handle_toggle_service(&mut c, &mut self.svcs, name.into(), enabled, &rtx);
+            rrx.recv().expect("reply")
+        }
+
+        fn text(&self) -> String {
+            std::fs::read_to_string(&self.cfg_path).expect("read")
+        }
+    }
+
+    /// A MockSys that only knows what time it is.
+    fn clock_only_sys() -> MockSys {
+        let mut sys = MockSys::new();
+        sys.expect_now().returning(Instant::now);
+        sys
+    }
+
+    #[test]
+    fn test_toggle_disable_persists_then_kills_and_inerts() {
+        let mut sys = clock_only_sys();
+        sys.expect_kill()
+            .withf(|pid, sig| *pid == 55 && *sig == libc::SIGTERM)
+            .times(1)
+            .returning(|_, _| Ok(()));
+
+        let mut fx = ToggleFixture::new(
+            "[services.snmp]\nenabled = true\nexec = \"/bin/true\"\n",
+            &[("snmp", true)],
+            &[("snmp", 55)],
+        );
+
+        assert_eq!(fx.toggle(&sys, "snmp", false), control::ToggleOutcome::Ok);
+        // File first.
+        assert!(fx.text().contains("enabled = false"));
+        assert!(!fx.cfg.services["snmp"].enabled);
+        assert_eq!(fx.svcs[0].state, SvcState::Disabled);
+    }
+
+    #[test]
+    fn test_toggle_enable_a_boot_time_disabled_service_inserts_it() {
+        // dropbear is the shipped case: disabled in the file, never in the vec.
+        let sys = clock_only_sys();
+        let mut fx = ToggleFixture::new(
+            "[services.dropbear]\nenabled = false\nexec = \"/bin/true\"\n",
+            &[("dropbear", false)],
+            &[],
+        );
+
+        assert_eq!(
+            fx.toggle(&sys, "dropbear", true),
+            control::ToggleOutcome::Ok
+        );
+        assert!(fx.text().contains("enabled = true"));
+        // Inserted exactly as build_enabled_services would: boot-start state.
+        assert_eq!(fx.svcs.len(), 1);
+        assert_eq!(fx.svcs[0].name, "dropbear");
+        assert!(matches!(
+            fx.svcs[0].state,
+            SvcState::Backoff { attempt: 0, .. }
+        ));
+    }
+
+    #[test]
+    fn test_toggle_unknown_service_replies_unknown_and_writes_nothing() {
+        let sys = clock_only_sys();
+        let before = "[services.snmp]\nenabled = true\nexec = \"/bin/true\"\n";
+        let mut fx = ToggleFixture::new(before, &[("snmp", true)], &[("snmp", 55)]);
+
+        assert_eq!(
+            fx.toggle(&sys, "nope", false),
+            control::ToggleOutcome::Unknown
+        );
+        assert_eq!(fx.text(), before);
+    }
+
+    #[test]
+    fn test_toggle_of_wpa_supplicant_is_refused() {
+        // Configured and enabled, but not toggleable: disabling it would let the
+        // monitor's wifi ladder reboot the camera, and there is no way back in.
+        let sys = clock_only_sys();
+        let before = "[services.wpa_supplicant]\nenabled = true\nexec = \"/bin/true\"\n";
+        let mut fx = ToggleFixture::new(
+            before,
+            &[("wpa_supplicant", true)],
+            &[("wpa_supplicant", 55)],
+        );
+
+        assert_eq!(
+            fx.toggle(&sys, "wpa_supplicant", false),
+            control::ToggleOutcome::Unknown
+        );
+        assert_eq!(fx.text(), before);
+        assert!(fx.cfg.services["wpa_supplicant"].enabled);
+    }
+
+    #[test]
+    fn test_toggle_is_an_idempotent_noop_when_already_in_that_state() {
+        // MockSys with no kill expectation — calling it would fail the test.
+        let sys = MockSys::new();
+        let before = "[services.snmp]\nenabled = false\nexec = \"/bin/true\"\n";
+        let mut fx = ToggleFixture::new(before, &[("snmp", false)], &[]);
+
+        assert_eq!(fx.toggle(&sys, "snmp", false), control::ToggleOutcome::Ok);
+        assert_eq!(fx.text(), before);
+    }
+
+    #[test]
+    fn test_toggle_replies_error_and_changes_nothing_when_the_write_fails() {
+        let sys = clock_only_sys();
+        let mut fx = ToggleFixture::unreadable(&[("snmp", true)], &[("snmp", 55)]);
+
+        assert_eq!(
+            fx.toggle(&sys, "snmp", false),
+            control::ToggleOutcome::Error
+        );
+        assert!(fx.cfg.services["snmp"].enabled); // in-memory untouched
+        assert!(matches!(fx.svcs[0].state, SvcState::Running { .. }));
+    }
+
+    #[test]
+    fn test_disabling_vendor_daemon_removes_the_video_heartbeat() {
+        // Without this the monitor keeps reading a stale counter and reboots
+        // the camera five ticks later — the exact thing disabling is meant to stop.
+        let mut sys = clock_only_sys();
+        sys.expect_kill()
+            .withf(|pid, sig| *pid == 77 && *sig == libc::SIGTERM)
+            .times(1)
+            .returning(|_, _| Ok(()));
+
+        let mut fx = ToggleFixture::new(
+            "[services.vendor-daemon]\nenabled = true\nexec = \"/bin/true\"\n",
+            &[("vendor-daemon", true)],
+            &[("vendor-daemon", 77)],
+        );
+        let hb = fx.dir.path().join("video.heartbeat");
+        std::fs::write(&hb, "12345\n").expect("seed heartbeat");
+        fx.cfg.monitor.video_heartbeat_path = hb.display().to_string();
+
+        assert_eq!(
+            fx.toggle(&sys, "vendor-daemon", false),
+            control::ToggleOutcome::Ok
+        );
+        assert!(!hb.exists());
+    }
+
+    #[test]
+    fn test_query_status_lists_enabled_and_disabled_services() {
+        let mut services = BTreeMap::new();
+        services.insert("onvif".to_string(), svc_cfg("/bin/true", true));
+        services.insert("snmp".to_string(), svc_cfg("/bin/true", false));
+        services.insert("dropbear".to_string(), svc_cfg("/bin/true", false));
+        let cfg = test_config(services);
+
+        let svcs = vec![Service {
+            name: "onvif".into(),
+            spec: dummy_spec(),
+            state: SvcState::Running {
+                pid: 42,
+                since: Instant::now() - Duration::from_secs(90),
+            },
+            hist: RestartHistory::default(),
+        }];
+
+        let (tx, rx) = channel();
+        handle_query_status(&cfg, &svcs, &tx);
+        let ControlMsg::Status(rows) = rx.recv().expect("status");
+
+        // BTreeMap order; disabled rows synthesized from cfg.
+        let names: Vec<&str> = rows.iter().map(|r| r.name.as_str()).collect();
+        assert_eq!(names, vec!["dropbear", "onvif", "snmp"]);
+        let snmp = rows.iter().find(|r| r.name == "snmp").expect("snmp row");
+        assert_eq!(snmp.state, "disabled");
+        assert_eq!(snmp.pid, None);
+        let onvif = rows.iter().find(|r| r.name == "onvif").expect("onvif row");
+        assert_eq!(onvif.state, "running");
+        assert_eq!(onvif.pid, Some(42));
+    }
+
+    #[test]
+    fn test_query_status_never_drops_a_configured_service() {
+        // Defensive: cfg says enabled, the vec does not have it (should not
+        // happen after Task 4's insertion). The row must still appear, never
+        // vanish.
+        let mut services = BTreeMap::new();
+        services.insert("snmp".to_string(), svc_cfg("/bin/true", true));
+        let cfg = test_config(services);
+
+        let (tx, rx) = channel();
+        handle_query_status(&cfg, &[], &tx);
+        let ControlMsg::Status(rows) = rx.recv().expect("status");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].state, "backoff");
+    }
+
+    #[test]
+    fn test_toggle_telnet_enable_persists_then_spawns() {
+        let mut sys = MockSys::new();
+        sys.expect_run_to_completion()
+            .times(1)
+            .returning(|prog, _args| {
+                assert_eq!(prog, "pidof");
+                // pidof exits non-zero when the process is absent.
+                Ok(crate::sys::ExitStatus::Code(1))
+            });
+        sys.expect_spawn_detached()
+            .times(1)
+            .returning(|prog, args| {
+                assert_eq!(prog, "telnetd");
+                assert_eq!(
+                    args,
+                    &[
+                        "-p".to_string(),
+                        "24".to_string(),
+                        "-l".to_string(),
+                        "/bin/sh".to_string()
+                    ]
+                );
+                Ok(77)
+            });
+
+        let mut fx = ToggleFixture::new("[system]\ntelnet = false\n", &[], &[]);
+
+        assert_eq!(fx.toggle(&sys, "telnetd", true), control::ToggleOutcome::Ok);
+        // File first, then memory — and never a supervised service.
+        assert!(fx.text().contains("telnet = true"));
+        assert!(fx.cfg.system.telnet);
+        assert_eq!(fx.svcs.len(), 0);
+    }
+
+    #[test]
+    fn test_toggle_telnet_enable_is_idempotent_when_already_running() {
+        let mut sys = MockSys::new();
+        sys.expect_run_to_completion()
+            .times(1)
+            .returning(|prog, _| {
+                assert_eq!(prog, "pidof");
+                // pidof found it: port 24 already held, do not double-spawn.
+                Ok(crate::sys::ExitStatus::Code(0))
+            });
+        sys.expect_spawn_detached().times(0);
+
+        let mut fx = ToggleFixture::new("[system]\ntelnet = false\n", &[], &[]);
+
+        assert_eq!(fx.toggle(&sys, "telnetd", true), control::ToggleOutcome::Ok);
+        assert!(fx.cfg.system.telnet);
+    }
+
+    #[test]
+    fn test_toggle_telnet_disable_persists_then_killalls() {
+        let mut sys = MockSys::new();
+        sys.expect_run_to_completion()
+            .times(1)
+            .returning(|prog, _| {
+                assert_eq!(prog, "killall");
+                // killall exits non-zero when nothing matched — success here.
+                Ok(crate::sys::ExitStatus::Code(1))
+            });
+        sys.expect_spawn_detached().times(0);
+
+        let mut fx = ToggleFixture::new("[system]\ntelnet = true\n", &[], &[]);
+        fx.cfg.system.telnet = true;
+
+        assert_eq!(
+            fx.toggle(&sys, "telnetd", false),
+            control::ToggleOutcome::Ok
+        );
+        assert!(fx.text().contains("telnet = false"));
+        assert!(!fx.cfg.system.telnet);
+    }
+
+    #[test]
+    fn test_toggle_telnet_write_failure_changes_nothing() {
+        // The config cannot be read, so neither the file, the memory, nor any
+        // process may change.
+        let mut sys = MockSys::new();
+        sys.expect_run_to_completion().times(0);
+        sys.expect_spawn_detached().times(0);
+
+        let mut fx = ToggleFixture::unreadable(&[], &[]);
+
+        assert_eq!(
+            fx.toggle(&sys, "telnetd", true),
+            control::ToggleOutcome::Error
+        );
+        assert!(!fx.cfg.system.telnet);
     }
 }

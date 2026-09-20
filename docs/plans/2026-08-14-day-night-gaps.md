@@ -634,7 +634,7 @@ git commit -m "feat(night): allow overriding the night AE ceiling from config"
 Deploy, set `night_a_gain_max = 24`, restart the supervisor, wait for night, capture a frame and measure:
 
 ```bash
-ffmpeg -y -loglevel error -i "http://admin:admin@127.0.0.1:12180/live/main.flv" \
+ffmpeg -y -loglevel error -i "http://admin:$CAMERA_PASS@127.0.0.1:12180/live/main.flv" \
   -frames:v 1 -q:v 2 /tmp/after.jpg
 ffmpeg -loglevel info -i /tmp/after.jpg \
   -vf "signalstats,metadata=print:key=lavfi.signalstats.YAVG" -f null - 2>&1 | grep YAVG

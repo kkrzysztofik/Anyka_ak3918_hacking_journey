@@ -26,7 +26,7 @@ export HOST=x86_64-unknown-linux-gnu
 - Host tests: `$CARGO test --target $HOST --lib -- <name>` (run from `cross-compile/onvif-rust/`).
 - Before every Rust commit: `PATH=$TOOLBIN:$PATH $CARGO clippy --target $HOST --lib --tests -- -D warnings` and `$CARGO fmt --check`. The `PATH` prefix is mandatory or clippy dies with `E0514` (see memory `vendored-clippy-needs-path-prefix`).
 - Daemon build: `make -C cross-compile/vendor-daemon` (clean rebuild needs `make -C cross-compile/vendor-daemon clean` first — the Makefile has no header dependency tracking).
-- Device shell: `uv run python3 scripts/debugging/cam_exec.py '<cmd>'`. The device drops straight to a root shell; RTSP creds `admin:admin`; ONVIF HTTP on port 80 with a rate limiter.
+- Device shell: `uv run python3 scripts/debugging/cam_exec.py '<cmd>'`. The device drops straight to a root shell; RTSP creds `admin` / $CAMERA_PASS; ONVIF HTTP on port 80 with a rate limiter.
 - Device file transfer (no `lftp`): camera `nc -l -p PORT > /tmp/x &`, host `nc 192.168.2.198 PORT < file`, verify with `md5sum` both sides, then `mv` into place with `chmod +x`.
 
 ---
@@ -509,7 +509,7 @@ sleep 5
 setsid /mnt/anyka_hack/onvif/run_onvif_rust.sh >/dev/null 2>&1 &
 sleep 14
 echo "vd=$(pidof vendor-daemon.bin) onvif=$(pidof onvif-rust.bin) available=$(grep -ac attach_available /mnt/logs/onvif_rust.log)"'
-ffprobe -rtsp_transport tcp -v error -show_entries stream=codec_name,width,height -of default=noprint_wrappers=1 "rtsp://admin:admin@192.168.2.198:554/main" 2>&1 | head -3
+ffprobe -rtsp_transport tcp -v error -show_entries stream=codec_name,width,height -of default=noprint_wrappers=1 "rtsp://admin:$CAMERA_PASS@192.168.2.198:554/main" 2>&1 | head -3
 ```
 
 Expected: both PIDs present, `available=1`, ffprobe prints `codec_name=h264`.
@@ -527,7 +527,7 @@ sleep 15
 echo "vd_same=$([ \"$(pidof vendor-daemon.bin)\" = \"$VDPID\" ] && echo yes || echo NO-CRASHED)"
 echo "onvif=$(pidof onvif-rust.bin) available=$(grep -ac attach_available /mnt/logs/onvif_rust.log)"
 echo "new cores: $(ls /mnt/coredumps/core.* 2>/dev/null | wc -l)"'
-ffprobe -rtsp_transport tcp -v error -select_streams v -read_intervals "%+#1" -show_entries frame=pict_type -show_entries stream=codec_name -of default=noprint_wrappers=1 "rtsp://admin:admin@192.168.2.198:554/main" 2>&1 | head -3
+ffprobe -rtsp_transport tcp -v error -select_streams v -read_intervals "%+#1" -show_entries frame=pict_type -show_entries stream=codec_name -of default=noprint_wrappers=1 "rtsp://admin:$CAMERA_PASS@192.168.2.198:554/main" 2>&1 | head -3
 ```
 
 **Pass criteria:** `vd_same=yes` (daemon did not crash), `new cores: 0`,
@@ -557,7 +557,7 @@ setsid /mnt/anyka_hack/vendor-daemon/run_vendor_daemon.sh >/dev/null 2>&1 &
 sleep 18
 echo "onvif_same=$([ \"$(pidof onvif-rust.bin)\" = \"$ONVIFPID\" ] && echo yes || echo NO)"
 echo "available=$(grep -ac attach_available /mnt/logs/onvif_rust.log) given_up=$(grep -ac attach_given_up /mnt/logs/onvif_rust.log)"'
-ffprobe -rtsp_transport tcp -v error -show_entries stream=codec_name -of default=noprint_wrappers=1 "rtsp://admin:admin@192.168.2.198:554/main" 2>&1 | head -2
+ffprobe -rtsp_transport tcp -v error -show_entries stream=codec_name -of default=noprint_wrappers=1 "rtsp://admin:$CAMERA_PASS@192.168.2.198:554/main" 2>&1 | head -2
 ```
 
 **Pass criteria:** `onvif_same=yes` (no restart), `given_up=0`, `available>=1`,
@@ -576,7 +576,7 @@ echo "epoch $E0 -> $E1 (must differ)"
 echo "onvif=$(pidof onvif-rust.bin) available=$(grep -ac attach_available /mnt/logs/onvif_rust.log)"
 sleep 8
 echo "stable check: attached=$(grep -ac ipc_attached /mnt/logs/onvif_rust.log) available=$(grep -ac attach_available /mnt/logs/onvif_rust.log)"'
-ffprobe -rtsp_transport tcp -v error -show_entries stream=codec_name -of default=noprint_wrappers=1 "rtsp://admin:admin@192.168.2.198:554/main" 2>&1 | head -2
+ffprobe -rtsp_transport tcp -v error -show_entries stream=codec_name -of default=noprint_wrappers=1 "rtsp://admin:$CAMERA_PASS@192.168.2.198:554/main" 2>&1 | head -2
 ```
 
 **Pass criteria:** epoch differs, `onvif` PID unchanged, `available` incremented

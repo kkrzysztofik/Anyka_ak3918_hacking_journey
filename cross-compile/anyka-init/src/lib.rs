@@ -6,6 +6,7 @@
 
 pub mod boot;
 pub mod config;
+pub mod control;
 pub mod logging;
 pub mod monitor;
 pub mod netoverlay;

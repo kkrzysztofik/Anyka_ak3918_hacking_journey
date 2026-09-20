@@ -7,6 +7,8 @@ pub mod http;
 pub mod logs;
 pub mod network;
 pub mod proc;
+pub mod processes;
+pub mod services;
 pub mod snmp;
 pub mod sound;
 pub mod state;

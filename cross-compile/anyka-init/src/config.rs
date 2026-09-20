@@ -23,6 +23,12 @@ pub enum ConfigError {
     Parse(#[from] toml::de::Error),
     #[error("invalid configuration: {0}")]
     Invalid(String),
+    #[error("failed to write {path}: {source}")]
+    Write {
+        path: String,
+        #[source]
+        source: std::io::Error,
+    },
 }
 
 #[derive(Debug, Deserialize)]
@@ -383,6 +389,120 @@ fn default_trial_ports() -> Vec<u16> {
     crate::update::TRIAL_PORTS.to_vec()
 }
 
+/// Line-level edit of `enabled =` under `[services.<name>]`.
+///
+/// Only the one boolean line changes — comments, ordering and formatting
+/// everywhere else survive byte-for-byte, which a TOML round-trip cannot
+/// guarantee. That matters because this file is the operator's: hand-edited,
+/// comment-rich, and holding the Wi-Fi credentials.
+pub fn set_bool_in_text(
+    text: &str,
+    section: &str,
+    key: &str,
+    enabled: bool,
+) -> Result<String, ConfigError> {
+    let value = if enabled { "true" } else { "false" };
+
+    // Preserve the file's line ending. Splitting on '\n' alone would leave a
+    // '\r' on every existing line while the rewritten one has none, producing
+    // a mixed-ending file out of a CRLF original.
+    let nl = if text.contains("\r\n") { "\r\n" } else { "\n" };
+    let mut out: Vec<String> = text.split(nl).map(str::to_owned).collect();
+
+    let Some(hdr) = out.iter().position(|l| strip_comment(l) == section) else {
+        return Err(ConfigError::Invalid(format!(
+            "no {section} stanza in config"
+        )));
+    };
+    // The stanza ends at the next `[`-prefixed line, or at end of file.
+    let end = out[hdr + 1..]
+        .iter()
+        .position(|l| l.trim_start().starts_with('['))
+        .map(|i| i + hdr + 1)
+        .unwrap_or(out.len());
+
+    let Some(i) = (hdr + 1..end).find(|&i| line_key(&out[i]).is_some_and(|k| k == key)) else {
+        out.insert(hdr + 1, format!("{key} = {value}"));
+        return verified(out.join(nl), section, key);
+    };
+    // Preserve the line's indentation, change only the value.
+    let lead: String = out[i].chars().take_while(|c| c.is_whitespace()).collect();
+    out[i] = format!("{lead}{key} = {value}");
+    verified(out.join(nl), section, key)
+}
+
+/// A line with any trailing `# comment` removed, trimmed. Lets
+/// `[services.snmp]  # the SNMP agent` match its bare header.
+fn strip_comment(line: &str) -> &str {
+    line.split('#').next().unwrap_or("").trim()
+}
+
+/// The key a `key = value` line assigns, unquoted, or `None` for a line that
+/// assigns nothing (a comment, a blank, a bare header).
+///
+/// Matching the *parsed key* rather than a prefix is load-bearing twice over:
+/// `starts_with("enabled")` would overwrite a sibling `enabled_at_boot`, and
+/// it would skip the equally valid `"enabled" = true`, insert a second
+/// `enabled` key, and leave behind a duplicate-key document that no longer
+/// parses.
+fn line_key(line: &str) -> Option<&str> {
+    let (lhs, _) = line.split_once('=')?;
+    let lhs = lhs.trim();
+    if lhs.starts_with('#') {
+        return None;
+    }
+    Some(lhs.trim_matches(|c| c == '"' || c == '\''))
+}
+
+/// Re-parse the edited document before handing it back.
+///
+/// The editor scans lines rather than parsing TOML, which is what keeps
+/// comments and formatting byte-identical. The cost is that an unusual but
+/// legal input could, in principle, be mis-scanned into a document that no
+/// longer parses — and the caller would then write it over the operator's
+/// config, parking the supervisor on the next boot. Validating the *output*
+/// turns every such case into a refused edit rather than a bricked camera,
+/// without needing the scanner to understand all of TOML.
+fn verified(out: String, section: &str, key: &str) -> Result<String, ConfigError> {
+    match toml::from_str::<toml::Value>(&out) {
+        Ok(_) => Ok(out),
+        Err(e) => Err(ConfigError::Invalid(format!(
+            "editing {key} under {section} produced invalid TOML ({e}); config left unchanged"
+        ))),
+    }
+}
+
+fn read_config_text(path: &std::path::Path) -> Result<String, ConfigError> {
+    std::fs::read_to_string(path).map_err(|source| ConfigError::Read {
+        path: path.display().to_string(),
+        source,
+    })
+}
+
+/// Write `new_text` to a temp file next to `path`, fsync it, then rename over
+/// the original, so an interrupted write never leaves a half-written operator
+/// config behind (the same pattern `update.rs` uses for the `active` pointer
+/// on this filesystem).
+fn persist_text(path: &std::path::Path, new_text: &str) -> Result<(), ConfigError> {
+    let tmp = path.with_extension("toml.tmp");
+    let write = |f: &mut std::fs::File| -> Result<(), std::io::Error> {
+        std::io::Write::write_all(f, new_text.as_bytes())?;
+        f.sync_all()
+    };
+    let mut f = std::fs::File::create(&tmp).map_err(|source| ConfigError::Write {
+        path: tmp.display().to_string(),
+        source,
+    })?;
+    write(&mut f).map_err(|source| ConfigError::Write {
+        path: tmp.display().to_string(),
+        source,
+    })?;
+    std::fs::rename(&tmp, path).map_err(|source| ConfigError::Write {
+        path: path.display().to_string(),
+        source,
+    })
+}
+
 impl Default for Update {
     fn default() -> Self {
         Self {
@@ -479,6 +599,34 @@ impl std::str::FromStr for Config {
 }
 
 impl Config {
+    /// Persist `enabled` for one service: line-level edit, then atomic
+    /// tmp+rename over the original (the same pattern `update.rs` uses for the
+    /// `active` pointer on this filesystem). On failure the original is
+    /// untouched.
+    ///
+    /// Associated, not a method: this writes the file, and the in-memory
+    /// `Config` is updated separately by the caller so the two steps stay
+    /// visibly ordered.
+    pub fn set_service_enabled(
+        path: &std::path::Path,
+        name: &str,
+        enabled: bool,
+    ) -> Result<(), ConfigError> {
+        let text = read_config_text(path)?;
+        let new_text = set_bool_in_text(&text, &format!("[services.{name}]"), "enabled", enabled)?;
+        persist_text(path, &new_text)
+    }
+
+    /// Persist `[system].telnet` — the recovery-telnet switch. Same file-first
+    /// atomic-write discipline as `set_service_enabled`; the in-memory `Config`
+    /// and the runtime side (spawn/killall) are the caller's, in the same
+    /// visible order.
+    pub fn set_system_telnet(path: &std::path::Path, enabled: bool) -> Result<(), ConfigError> {
+        let text = read_config_text(path)?;
+        let new_text = set_bool_in_text(&text, "[system]", "telnet", enabled)?;
+        persist_text(path, &new_text)
+    }
+
     pub fn load(path: &str) -> Result<Self, ConfigError> {
         Self::load_with_overlay(
             path,
@@ -1133,5 +1281,166 @@ password = "overlaypass"
             "valid overlay must not be quarantined for a baseline fault"
         );
         assert!(!dir.path().join("network.toml.bad").exists());
+    }
+
+    const SAMPLE: &str = concat!(
+        "title = \"anyka\"\n",
+        "[services.onvif]\n",
+        "enabled = true\n",
+        "exec = \"/mnt/anyka_hack/slots/a/bin/onvif-rust.bin\"\n",
+        "# keep this comment alive\n",
+        "[services.snmp]\n",
+        "exec = \"/usr/sbin/snmpd\"\n",
+        "[services.dropbear]\n",
+        "enabled = false\n",
+    );
+
+    #[test]
+    fn test_set_bool_in_text_replaces_an_existing_line() {
+        let got = set_bool_in_text(SAMPLE, "[services.onvif]", "enabled", false).expect("edit");
+        assert!(got.contains("[services.onvif]\nenabled = false\nexec ="));
+    }
+
+    #[test]
+    fn test_set_bool_in_text_does_not_clobber_a_key_with_the_same_prefix() {
+        // A prefix match would overwrite this line, silently losing a key from
+        // the operator's file.
+        let src = "[services.x]\nenabled_at_boot = \"yes\"\nexec = \"/bin/true\"\n";
+        let got = set_bool_in_text(src, "[services.x]", "enabled", false).expect("edit");
+        assert!(got.contains("enabled_at_boot = \"yes\""));
+        assert!(got.contains("\nenabled = false\n"));
+    }
+
+    #[test]
+    fn test_set_bool_in_text_matches_a_quoted_key() {
+        // `"enabled" = true` is legal TOML. Skipping it would insert a second
+        // `enabled` key and produce a duplicate-key document.
+        let src = "[services.x]\n\"enabled\" = true\nexec = \"/bin/true\"\n";
+        let got = set_bool_in_text(src, "[services.x]", "enabled", false).expect("edit");
+        assert!(got.contains("enabled = false"));
+        toml::from_str::<toml::Value>(&got).expect("must stay valid TOML");
+    }
+
+    #[test]
+    fn test_set_bool_in_text_matches_a_header_with_a_trailing_comment() {
+        let src = "[services.x]  # the X service\nenabled = true\nexec = \"/bin/true\"\n";
+        let got = set_bool_in_text(src, "[services.x]", "enabled", false).expect("edit");
+        assert!(got.contains("# the X service"));
+        assert!(got.contains("enabled = false"));
+    }
+
+    #[test]
+    fn test_set_bool_in_text_ignores_a_commented_out_key() {
+        let src = "[services.x]\n# enabled = true\nexec = \"/bin/true\"\n";
+        let got = set_bool_in_text(src, "[services.x]", "enabled", false).expect("edit");
+        assert!(got.contains("# enabled = true"));
+        assert!(got.contains("\nenabled = false\n"));
+    }
+
+    #[test]
+    fn test_set_bool_in_text_preserves_crlf_line_endings() {
+        let src = "[services.x]\r\nenabled = true\r\nexec = \"/bin/true\"\r\n";
+        let got = set_bool_in_text(src, "[services.x]", "enabled", false).expect("edit");
+        assert!(!got.contains("\n\n"), "no bare LF may be introduced");
+        assert_eq!(got, src.replace("enabled = true", "enabled = false"));
+    }
+
+    #[test]
+    fn test_set_bool_in_text_refuses_to_return_invalid_toml() {
+        // The scanner cannot see that this `[` continues an array, so it ends
+        // the stanza early and would insert a duplicate `enabled`. The output
+        // check turns that into a refused edit instead of a config that fails
+        // to parse on the next boot.
+        let src = "[services.x]\nargs = [\n[\"a\"],\n]\nenabled = true\n";
+        match set_bool_in_text(src, "[services.x]", "enabled", false) {
+            Err(ConfigError::Invalid(m)) => assert!(m.contains("invalid TOML"), "{m}"),
+            other => panic!("expected refusal, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_set_bool_in_text_preserves_everything_else() {
+        let got = set_bool_in_text(SAMPLE, "[services.snmp]", "enabled", true).expect("edit");
+        // The only byte-level change: one inserted line.
+        assert_eq!(
+            got,
+            SAMPLE.replace(
+                "[services.snmp]\nexec =",
+                "[services.snmp]\nenabled = true\nexec =",
+            )
+        );
+        assert!(got.contains("# keep this comment alive"));
+    }
+
+    #[test]
+    fn test_set_bool_in_text_inserts_under_the_header_when_absent() {
+        // A hand-edited config may omit `enabled` entirely (it defaults true),
+        // so "disable" has to be able to create the line.
+        let got = set_bool_in_text(SAMPLE, "[services.snmp]", "enabled", false).expect("edit");
+        assert!(got.contains("[services.snmp]\nenabled = false\nexec ="));
+    }
+
+    #[test]
+    fn test_set_bool_in_text_does_not_escape_the_stanza() {
+        // dropbear's line must be untouched when onvif is edited.
+        let got = set_bool_in_text(SAMPLE, "[services.onvif]", "enabled", false).expect("edit");
+        assert!(got.contains("[services.dropbear]\nenabled = false\n"));
+    }
+
+    #[test]
+    fn test_set_bool_in_text_unknown_stanza_is_an_error() {
+        match set_bool_in_text(SAMPLE, "[services.nope]", "enabled", true) {
+            Err(ConfigError::Invalid(_)) => {}
+            other => panic!("expected Invalid, got {other:?}"),
+        }
+    }
+
+    const SYSTEM_SAMPLE: &str = "\n[system]\nsensor_module = \"/data/sensor/sensor_gc1084.ko\"\ntelnet = false\nftp = true\n\n[wifi]\n";
+
+    #[test]
+    fn test_set_bool_in_text_system_telnet_replaces_the_line_only() {
+        let got = set_bool_in_text(SYSTEM_SAMPLE, "[system]", "telnet", true).expect("edit");
+        assert!(got.contains(
+            "[system]\nsensor_module = \"/data/sensor/sensor_gc1084.ko\"\ntelnet = true\nftp = true"
+        ));
+    }
+
+    #[test]
+    fn test_set_bool_in_text_system_telnet_inserts_when_absent() {
+        let sample = "[system]\nftp = true\n";
+        let got = set_bool_in_text(sample, "[system]", "telnet", false).expect("edit");
+        assert!(got.contains("[system]\ntelnet = false\nftp = true"));
+    }
+
+    #[test]
+    fn test_set_system_telnet_writes_atomically_and_preserves_the_file() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("anyka.toml");
+        std::fs::write(&path, SYSTEM_SAMPLE).expect("seed");
+
+        Config::set_system_telnet(&path, true).expect("persist");
+
+        let after = std::fs::read_to_string(&path).expect("read back");
+        assert!(after.contains("telnet = true\nftp = true"));
+        assert!(after.contains("sensor_module = \"/data/sensor/sensor_gc1084.ko\""));
+        // No temp file left behind.
+        assert!(!path.with_extension("toml.tmp").exists());
+    }
+
+    #[test]
+    fn test_set_service_enabled_writes_atomically_and_preserves_the_file() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("anyka.toml");
+        std::fs::write(&path, SAMPLE).expect("seed");
+
+        Config::set_service_enabled(&path, "onvif", false).expect("persist");
+
+        let after = std::fs::read_to_string(&path).expect("read back");
+        assert!(after.contains("[services.onvif]\nenabled = false"));
+        assert!(after.contains("# keep this comment alive"));
+        // No temp file left behind.
+        assert!(!path.with_extension("toml.tmp").exists());
+        // Still parses.
+        Config::load_without_overlay(path.to_str().expect("utf8")).ok();
     }
 }

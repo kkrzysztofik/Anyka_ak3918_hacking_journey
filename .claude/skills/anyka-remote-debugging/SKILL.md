@@ -11,7 +11,9 @@ Debug the Anyka AK3918 camera at runtime: shell access, process inspection, log 
 ## Access Model
 
 - **No SSH on the stock camera** — remote shell is **telnet port 24** (root, typically no password). Use `scripts/debugging/cam_exec.py` (Python 3.13 removed `telnetlib`, so it speaks raw telnet via the shared client in `camera_ntp_sync.py`).
-- **FTP** (default user `admin`/`admin`) for pulling coredumps/logs off the device.
+- **FTP** for pulling coredumps/logs off the device. Credentials come from the
+  secret store (`ANYKA_FTP_PASS`), not from this file. Note the account is
+  `root`, not `admin` — an `admin` login is refused.
 - Camera IP defaults to `192.168.2.198` in tooling.
 - For on-device `gdbserver`, the reference rootfs ships one (`cross-compile/anyka_reference/platform/rootfs/utils/usr/bin/gdbserver`); telnet to the device, copy your binary + gdbserver, and attach.
 

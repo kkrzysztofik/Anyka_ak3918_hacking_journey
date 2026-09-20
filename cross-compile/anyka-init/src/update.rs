@@ -367,6 +367,24 @@ impl Default for Policy {
 /// value of `[update] trial_ports`.
 pub const TRIAL_PORTS: [u16; 3] = [80, 554, 8080];
 
+/// The trial may only require ports an enabled service can actually bind.
+///
+/// All of `TRIAL_PORTS` is owned by the `onvif` service — ONVIF, RTSP and
+/// HTTP-FLV all live in the onvif-rust binary. With onvif disabled the default
+/// set is unbindable, so every subsequent A/B update would fail its trial and
+/// revert: exactly when an admin most needs to ship a fix. Ports of unknown
+/// ownership are kept; dropping something we do not own is the worse error.
+pub fn effective_trial_ports(requested: &[u16], onvif_enabled: bool) -> Vec<u16> {
+    if onvif_enabled {
+        return requested.to_vec();
+    }
+    requested
+        .iter()
+        .copied()
+        .filter(|p| !TRIAL_PORTS.contains(p))
+        .collect()
+}
+
 /// Watch `ports` once a second until all of them have been bound continuously
 /// for `hold_secs`, or `deadline_secs` elapses.
 ///
@@ -1484,6 +1502,34 @@ mod tests {
         assert!(
             old.join("onvif-rust.bin").exists(),
             "the rollback slot must survive a failed removal intact"
+        );
+    }
+
+    #[test]
+    fn test_effective_trial_ports_unchanged_when_onvif_enabled() {
+        assert_eq!(
+            effective_trial_ports(&TRIAL_PORTS, true),
+            TRIAL_PORTS.to_vec()
+        );
+        // A camera with a custom trial_ports override is unaffected either way.
+        assert_eq!(effective_trial_ports(&[2000], true), vec![2000]);
+    }
+
+    #[test]
+    fn test_effective_trial_ports_drops_onvif_ports_when_onvif_disabled() {
+        assert_eq!(
+            effective_trial_ports(&TRIAL_PORTS, false),
+            Vec::<u16>::new()
+        );
+    }
+
+    #[test]
+    fn test_effective_trial_ports_keeps_ports_of_unknown_ownership() {
+        // Only ports we know belong to onvif are dropped; a custom port could
+        // belong to anything, and a too-lax trial is worse than a strict one.
+        assert_eq!(
+            effective_trial_ports(&[80, 554, 8080, 2000], false),
+            vec![2000]
         );
     }
 }

@@ -101,6 +101,7 @@ fn required_level_for_path(path: &str) -> AuthLevel {
         "/sound" | "/sound/" => AuthLevel::Administrator,
         "/sound/play" | "/sound/play/" => AuthLevel::Administrator,
         "/diagnostics" | "/diagnostics/" => AuthLevel::User,
+        "/processes" | "/processes/" => AuthLevel::User,
         // Fail closed: unknown routes require Administrator until explicitly opened.
         _ => AuthLevel::Administrator,
     }
@@ -344,6 +345,43 @@ mod tests {
     #[test]
     fn test_required_level_for_path_diagnostics_with_api_prefix_requires_user() {
         assert_eq!(required_level_for_path("/api/diagnostics"), AuthLevel::User);
+    }
+
+    /// Reading the process list is a diagnostic, like /diagnostics: User is enough.
+    #[test]
+    fn test_required_level_for_processes_is_user() {
+        assert_eq!(required_level_for_path("/processes"), AuthLevel::User);
+        assert_eq!(required_level_for_path("/processes/"), AuthLevel::User);
+    }
+
+    /// Restarting a service is a state change, like /update. It is NOT listed in
+    /// the table on purpose — it must inherit the fail-closed default. This test
+    /// pins that, so opening the default later cannot silently expose it.
+    #[test]
+    fn test_required_level_for_a_service_restart_is_administrator() {
+        assert_eq!(
+            required_level_for_path("/services/onvif/restart"),
+            AuthLevel::Administrator
+        );
+    }
+
+    /// The two new state changes ride the same catch-all as restart — pin
+    /// that so a future whitelist edit cannot silently open them to lower
+    /// levels.
+    #[test]
+    fn test_required_level_for_a_service_enable_is_administrator() {
+        assert_eq!(
+            required_level_for_path("/services/onvif/enable"),
+            AuthLevel::Administrator
+        );
+    }
+
+    #[test]
+    fn test_required_level_for_a_service_disable_is_administrator() {
+        assert_eq!(
+            required_level_for_path("/services/snmp/disable"),
+            AuthLevel::Administrator
+        );
     }
 
     // ── reuse proof: verify_basic_auth_self integration ──────────────────
