@@ -455,9 +455,9 @@ fn strip_comment(line: &str) -> &str {
 fn valid_ntp_server(s: &str) -> bool {
     !s.is_empty()
         && s.len() <= 255
-        && !s.chars().any(|c| {
-            c.is_whitespace() || c.is_control() || c == '"' || c == '\\' || c == '#'
-        })
+        && !s
+            .chars()
+            .any(|c| c.is_whitespace() || c.is_control() || c == '"' || c == '\\' || c == '#')
 }
 
 /// The key a `key = value` line assigns, unquoted, or `None` for a line that
@@ -1417,9 +1417,8 @@ password = "overlaypass"
 servers = [\"192.168.2.1\"]
 timezone = \"UTC0\"
 ";
-        let out =
-            set_value_in_text(src, "[time]", "servers", "[\"a.example\", \"b.example\"]")
-                .expect("edit must succeed");
+        let out = set_value_in_text(src, "[time]", "servers", "[\"a.example\", \"b.example\"]")
+            .expect("edit must succeed");
         assert!(out.contains("servers = [\"a.example\", \"b.example\"]"));
         assert!(out.contains("# the operator's note, must survive"));
         assert!(out.contains("# IP first, deliberately"));
@@ -1439,7 +1438,10 @@ timezone = \"UTC0\"
         // `verified()` must catch a raw value that is not valid TOML.
         let src = "[time]\nservers = [\"old\"]\n";
         let err = set_value_in_text(src, "[time]", "servers", "[\"unterminated]");
-        assert!(err.is_err(), "a malformed raw value must be refused, not written");
+        assert!(
+            err.is_err(),
+            "a malformed raw value must be refused, not written"
+        );
     }
 
     #[test]
