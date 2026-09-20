@@ -419,9 +419,17 @@ impl ServiceHandler for DeviceService {
                 system_ops::handle_get_system_date_and_time(&config, request)
             }),
 
-            "SetSystemDateAndTime" => dispatch_sync(body_xml, |request: SetSystemDateAndTime| {
-                system_ops::handle_set_system_date_and_time(&config, request)
-            }),
+            "SetSystemDateAndTime" => {
+                // Every sibling setter asks the store to persist; this one
+                // must too, or the timezone reverts on the next restart.
+                let result = dispatch_sync(body_xml, |request: SetSystemDateAndTime| {
+                    system_ops::handle_set_system_date_and_time(&config, request)
+                });
+                if result.is_ok() {
+                    self.store.request_save();
+                }
+                result
+            }
 
             // System Operations
             "SystemReboot" => dispatch_sync(body_xml, |request: SystemReboot| {
@@ -865,6 +873,36 @@ mod tests {
 
         let content = std::fs::read_to_string(temp_file.path()).unwrap();
         assert!(content.contains("deploy-host"));
+    }
+
+    #[tokio::test]
+    async fn test_set_system_date_and_time_persists_the_timezone() {
+        let _lock = crate::time::tz::test_lock();
+        let config = Arc::new(ConfigRuntime::new(crate::config::AppConfig::default()));
+        let (handle, temp_file, task, shutdown_tx) =
+            spawn_config_persistence(Arc::clone(&config)).await;
+        let service = test_service_with_persistence(config, handle);
+
+        let body = r#"<SetSystemDateAndTime>
+            <DateTimeType>NTP</DateTimeType>
+            <DaylightSavings>false</DaylightSavings>
+            <TimeZone><TZ>CET-1CEST,M3.5.0,M10.5.0/3</TZ></TimeZone>
+        </SetSystemDateAndTime>"#;
+        service
+            .handle_operation("SetSystemDateAndTime", body)
+            .await
+            .unwrap();
+
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        let _ = shutdown_tx.send(());
+        task.await.unwrap();
+
+        let content = std::fs::read_to_string(temp_file.path()).unwrap();
+        assert!(
+            content.contains("CET-1CEST,M3.5.0,M10.5.0/3"),
+            "timezone must survive a restart, got: {content}"
+        );
+        crate::time::tz::set_current(crate::time::tz::PosixTz::utc());
     }
 
     #[tokio::test]
