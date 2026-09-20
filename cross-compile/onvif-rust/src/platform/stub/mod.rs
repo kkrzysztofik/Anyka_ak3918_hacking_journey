@@ -1653,6 +1653,19 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_stub_network_info_reports_no_default_gateway() {
+        let platform = StubPlatformBuilder::new()
+            .network_info_supported(true)
+            .build();
+
+        let network = platform.network_info().unwrap();
+
+        // The stub does not override the trait default, and GetNetworkDefaultGateway
+        // must fall through to config rather than inherit a made-up address.
+        assert_eq!(network.get_default_gateway().await.unwrap(), None);
+    }
+
+    #[tokio::test]
     async fn test_stub_network_info_set_interface() {
         let platform = StubPlatformBuilder::new()
             .network_info_supported(true)

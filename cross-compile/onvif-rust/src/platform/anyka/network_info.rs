@@ -50,6 +50,16 @@ pub(super) fn parse_proc_route(text: &str) -> Vec<RouteEntry> {
         .collect()
 }
 
+/// Gateway of the default route as the kernel currently has it.
+///
+/// Blocking: reads `/proc/net/route`. Call it from `spawn_blocking`.
+fn read_default_gateway() -> Option<String> {
+    let routes = std::fs::read_to_string(PROC_ROUTE)
+        .map(|text| parse_proc_route(&text))
+        .unwrap_or_default();
+    default_gateway(&routes)
+}
+
 /// Gateway of the default route, if one exists.
 pub(super) fn default_gateway(routes: &[RouteEntry]) -> Option<String> {
     routes
@@ -357,13 +367,7 @@ impl NetworkInfo for AnykaNetworkInfo {
     }
 
     async fn get_default_gateway(&self) -> PlatformResult<Option<String>> {
-        off_runtime(|| {
-            let routes = std::fs::read_to_string(PROC_ROUTE)
-                .map(|text| parse_proc_route(&text))
-                .unwrap_or_default();
-            default_gateway(&routes)
-        })
-        .await
+        off_runtime(read_default_gateway).await
     }
 
     async fn get_dns_info(&self) -> PlatformResult<DnsInfo> {
@@ -479,6 +483,57 @@ wlan0\t0002A8C0\t00000000\t0001\t0\t0\t0\t00FFFFFF\t0\t0\t0
             None
         );
         assert_eq!(cmdline_udhcpc_interface(b"udhcpc\0"), None);
+    }
+
+    #[test]
+    fn test_read_interfaces_skips_loopback_and_invents_no_address() {
+        // Runs against the host's real /sys/class/net; only invariants that
+        // hold on any Linux box are asserted.
+        let interfaces = AnykaNetworkInfo::read_interfaces(None);
+
+        assert!(
+            interfaces.iter().all(|i| i.name != "lo"),
+            "loopback must never be offered as an ONVIF interface"
+        );
+        assert!(
+            interfaces
+                .iter()
+                .all(|i| i.ipv4_address.is_none() && i.ipv4_prefix_length.is_none()),
+            "with no outbound address known, no interface may claim one"
+        );
+        assert!(
+            interfaces.iter().all(|i| !i.token.is_empty()),
+            "an empty token cannot be addressed by SetNetworkInterfaces"
+        );
+    }
+
+    #[test]
+    fn test_read_dns_config_keeps_one_list_authoritative() {
+        let dns = AnykaNetworkInfo::read_dns_config();
+
+        assert!(
+            !dns.from_dhcp || dns.dns_manual.is_empty(),
+            "servers move to dns_from_dhcp wholesale; leaving copies in \
+             dns_manual would make GetDNS advertise each one twice"
+        );
+    }
+
+    #[test]
+    fn test_udhcpc_interfaces_walks_proc_without_panicking() {
+        // No udhcpc on a build host, so the useful assertion is that the walk
+        // survives /proc entries it cannot read (short-lived pids, kthreads).
+        assert!(udhcpc_interfaces().iter().all(|i| !i.is_empty()));
+    }
+
+    #[tokio::test]
+    async fn test_getters_run_the_blocking_reads_off_the_runtime() {
+        let info = AnykaNetworkInfo::new();
+
+        // A spawn_blocking panic surfaces as a JoinError, so `is_ok` is the
+        // assertion that the /proc and sysfs walks completed on the pool.
+        assert!(info.get_network_interfaces().await.is_ok());
+        assert!(info.get_default_gateway().await.is_ok());
+        assert!(info.get_dns_info().await.is_ok());
     }
 
     #[tokio::test]
