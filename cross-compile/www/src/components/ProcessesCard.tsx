@@ -56,6 +56,15 @@ const DISABLE_COPY: Record<string, string> = {
     'Stops DHCP renewals, so a configured static address is no longer overwritten on renewal. The link watchdog still runs a one-shot udhcpc if the default route disappears.',
   snmp: 'SNMP polling stops.',
   dropbear: 'The SSH daemon will not run until it is re-enabled.',
+  telnetd:
+    'The recovery telnet (port 24) stops. Unlike supervised services it is not restarted — it stays stopped until re-enabled. Safe-mode boots always bring it back.',
+};
+
+// telnetd is the one non-supervised row: the default enable copy ("supervisor
+// backoff policy") is a lie for it, so it gets its own.
+const ENABLE_COPY: Record<string, string> = {
+  telnetd:
+    'The recovery telnet (port 24) starts now and stays up across reboots. It hands a root shell to anything on the LAN — enable only while you need it.',
 };
 
 const DEFAULT_ENABLE_COPY =
@@ -76,7 +85,7 @@ function actionDescription(p: NonNullable<PendingAction>): string {
       : 'The supervisor sends SIGTERM; the service is restarted under its normal backoff policy.';
   }
   if (p.action === 'enable') {
-    return DEFAULT_ENABLE_COPY;
+    return ENABLE_COPY[p.service.name] ?? DEFAULT_ENABLE_COPY;
   }
   return (
     DISABLE_COPY[p.service.name] ?? 'The service stops and will not run again until re-enabled.'
@@ -309,7 +318,11 @@ export default function ProcessesCard() {
                             className="font-mono text-white"
                             data-testid={`diagnostics-processes-uptime-${service.name}`}
                           >
-                            {service.state === 'running' ? formatDuration(service.uptime_s) : '—'}
+                            {service.name === 'telnetd'
+                              ? '—' // unsupervised: no uptime or restart history to show
+                              : service.state === 'running'
+                                ? formatDuration(service.uptime_s)
+                                : '—'}
                             {service.state === 'backoff' && (
                               <span
                                 className="text-muted-foreground"
@@ -319,10 +332,12 @@ export default function ProcessesCard() {
                               </span>
                             )}
                           </td>
-                          <td className="font-mono text-white">{service.restarts}</td>
+                          <td className="font-mono text-white">
+                            {service.name === 'telnetd' ? '—' : service.restarts}
+                          </td>
                           <td className="py-2">
                             <div className="flex justify-end gap-2">
-                              {!isDisabled && (
+                              {!isDisabled && service.name !== 'telnetd' && (
                                 <Button
                                   size="sm"
                                   variant="outline"

@@ -322,3 +322,81 @@ describe('ProcessesCard service toggling', () => {
     expect(screen.queryByTestId('diagnostics-processes-reconnecting')).not.toBeInTheDocument();
   });
 });
+
+describe('ProcessesCard telnet row', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(getDiagnostics).mockResolvedValue({} as Awaited<ReturnType<typeof getDiagnostics>>);
+  });
+
+  const TELNET_ON: ServiceStatus = {
+    name: 'telnetd',
+    state: 'running',
+    pid: 99,
+    uptime_s: 0,
+    restarts: 0,
+    retry_in_s: 0,
+  };
+  const TELNET_OFF: ServiceStatus = {
+    name: 'telnetd',
+    state: 'disabled',
+    pid: null,
+    uptime_s: 0,
+    restarts: 0,
+    retry_in_s: 0,
+  };
+
+  it('shows a running telnetd with a Disable action and no Restart', async () => {
+    vi.mocked(getProcesses).mockResolvedValue(supervisedFixture([SNMP, TELNET_ON]));
+    renderWithProviders(<ProcessesCard />);
+    await waitForPageLoad('diagnostics-processes-title');
+    expect(await screen.findByTestId('diagnostics-processes-status-telnetd')).toHaveTextContent(
+      'running',
+    );
+    expect(screen.getByTestId('diagnostics-processes-disable-telnetd')).toBeInTheDocument();
+    // telnetd is not a supervised service: there is no restart to offer.
+    expect(screen.queryByTestId('diagnostics-processes-restart-telnetd')).not.toBeInTheDocument();
+    // It has no uptime or restart history to show.
+    expect(screen.getByTestId('diagnostics-processes-uptime-telnetd')).toHaveTextContent('—');
+  });
+
+  it('shows a stopped telnetd dimmed, with Enable and no Restart', async () => {
+    vi.mocked(getProcesses).mockResolvedValue(supervisedFixture([SNMP, TELNET_OFF]));
+    renderWithProviders(<ProcessesCard />);
+    await waitForPageLoad('diagnostics-processes-title');
+    expect(await screen.findByTestId('diagnostics-processes-enable-telnetd')).toBeInTheDocument();
+    expect(screen.queryByTestId('diagnostics-processes-restart-telnetd')).not.toBeInTheDocument();
+    expect(screen.getByTestId('diagnostics-processes-row-telnetd')).toHaveClass('opacity-50');
+  });
+
+  it('disabling telnetd shows the recovery-channel consequence and calls serviceAction', async () => {
+    vi.mocked(getProcesses).mockResolvedValue(supervisedFixture([SNMP, TELNET_ON]));
+    vi.mocked(serviceAction).mockResolvedValue(undefined);
+    renderWithProviders(<ProcessesCard />);
+    await waitForPageLoad('diagnostics-processes-title');
+    const user = userEvent.setup();
+    await user.click(await screen.findByTestId('diagnostics-processes-disable-telnetd'));
+    expect(screen.getByTestId('diagnostics-processes-action-title')).toHaveTextContent(
+      'Disable telnetd?',
+    );
+    expect(screen.getByTestId('diagnostics-processes-action-description')).toHaveTextContent(
+      'recovery telnet (port 24)',
+    );
+    await user.click(screen.getByTestId('diagnostics-processes-action-confirm'));
+    await waitFor(() => expect(serviceAction).toHaveBeenCalledWith('telnetd', 'disable'));
+  });
+
+  it('enabling telnetd warns that it is a root shell on the LAN', async () => {
+    vi.mocked(getProcesses).mockResolvedValue(supervisedFixture([SNMP, TELNET_OFF]));
+    vi.mocked(serviceAction).mockResolvedValue(undefined);
+    renderWithProviders(<ProcessesCard />);
+    await waitForPageLoad('diagnostics-processes-title');
+    const user = userEvent.setup();
+    await user.click(await screen.findByTestId('diagnostics-processes-enable-telnetd'));
+    expect(screen.getByTestId('diagnostics-processes-action-description')).toHaveTextContent(
+      'root shell',
+    );
+    await user.click(screen.getByTestId('diagnostics-processes-action-confirm'));
+    await waitFor(() => expect(serviceAction).toHaveBeenCalledWith('telnetd', 'enable'));
+  });
+});
