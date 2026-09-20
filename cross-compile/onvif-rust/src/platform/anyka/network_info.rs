@@ -6,8 +6,7 @@ use std::net::Ipv4Addr;
 
 use crate::config::netoverlay::NetworkOverlay;
 use crate::platform::common::{
-    DnsInfo, NetworkInfo, NetworkInterfaceInfo, NetworkProtocolInfo, NtpInfo, PlatformError,
-    PlatformResult,
+    DnsInfo, NetworkInfo, NetworkInterfaceInfo, NtpInfo, PlatformError, PlatformResult,
 };
 use async_trait::async_trait;
 
@@ -347,23 +346,6 @@ impl NetworkInfo for AnykaNetworkInfo {
 
     async fn get_ntp_info(&self) -> PlatformResult<NtpInfo> {
         Ok(Self::read_ntp_config())
-    }
-
-    async fn get_network_protocols(&self) -> PlatformResult<Vec<NetworkProtocolInfo>> {
-        // Return the protocols this ONVIF server supports
-        // These are typically configured at build/runtime, not read from system
-        Ok(vec![
-            NetworkProtocolInfo {
-                name: "HTTP".to_string(),
-                enabled: true,
-                ports: vec![80],
-            },
-            NetworkProtocolInfo {
-                name: "RTSP".to_string(),
-                enabled: true,
-                ports: vec![554],
-            },
-        ])
     }
 
     async fn set_network_interface(

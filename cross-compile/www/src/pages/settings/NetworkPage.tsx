@@ -57,7 +57,6 @@ import {
 } from '@/components/ui/status-card';
 import { Switch } from '@/components/ui/switch';
 import { useDeviceStatus } from '@/hooks/useDeviceStatus';
-import { type Diagnostics } from '@/services/diagnosticsService';
 import {
   type NetworkConfig,
   type NetworkOverlayState,
@@ -72,6 +71,7 @@ import {
   setNetworkProtocols,
 } from '@/services/networkService';
 import { pickPrimaryNetworkInterface } from '@/utils/identificationStatusCard';
+import { type WifiDiagnostics, wifiSecurityMode } from '@/utils/wifiStatus';
 
 const octet = String.raw`(?:25[0-5]|2[0-4]\d|1\d{2}|[1-9]\d|\d)`;
 const ipRegex = new RegExp(String.raw`^${octet}\.${octet}\.${octet}\.${octet}$`);
@@ -150,8 +150,6 @@ function ipOverlayDiffersFromLive(
   return false;
 }
 
-type WifiDiagnostics = NonNullable<Diagnostics['wifi']>;
-
 /**
  * Form values for the live device state, with any pending overlay on top.
  *
@@ -171,7 +169,7 @@ function formValuesFrom(
   return {
     ssid: pending?.ssid ?? wifi?.ssid ?? '',
     password: '',
-    security: (pending?.security as NetworkFormData['security']) ?? 'wpa',
+    security: (pending?.security as NetworkFormData['security']) ?? wifiSecurityMode(wifi),
     dhcp: pending?.dhcp ?? iface?.dhcp ?? true,
     address: parsed?.ip ?? iface?.address ?? '',
     prefixLength: parsed?.prefix ?? iface?.prefixLength ?? 24,
@@ -306,7 +304,8 @@ export default function NetworkPage() {
       // builder takes string | undefined, so collapse null into undefined.
       const liveSsid = overlay?.pending?.ssid ?? diagnostics?.wifi?.ssid ?? undefined;
       const liveSecurity =
-        (overlay?.pending?.security as NetworkFormData['security'] | undefined) ?? 'wpa';
+        (overlay?.pending?.security as NetworkFormData['security'] | undefined) ??
+        wifiSecurityMode(diagnostics?.wifi);
       const wifiPatch = buildWifiOverlayPatch(values, liveSsid, liveSecurity);
       if (wifiPatch) {
         await runNetworkStep('Wi-Fi configuration failed', () => putNetworkOverlay(wifiPatch));

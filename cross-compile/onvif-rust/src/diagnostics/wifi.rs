@@ -32,6 +32,18 @@ pub fn map_key_mgmt(raw: &str) -> String {
     }
 }
 
+/// Whether a `key_mgmt=NONE` association is WEP rather than genuinely open.
+///
+/// wpa_supplicant reports both as `NONE`; only the negotiated cipher separates
+/// them, and a static-key WEP link often carries it as the group cipher with no
+/// pairwise one at all.
+fn is_wep(fields: &HashMap<&str, &str>) -> bool {
+    ["pairwise_cipher", "group_cipher"]
+        .iter()
+        .filter_map(|key| fields.get(key))
+        .any(|cipher| cipher.starts_with("WEP"))
+}
+
 /// Convert centre frequency (MHz) to IEEE channel when unambiguous.
 pub fn frequency_to_channel(freq_mhz: u32) -> Option<u32> {
     if freq_mhz == 2484 {
@@ -59,7 +71,13 @@ pub fn parse_wpa_status(text: &str, interface: &str) -> WifiDiagnostics {
     let connected = wpa_state == "COMPLETED";
     let frequency_mhz = fields.get("freq").and_then(|value| value.parse().ok());
     let channel = frequency_mhz.and_then(frequency_to_channel);
-    let security = fields.get("key_mgmt").map(|value| map_key_mgmt(value));
+    let security = fields.get("key_mgmt").map(|value| {
+        if *value == "NONE" && is_wep(&fields) {
+            "WEP".to_string()
+        } else {
+            map_key_mgmt(value)
+        }
+    });
     let ssid = fields.get("ssid").map(|value| value.to_string());
     let signal_dbm = fields.get("signal").and_then(|value| value.parse().ok());
 
@@ -217,6 +235,23 @@ signal=-52
     fn test_map_key_mgmt_open_and_enterprise_labels() {
         assert_eq!(map_key_mgmt("NONE"), "Open");
         assert_eq!(map_key_mgmt("WPA2-EAP"), "Enterprise");
+    }
+
+    #[test]
+    fn test_parse_wpa_status_separates_wep_from_open() {
+        let open = parse_wpa_status(
+            "wpa_state=COMPLETED\nkey_mgmt=NONE\npairwise_cipher=NONE\ngroup_cipher=NONE\n",
+            "wlan0",
+        );
+        assert_eq!(open.security.as_deref(), Some("Open"));
+
+        // Static-key WEP negotiates no pairwise cipher, so the evidence is the
+        // group cipher alone.
+        let wep = parse_wpa_status(
+            "wpa_state=COMPLETED\nkey_mgmt=NONE\npairwise_cipher=NONE\ngroup_cipher=WEP-104\n",
+            "wlan0",
+        );
+        assert_eq!(wep.security.as_deref(), Some("WEP"));
     }
 
     #[test]

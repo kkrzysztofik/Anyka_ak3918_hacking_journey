@@ -555,11 +555,8 @@ impl ServiceHandler for DeviceService {
             // Network Protocol Operations
             "GetNetworkProtocols" => {
                 dispatch_async(body_xml, |request: GetNetworkProtocols| {
-                    let platform = platform.clone();
                     let config = config.clone();
-                    async move {
-                        network_ops::handle_get_network_protocols(&platform, &config, request).await
-                    }
+                    async move { network_ops::handle_get_network_protocols(&config, request).await }
                 })
                 .await
             }

@@ -554,36 +554,14 @@ pub async fn handle_get_network_default_gateway(
 /// Handle GetNetworkProtocols request.
 ///
 /// Returns network protocol configurations.
+/// Config is the only source: `SetNetworkProtocols` writes there, and the
+/// listeners are bound from the same values. The platform used to answer first
+/// with a hardcoded 80/554, which silently discarded every port change.
 pub async fn handle_get_network_protocols(
-    platform: &Option<Arc<dyn Platform>>,
     config: &Arc<ConfigRuntime>,
     _request: GetNetworkProtocols,
 ) -> OnvifResult<GetNetworkProtocolsResponse> {
     tracing::debug!("GetNetworkProtocols request");
-
-    // Try to get protocol info from platform
-    if let Some(platform) = platform
-        && let Some(network_info) = platform.network_info()
-        && let Ok(protocols) = network_info.get_network_protocols().await
-    {
-        let network_protocols: Vec<NetworkProtocol> = protocols
-            .iter()
-            .filter_map(|p| {
-                let name = match p.name.to_uppercase().as_str() {
-                    "HTTP" => NetworkProtocolType::HTTP,
-                    "HTTPS" => NetworkProtocolType::HTTPS,
-                    "RTSP" => NetworkProtocolType::RTSP,
-                    _ => return None,
-                };
-                Some(NetworkProtocol {
-                    name,
-                    enabled: p.enabled,
-                    port: p.ports.iter().map(|&p| p as i32).collect(),
-                })
-            })
-            .collect();
-        return Ok(GetNetworkProtocolsResponse { network_protocols });
-    }
 
     let cfg = config.read();
     Ok(GetNetworkProtocolsResponse {
@@ -1095,7 +1073,7 @@ mod tests {
     #[tokio::test]
     async fn test_get_network_protocols() {
         let config = create_test_config();
-        let response = handle_get_network_protocols(&None, &config, GetNetworkProtocols {})
+        let response = handle_get_network_protocols(&config, GetNetworkProtocols {})
             .await
             .unwrap();
 
@@ -1113,6 +1091,38 @@ mod tests {
                 .iter()
                 .any(|p| p.name == NetworkProtocolType::RTSP),
             "RTSP must be advertised"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_get_network_protocols_reports_a_changed_port() {
+        let config = create_test_config();
+        handle_set_network_protocols(
+            &config,
+            SetNetworkProtocols {
+                network_protocols: vec![NetworkProtocol {
+                    name: NetworkProtocolType::HTTP,
+                    enabled: true,
+                    port: vec![8080],
+                }],
+            },
+        )
+        .await
+        .expect("set must succeed");
+
+        let response = handle_get_network_protocols(&config, GetNetworkProtocols {})
+            .await
+            .unwrap();
+
+        let http = response
+            .network_protocols
+            .iter()
+            .find(|p| p.name == NetworkProtocolType::HTTP)
+            .expect("HTTP must be advertised");
+        assert_eq!(
+            http.port,
+            vec![8080],
+            "the platform used to answer first with a hardcoded 80, hiding every port change"
         );
     }
 
