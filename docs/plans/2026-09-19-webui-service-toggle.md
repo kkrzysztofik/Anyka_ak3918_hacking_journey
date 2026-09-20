@@ -48,6 +48,31 @@ Verified against the code on 2026-09-19. If any of these has drifted, stop and r
 | Nothing in the codebase writes `anyka.toml` today, and `netoverlay.rs` says so | `netoverlay.rs:3-7` |
 | The network overlay merges `[wifi]` only — it cannot conflict with `[services]` | `config.rs:513-544` |
 
+### Validated by execution (2026-09-20)
+
+The line editor in Task 1 was ported and run against the **real**
+`SD_card_contents/anyka_hack/anyka.toml` before this plan was finalised:
+6 services × both booleans = 12 cases. Every case re-parses as TOML, sets
+only the intended value, changes exactly two lines of text (zero for an
+idempotent no-op), preserves every comment, and leaves every other key
+byte-identical.
+
+Adversarial inputs also pass: inline-table `env` (the form the shipped file
+uses), `enabled=true` with no spaces, a commented-out `# enabled = true`, an
+indented stanza, `=` inside a value, a final stanza with no trailing newline,
+and CRLF.
+
+Two defects were found this way and are already fixed in the code below —
+do not "simplify" them back:
+
+1. A prefix match on `enabled` **destroys** a sibling key such as
+   `enabled_at_boot`. The editor matches the parsed key, not the prefix.
+2. `RestartHistory` has `record()`, not `push()`.
+
+Known ceiling, left uncoded: a multi-line array whose continuation line begins
+with `[` would end the stanza scan early. Unreachable with the current
+`ServiceCfg` schema; marked with a `ponytail:` comment at the site.
+
 ---
 
 ## File Structure
@@ -137,6 +162,24 @@ fn test_set_enabled_in_text_does_not_escape_the_stanza() {
 }
 
 #[test]
+fn test_set_enabled_in_text_does_not_clobber_a_key_that_starts_with_enabled() {
+    // Regression: a prefix match would overwrite this line, silently losing a
+    // key from the operator's file.
+    let src = "[services.x]\nenabled_at_boot = \"yes\"\nexec = \"/bin/true\"\n";
+    let got = set_enabled_in_text(src, "x", false).expect("edit");
+    assert!(got.contains("enabled_at_boot = \"yes\""));
+    assert!(got.contains("enabled = false"));
+}
+
+#[test]
+fn test_set_enabled_in_text_ignores_a_commented_out_line() {
+    let src = "[services.x]\n# enabled = true\nexec = \"/bin/true\"\n";
+    let got = set_enabled_in_text(src, "x", false).expect("edit");
+    assert!(got.contains("# enabled = true"));
+    assert!(got.contains("\nenabled = false\n"));
+}
+
+#[test]
 fn test_set_enabled_in_text_unknown_stanza_is_an_error() {
     match set_enabled_in_text(SAMPLE, "nope", true) {
         Err(ConfigError::Invalid(_)) => {}
@@ -202,13 +245,24 @@ pub fn set_enabled_in_text(text: &str, name: &str, enabled: bool) -> Result<Stri
         )));
     };
     // The stanza ends at the next `[`-prefixed line, or at end of file.
+    //
+    // ponytail: a multi-line array whose continuation line begins with `[`
+    // would end the stanza early here. Unreachable with the current schema —
+    // `ServiceCfg.args` is `Vec<String>`, which cannot nest. If a nested-array
+    // field is ever added, parse the stanza instead of scanning it.
     let end = out[hdr + 1..]
         .iter()
         .position(|l| l.trim_start().starts_with('['))
         .map(|i| i + hdr + 1)
         .unwrap_or(out.len());
 
-    let Some(i) = (hdr + 1..end).find(|&i| out[i].trim_start().starts_with("enabled")) else {
+    // Match the *key*, not a prefix: `starts_with("enabled")` also matches a
+    // line like `enabled_at_boot = "yes"` and would overwrite it — silent data
+    // loss in the operator's file. Splitting on `=` also skips comments
+    // (`# enabled = true` yields the key `# enabled`) and tolerates `enabled=true`.
+    let Some(i) = (hdr + 1..end)
+        .find(|&i| out[i].split('=').next().is_some_and(|k| k.trim() == "enabled"))
+    else {
         out.insert(hdr + 1, format!("enabled = {value}"));
         return Ok(out.join("\n"));
     };
@@ -241,13 +295,17 @@ pub fn set_service_enabled(
     })?;
     let new_text = set_enabled_in_text(&text, name, enabled)?;
 
+    // Same shape as `Slots::set_active` (update.rs:68) — create, write, fsync,
+    // rename. No trailing `libc::sync()`: losing a toggle to a power cut is
+    // survivable, losing the A/B pointer is not.
     let tmp = path.with_extension("toml.tmp");
-    let write = |p: &std::path::Path| -> Result<(), std::io::Error> {
-        let mut f = std::fs::File::create(p)?;
-        std::io::Write::write_all(&mut f, new_text.as_bytes())?;
+    (|| -> std::io::Result<()> {
+        use std::io::Write;
+        let mut f = std::fs::File::create(&tmp)?;
+        f.write_all(new_text.as_bytes())?;
         f.sync_all()
-    };
-    write(&tmp).map_err(|source| ConfigError::Write {
+    })()
+    .map_err(|source| ConfigError::Write {
         path: tmp.display().to_string(),
         source,
     })?;
@@ -308,7 +366,7 @@ fn test_decide_never_acts_on_a_disabled_service() {
     let mut hist = RestartHistory::default();
     // Pre-load history so any other state would be deep in crash-loop logic.
     for _ in 0..10 {
-        hist.push(now - Duration::from_secs(1));
+        hist.record(now - Duration::from_secs(1));
     }
     let before = hist.len();
 
@@ -541,12 +599,8 @@ Add the helper, next to `handle_control_conn`:
 /// The 1 s budget is deliberately below the client's 2 s socket timeout
 /// (`onvif-rust/src/diagnostics/services.rs`): if we answered later than the
 /// client waits, an applied-and-persisted toggle would surface as a 503.
-fn send_toggle<W: std::io::Write>(
-    writer: &mut W,
-    tx: &Sender<Msg>,
-    name: String,
-    enabled: bool,
-) {
+fn send_toggle(stream: &mut UnixStream, tx: &Sender<Msg>, name: String, enabled: bool) {
+    use std::io::Write;
     let (reply_tx, reply_rx) = channel();
     let sent = tx.send(Msg::ToggleService {
         name,
@@ -564,9 +618,12 @@ fn send_toggle<W: std::io::Write>(
         control::ToggleOutcome::Unknown => "unknown\n",
         control::ToggleOutcome::Error => "error\n",
     };
-    let _ = writer.write_all(reply.as_bytes());
+    let _ = stream.write_all(reply.as_bytes());
 }
 ```
+
+(Concrete `UnixStream`, not `impl Write`: `handle_control_conn` is the only
+caller and nothing tests this against a buffer.)
 
 And two arms in `handle_control_conn`, alongside the existing `Status`/`Restart` ones:
 
@@ -705,19 +762,10 @@ fn dummy_spec() -> SpawnSpec {
     }
 }
 
-/// A `LoopCtx` over test-owned parts. Returned by value so each test can keep
-/// its tempdir alive.
-fn ctx<'a>(
-    sys: &'a dyn Sys,
-    cfg: &'a mut Config,
-    config_path: &'a Path,
-    update_root: &'a Path,
-    slots: &'a crate::update::Slots,
-    policy: &'a Policy,
-) -> LoopCtx<'a> {
-    LoopCtx { sys, cfg, config_path, update_root, slots, policy }
-}
 ```
+
+Tests build `LoopCtx { .. }` inline — a helper wrapping a six-field struct
+literal in a six-argument function saves nothing.
 
 Tests:
 
@@ -752,7 +800,14 @@ fn test_toggle_disable_persists_then_kills_and_inerts() {
     }];
 
     let (rtx, rrx) = channel();
-    let mut c = ctx(&sys, &mut cfg, &cfg_path, dir.path(), &slots, &policy);
+    let mut c = LoopCtx {
+        sys: &sys,
+        cfg: &mut cfg,
+        config_path: &cfg_path,
+        update_root: dir.path(),
+        slots: &slots,
+        policy: &policy,
+    };
     handle_toggle_service(&mut c, &mut svcs, "snmp".into(), false, &rtx);
 
     assert_eq!(rrx.recv().expect("reply"), control::ToggleOutcome::Ok);
@@ -788,7 +843,14 @@ fn test_toggle_enable_a_boot_time_disabled_service_inserts_it() {
     let mut svcs: Vec<Service> = Vec::new();
 
     let (rtx, rrx) = channel();
-    let mut c = ctx(&sys, &mut cfg, &cfg_path, dir.path(), &slots, &policy);
+    let mut c = LoopCtx {
+        sys: &sys,
+        cfg: &mut cfg,
+        config_path: &cfg_path,
+        update_root: dir.path(),
+        slots: &slots,
+        policy: &policy,
+    };
     handle_toggle_service(&mut c, &mut svcs, "dropbear".into(), true, &rtx);
 
     assert_eq!(rrx.recv().expect("reply"), control::ToggleOutcome::Ok);
@@ -1059,6 +1121,13 @@ Expected: compile failure — `handle_query_status` takes one more argument.
 - [ ] **Step 3: Implement**
 
 ```rust
+/// A row for a service with no live `Service` entry — reuses `from_svc_state`
+/// rather than hand-building a `ServiceStatus`, so the field defaults stay in
+/// one place.
+fn synth(name: &str, state: SvcState, now: Instant) -> control::ServiceStatus {
+    control::ServiceStatus::from_svc_state(name, &state, &RestartHistory::default(), now)
+}
+
 /// One row per **configured** service, not per running one: a disabled service
 /// has to be listable or the UI has no way to offer re-enabling it. `cfg` is
 /// the single source of truth — both the boot path and the toggle handler
@@ -1068,27 +1137,15 @@ fn handle_query_status(cfg: &Config, services: &[Service], reply_tx: &Sender<Con
     let rows: Vec<control::ServiceStatus> = cfg
         .services
         .iter()
-        .map(|(name, entry)| {
-            match services.iter().find(|s| s.name == *name) {
-                _ if !entry.enabled => control::ServiceStatus::from_svc_state(
-                    name,
-                    &SvcState::Disabled,
-                    &RestartHistory::default(),
-                    now,
-                ),
-                Some(svc) => {
-                    control::ServiceStatus::from_svc_state(&svc.name, &svc.state, &svc.hist, now)
-                }
-                // Enabled but not yet in the vec: render as pending, never drop.
-                None => control::ServiceStatus {
-                    name: name.clone(),
-                    state: "backoff",
-                    pid: None,
-                    uptime_s: 0,
-                    restarts: 0,
-                    retry_in_s: 0,
-                },
+        .map(|(name, entry)| match services.iter().find(|s| s.name == *name) {
+            _ if !entry.enabled => synth(name, SvcState::Disabled, now),
+            Some(svc) => {
+                control::ServiceStatus::from_svc_state(&svc.name, &svc.state, &svc.hist, now)
             }
+            // Enabled but not in the vec should not happen after Task 4's
+            // insertion. Render it as pending rather than dropping the row: a
+            // service missing from the table has no way back.
+            None => synth(name, SvcState::Backoff { until: now, attempt: 0 }, now),
         })
         .collect();
     let _ = reply_tx.send(ControlMsg::Status(rows));
@@ -1365,7 +1422,7 @@ rtk git commit -m "feat(onvif-rust): request_toggle socket client (Accepted/Unkn
 - Modify: `cross-compile/onvif-rust/src/diagnostics/http.rs` (auth-table tests only — the `_ => Administrator` catch-all at `http.rs:106` already covers these paths; the tests pin that)
 
 **Interfaces:**
-- Consumes: `request_toggle`, `query_status`, `SOCKET_PATH`.
+- Consumes: `request_toggle`, `SOCKET_PATH` (toggles); `query_status` (the restart route's 409 guard only).
 - Produces: `handle_enable_service` / `handle_disable_service`. Mapping: 202 Accepted / 404 Unknown / 503 Error-or-Unreachable.
 
 **Restart gets a 409.** Task 5 made `status` list disabled services, so the restart route's "is this a known name" guard now passes for them — it would return 202 while the supervisor logs "not running" and does nothing. It already holds the status rows, so checking the matched row's state costs nothing.
@@ -1413,49 +1470,38 @@ Expected: compile failure — `toggle_service` missing.
 
 In `processes.rs`, mirroring `handle_restart_service`:
 
+**One round-trip, not two.** `handle_restart_service` pre-flights a
+`query_status` because the supervisor answers every `restart` with `ok`,
+including for names it has never heard of — the snapshot is the only way to
+get a 404. The toggle protocol has its own `unknown` reply (§1), so the
+pre-flight would be a second socket round-trip that produces an answer the
+first one already carries. Drop it; `request_toggle` alone covers all four
+outcomes.
+
 ```rust
 /// Shared core for the enable/disable routes.
 ///
 /// 202, not 200: accepted, not confirmed — the supervisor SIGTERMs (disable)
 /// or starts under backoff (enable) on its own schedule.
 async fn toggle_service(name: String, enabled: bool) -> impl IntoResponse {
-    let sock = std::path::Path::new(crate::diagnostics::services::SOCKET_PATH);
+    use crate::diagnostics::services::{SOCKET_PATH, ToggleReply, request_toggle};
+    let sock = std::path::Path::new(SOCKET_PATH);
 
-    // Validate against the live snapshot (which now includes disabled rows)
-    // so an unknown name is a 404, not a silently-accepted "ok".
-    let known = tokio::task::spawn_blocking(move || {
-        crate::diagnostics::services::query_status(sock)
-            .map(|rows| rows.iter().any(|r| r.name == name))
-            .map(|found| (found, name))
-    })
-    .await;
-
-    let Ok(Some((found, name))) = known else {
-        return (StatusCode::SERVICE_UNAVAILABLE, "supervisor unreachable").into_response();
-    };
-    if !found {
-        return (StatusCode::NOT_FOUND, "unknown service").into_response();
-    }
-
-    let reply = tokio::task::spawn_blocking(move || {
-        crate::diagnostics::services::request_toggle(sock, &name, enabled)
-    })
-    .await;
+    let reply = tokio::task::spawn_blocking(move || request_toggle(sock, &name, enabled)).await;
 
     match reply {
-        Ok(crate::diagnostics::services::ToggleReply::Accepted) => {
-            StatusCode::ACCEPTED.into_response()
+        Ok(ToggleReply::Accepted) => StatusCode::ACCEPTED.into_response(),
+        Ok(ToggleReply::Unknown) => {
+            (StatusCode::NOT_FOUND, "unknown or non-toggleable service").into_response()
         }
-        Ok(crate::diagnostics::services::ToggleReply::Unknown) => (
-            StatusCode::NOT_FOUND,
-            "unknown or non-toggleable service",
-        )
-            .into_response(),
-        _ => (
-            StatusCode::SERVICE_UNAVAILABLE,
-            "toggle not accepted by supervisor",
-        )
-            .into_response(),
+        // Two different 503s: on a camera with no shell, the body is the only
+        // thing that tells "no supervisor" from "supervisor said no".
+        Ok(ToggleReply::Unreachable) | Err(_) => {
+            (StatusCode::SERVICE_UNAVAILABLE, "supervisor unreachable").into_response()
+        }
+        Ok(ToggleReply::Error) => {
+            (StatusCode::SERVICE_UNAVAILABLE, "supervisor rejected the toggle").into_response()
+        }
     }
 }
 
@@ -1793,9 +1839,10 @@ const DISABLE_COPY: Record<string, string> = {
   snmp: 'SNMP polling stops.',
   dropbear: 'The SSH daemon will not run until it is re-enabled.',
 };
-
-const DEFAULT_ENABLE_COPY = 'The service starts immediately under the normal supervisor backoff policy.';
 ```
+
+There is no `ENABLE_COPY` map: with `wpa_supplicant` gone (§2.1) every enable
+says the same thing, so it is one inline string in `actionDescription`.
 
 Row actions — Restart only when not disabled, then the toggle when the service is toggleable:
 
@@ -1818,7 +1865,7 @@ function actionDescription(p: NonNullable<PendingAction>): string {
       : 'The supervisor sends SIGTERM; the service is restarted under its normal backoff policy.';
   }
   if (p.action === 'enable') {
-    return DEFAULT_ENABLE_COPY;
+    return 'The service starts immediately under the normal supervisor backoff policy.';
   }
   return DISABLE_COPY[p.service.name] ?? 'The service stops and will not run again until re-enabled.';
 }
