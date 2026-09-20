@@ -728,17 +728,6 @@ pub struct NtpInfo {
     pub ntp_manual: Vec<String>,
 }
 
-/// Network protocol information.
-#[derive(Debug, Clone)]
-pub struct NetworkProtocolInfo {
-    /// Protocol name (HTTP, HTTPS, RTSP).
-    pub name: String,
-    /// Whether the protocol is enabled.
-    pub enabled: bool,
-    /// Port numbers.
-    pub ports: Vec<u16>,
-}
-
 /// Network information trait for querying system network configuration.
 #[cfg_attr(test, automock)]
 #[async_trait]
@@ -752,8 +741,10 @@ pub trait NetworkInfo: Send + Sync {
     /// Get NTP configuration.
     async fn get_ntp_info(&self) -> PlatformResult<NtpInfo>;
 
-    /// Get enabled network protocols.
-    async fn get_network_protocols(&self) -> PlatformResult<Vec<NetworkProtocolInfo>>;
+    /// Get the live default gateway, when the platform can observe one.
+    async fn get_default_gateway(&self) -> PlatformResult<Option<String>> {
+        Ok(None)
+    }
 
     /// Detect the local IP address.
     ///

@@ -518,23 +518,30 @@ pub async fn handle_set_ntp(request: SetNTP) -> OnvifResult<SetNTPResponse> {
 ///
 /// Returns default gateway configuration.
 pub async fn handle_get_network_default_gateway(
+    platform: &Option<Arc<dyn Platform>>,
     config: &Arc<ConfigRuntime>,
     _request: GetNetworkDefaultGateway,
 ) -> OnvifResult<GetNetworkDefaultGatewayResponse> {
     tracing::debug!("GetNetworkDefaultGateway request");
 
-    // Get gateway from config (platform doesn't expose gateway info)
-    let gateway = {
-        let g = config.read().network.gateway.clone();
-        if g.is_empty() {
-            "192.168.1.1".to_string()
-        } else {
-            g
-        }
+    // The live routing table wins: under DHCP the configured value is stale or
+    // absent, and the old literal fallback advertised a gateway from a subnet
+    // the camera is not even on.
+    let live = match platform.as_ref().and_then(|p| p.network_info()) {
+        Some(network_info) => network_info.get_default_gateway().await.ok().flatten(),
+        None => None,
     };
 
+    let gateway = live.unwrap_or_else(|| config.read().network.gateway.clone());
+
+    // An empty IPv4Address list is the spec-legal way to say "no default route";
+    // inventing one sends the WebUI a gateway from a subnet we are not on.
     let network_gateway = NetworkGateway {
-        ipv4_address: vec![gateway],
+        ipv4_address: if gateway.is_empty() {
+            vec![]
+        } else {
+            vec![gateway]
+        },
         ipv6_address: vec![],
         extension: None,
     };
@@ -547,36 +554,14 @@ pub async fn handle_get_network_default_gateway(
 /// Handle GetNetworkProtocols request.
 ///
 /// Returns network protocol configurations.
+/// Config is the only source: `SetNetworkProtocols` writes there, and the
+/// listeners are bound from the same values. The platform used to answer first
+/// with a hardcoded 80/554, which silently discarded every port change.
 pub async fn handle_get_network_protocols(
-    platform: &Option<Arc<dyn Platform>>,
     config: &Arc<ConfigRuntime>,
     _request: GetNetworkProtocols,
 ) -> OnvifResult<GetNetworkProtocolsResponse> {
     tracing::debug!("GetNetworkProtocols request");
-
-    // Try to get protocol info from platform
-    if let Some(platform) = platform
-        && let Some(network_info) = platform.network_info()
-        && let Ok(protocols) = network_info.get_network_protocols().await
-    {
-        let network_protocols: Vec<NetworkProtocol> = protocols
-            .iter()
-            .filter_map(|p| {
-                let name = match p.name.to_uppercase().as_str() {
-                    "HTTP" => NetworkProtocolType::HTTP,
-                    "HTTPS" => NetworkProtocolType::HTTPS,
-                    "RTSP" => NetworkProtocolType::RTSP,
-                    _ => return None,
-                };
-                Some(NetworkProtocol {
-                    name,
-                    enabled: p.enabled,
-                    port: p.ports.iter().map(|&p| p as i32).collect(),
-                })
-            })
-            .collect();
-        return Ok(GetNetworkProtocolsResponse { network_protocols });
-    }
 
     let cfg = config.read();
     Ok(GetNetworkProtocolsResponse {
@@ -1056,14 +1041,29 @@ mod tests {
     // ========================================================================
 
     #[tokio::test]
-    async fn test_get_network_default_gateway() {
+    async fn test_get_network_default_gateway_uses_config() {
         let config = create_test_config();
-        let response = handle_get_network_default_gateway(&config, GetNetworkDefaultGateway {})
-            .await
-            .unwrap();
+        config.write().network.gateway = "192.168.2.1".to_string();
+        let response =
+            handle_get_network_default_gateway(&None, &config, GetNetworkDefaultGateway {})
+                .await
+                .unwrap();
 
-        // Should have gateway information
-        assert!(!response.network_gateway.is_empty());
+        assert_eq!(response.network_gateway[0].ipv4_address, ["192.168.2.1"]);
+    }
+
+    #[tokio::test]
+    async fn test_get_network_default_gateway_reports_none_when_unknown() {
+        let config = create_test_config();
+        let response =
+            handle_get_network_default_gateway(&None, &config, GetNetworkDefaultGateway {})
+                .await
+                .unwrap();
+
+        assert!(
+            response.network_gateway[0].ipv4_address.is_empty(),
+            "an unknown gateway must not be answered with a made-up 192.168.1.1"
+        );
     }
 
     // ========================================================================
@@ -1073,7 +1073,7 @@ mod tests {
     #[tokio::test]
     async fn test_get_network_protocols() {
         let config = create_test_config();
-        let response = handle_get_network_protocols(&None, &config, GetNetworkProtocols {})
+        let response = handle_get_network_protocols(&config, GetNetworkProtocols {})
             .await
             .unwrap();
 
@@ -1091,6 +1091,38 @@ mod tests {
                 .iter()
                 .any(|p| p.name == NetworkProtocolType::RTSP),
             "RTSP must be advertised"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_get_network_protocols_reports_a_changed_port() {
+        let config = create_test_config();
+        handle_set_network_protocols(
+            &config,
+            SetNetworkProtocols {
+                network_protocols: vec![NetworkProtocol {
+                    name: NetworkProtocolType::HTTP,
+                    enabled: true,
+                    port: vec![8080],
+                }],
+            },
+        )
+        .await
+        .expect("set must succeed");
+
+        let response = handle_get_network_protocols(&config, GetNetworkProtocols {})
+            .await
+            .unwrap();
+
+        let http = response
+            .network_protocols
+            .iter()
+            .find(|p| p.name == NetworkProtocolType::HTTP)
+            .expect("HTTP must be advertised");
+        assert_eq!(
+            http.port,
+            vec![8080],
+            "the platform used to answer first with a hardcoded 80, hiding every port change"
         );
     }
 

@@ -74,6 +74,83 @@ describe('networkService', () => {
       expect(result[0].dhcp).toBe(false);
       expect(result[0].address).toBe('192.168.1.100');
     });
+
+    it('should read the address from FromDHCP when DHCP is on', async () => {
+      vi.mocked(apiClient.post).mockResolvedValueOnce(
+        createMockSOAPResponse(`
+        <GetNetworkInterfacesResponse>
+          <NetworkInterfaces token="wlan0">
+            <Enabled>true</Enabled>
+            <Info><Name>wlan0</Name><HwAddress>C0:4B:24:DA:4D:EA</HwAddress></Info>
+            <IPv4>
+              <Enabled>true</Enabled>
+              <Config>
+                <DHCP>true</DHCP>
+                <FromDHCP>
+                  <Address>192.168.2.198</Address>
+                  <PrefixLength>24</PrefixLength>
+                </FromDHCP>
+              </Config>
+            </IPv4>
+          </NetworkInterfaces>
+        </GetNetworkInterfacesResponse>
+      `),
+      );
+
+      const result = await getNetworkInterfaces();
+
+      expect(result[0].dhcp).toBe(true);
+      expect(result[0].address).toBe('192.168.2.198');
+      expect(result[0].prefixLength).toBe(24);
+    });
+
+    it('should ignore a stale Manual entry while DHCP is on', async () => {
+      vi.mocked(apiClient.post).mockResolvedValueOnce(
+        createMockSOAPResponse(`
+        <GetNetworkInterfacesResponse>
+          <NetworkInterfaces token="wlan0">
+            <Enabled>true</Enabled>
+            <Info><Name>wlan0</Name><HwAddress>C0:4B:24:DA:4D:EA</HwAddress></Info>
+            <IPv4>
+              <Enabled>true</Enabled>
+              <Config>
+                <DHCP>true</DHCP>
+                <Manual><Address>10.0.0.5</Address><PrefixLength>8</PrefixLength></Manual>
+                <FromDHCP><Address>192.168.2.198</Address><PrefixLength>24</PrefixLength></FromDHCP>
+              </Config>
+            </IPv4>
+          </NetworkInterfaces>
+        </GetNetworkInterfacesResponse>
+      `),
+      );
+
+      const result = await getNetworkInterfaces();
+
+      expect(result[0].address).toBe('192.168.2.198');
+      expect(result[0].prefixLength).toBe(24);
+    });
+
+    it('should fall back to FromDHCP when DHCP is off but no Manual exists', async () => {
+      vi.mocked(apiClient.post).mockResolvedValueOnce(
+        createMockSOAPResponse(`
+        <GetNetworkInterfacesResponse>
+          <NetworkInterfaces token="eth0">
+            <Enabled>true</Enabled>
+            <Info><Name>eth0</Name><HwAddress>00:11:22:33:44:55</HwAddress></Info>
+            <IPv4>
+              <Enabled>true</Enabled>
+              <Config>
+                <DHCP>false</DHCP>
+                <FromDHCP><Address>192.168.9.9</Address><PrefixLength>24</PrefixLength></FromDHCP>
+              </Config>
+            </IPv4>
+          </NetworkInterfaces>
+        </GetNetworkInterfacesResponse>
+      `),
+      );
+
+      await expect(getNetworkInterfaces()).resolves.toMatchObject([{ address: '192.168.9.9' }]);
+    });
   });
 
   describe('getNetworkDefaultGateway', () => {
@@ -183,6 +260,42 @@ describe('networkService', () => {
       const config = await getNetworkConfig();
       expect(config.interfaces[0].gateway).toBe('192.168.2.1');
       expect(config.protocols).toEqual({ http: 80, rtsp: 554 });
+    });
+
+    it('should attach the gateway to the uplink, not to interface 0', async () => {
+      vi.mocked(apiClient.post)
+        .mockResolvedValueOnce(
+          createMockSOAPResponse(`
+          <GetNetworkInterfacesResponse>
+            <NetworkInterfaces token="p2p0">
+              <Enabled>false</Enabled>
+              <Info><Name>p2p0</Name><HwAddress>C0:4B:24:DA:4D:EB</HwAddress></Info>
+              <IPv4><Enabled>true</Enabled><Config><DHCP>false</DHCP></Config></IPv4>
+            </NetworkInterfaces>
+            <NetworkInterfaces token="wlan0">
+              <Enabled>true</Enabled>
+              <Info><Name>wlan0</Name><HwAddress>C0:4B:24:DA:4D:EA</HwAddress></Info>
+              <IPv4><Enabled>true</Enabled><Config><DHCP>true</DHCP></Config></IPv4>
+            </NetworkInterfaces>
+          </GetNetworkInterfacesResponse>
+        `),
+        )
+        .mockResolvedValueOnce(
+          createMockSOAPResponse('<GetDNSResponse><DNSInformation/></GetDNSResponse>'),
+        )
+        .mockResolvedValueOnce(
+          createMockSOAPResponse(`
+          <GetNetworkDefaultGatewayResponse>
+            <NetworkGateway><IPv4Address>192.168.2.1</IPv4Address></NetworkGateway>
+          </GetNetworkDefaultGatewayResponse>
+        `),
+        )
+        .mockResolvedValueOnce(createMockSOAPResponse('<GetNetworkProtocolsResponse />'));
+
+      const config = await getNetworkConfig();
+
+      expect(config.interfaces[0].gateway).toBe('');
+      expect(config.interfaces[1].gateway).toBe('192.168.2.1');
     });
 
     it('should leave the gateway empty when the device reports none', async () => {

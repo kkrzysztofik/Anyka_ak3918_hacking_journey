@@ -82,7 +82,11 @@ const FormItem = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivEl
       <FormItemContext.Provider value={value}>
         <div
           ref={ref}
-          className={cn('space-y-2', className)}
+          // `grid gap-2`, not `space-y-2`: space-y puts a margin-bottom on every
+          // child but the last, which in the `flex ... items-center` rows (the
+          // DHCP / DNS / SNMP toggles) shifts label and switch 4px off centre.
+          // A caller's own `flex` overrides the display; the gap still applies.
+          className={cn('grid gap-2', className)}
           data-testid={props['data-testid' as keyof typeof props] || 'form-item'}
           {...props}
         />

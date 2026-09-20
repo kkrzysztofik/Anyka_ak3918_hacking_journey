@@ -59,6 +59,7 @@ import { Switch } from '@/components/ui/switch';
 import { useDeviceStatus } from '@/hooks/useDeviceStatus';
 import {
   type NetworkConfig,
+  type NetworkOverlayState,
   getNetworkConfig,
   getNetworkOverlay,
   getSnmpConfig,
@@ -69,6 +70,8 @@ import {
   setNetworkInterface,
   setNetworkProtocols,
 } from '@/services/networkService';
+import { pickPrimaryNetworkInterface } from '@/utils/identificationStatusCard';
+import { type WifiDiagnostics, wifiSecurityMode } from '@/utils/wifiStatus';
 
 const octet = String.raw`(?:25[0-5]|2[0-4]\d|1\d{2}|[1-9]\d|\d)`;
 const ipRegex = new RegExp(String.raw`^${octet}\.${octet}\.${octet}\.${octet}$`);
@@ -134,7 +137,7 @@ function ipOverlayDiffersFromLive(
 ): boolean {
   if (!config || !overlay?.has_pending) return false;
   const pending = overlay.pending;
-  const iface = config.interfaces[0];
+  const iface = pickPrimaryNetworkInterface(config.interfaces);
   if (!iface) return false;
 
   if (pending.dhcp !== undefined && pending.dhcp !== iface.dhcp) return true;
@@ -145,6 +148,38 @@ function ipOverlayDiffersFromLive(
   if (pending.gateway && pending.gateway !== iface.gateway) return true;
   if (pending.dns && pending.dns.join(',') !== config.dns.dnsServers.join(',')) return true;
   return false;
+}
+
+/**
+ * Form values for the live device state, with any pending overlay on top.
+ *
+ * Reads the primary interface, not `interfaces[0]`: the camera also reports a
+ * down `p2p0`, and ONVIF orders interfaces by whatever `/sys/class/net` hands
+ * back, so index 0 is regularly the wrong one.
+ */
+function formValuesFrom(
+  config: NetworkConfig,
+  overlay: NetworkOverlayState | undefined,
+  wifi: WifiDiagnostics | null | undefined,
+): Omit<NetworkFormData, 'snmpEnabled' | 'snmpPort' | 'snmpCommunity'> {
+  const iface = pickPrimaryNetworkInterface(config.interfaces);
+  const pending = overlay?.pending;
+  const parsed = parseOverlayAddress(pending?.address);
+
+  return {
+    ssid: pending?.ssid ?? wifi?.ssid ?? '',
+    password: '',
+    security: (pending?.security as NetworkFormData['security']) ?? wifiSecurityMode(wifi),
+    dhcp: pending?.dhcp ?? iface?.dhcp ?? true,
+    address: parsed?.ip ?? iface?.address ?? '',
+    prefixLength: parsed?.prefix ?? iface?.prefixLength ?? 24,
+    gateway: pending?.gateway ?? iface?.gateway ?? '',
+    dnsFromDHCP: config.dns.fromDHCP,
+    primaryDNS: pending?.dns?.[0] ?? config.dns.dnsServers[0] ?? '',
+    secondaryDNS: pending?.dns?.[1] ?? config.dns.dnsServers[1] ?? '',
+    httpPort: config.protocols.http,
+    rtspPort: config.protocols.rtsp,
+  };
 }
 
 function buildWifiOverlayPatch(
@@ -233,32 +268,25 @@ export default function NetworkPage() {
   const ipPending = useMemo(() => ipOverlayDiffersFromLive(config, overlay), [config, overlay]);
   const snmpUnavailable = snmpPending || snmpError;
 
+  // The PSK is deliberately never sent back (see `NetworkOverlayView`), so an
+  // empty field is ambiguous: unset, or set and withheld? A live association to
+  // a secured network proves a credential exists even when nothing is pending.
+  // ponytail: association-based, so a stored PSK for a currently-down link
+  // reads as "no password". Surface a live `has_password` if that ever matters.
+  const wifiSecured =
+    diagnostics?.wifi?.connected === true && (diagnostics.wifi.security ?? 'Open') !== 'Open';
+  const passwordPlaceholder =
+    overlay?.pending.has_password || wifiSecured ? 'Saved (leave blank to keep)' : '';
+
   useEffect(() => {
     if (!config || form.formState.isDirty) return;
-    const iface = config.interfaces[0];
-    const pending = overlay?.pending;
-    const parsed = parseOverlayAddress(pending?.address);
-    const snmpFields = {
+    form.reset({
+      ...formValuesFrom(config, overlay, diagnostics?.wifi),
       snmpEnabled: form.getValues('snmpEnabled'),
       snmpPort: form.getValues('snmpPort'),
       snmpCommunity: form.getValues('snmpCommunity'),
-    };
-    form.reset({
-      ssid: pending?.ssid ?? diagnostics?.wifi?.ssid ?? '',
-      password: '',
-      security: (pending?.security as NetworkFormData['security']) ?? 'wpa',
-      dhcp: pending?.dhcp ?? iface?.dhcp ?? true,
-      address: parsed?.ip ?? iface?.address ?? '',
-      prefixLength: parsed?.prefix ?? iface?.prefixLength ?? 24,
-      gateway: pending?.gateway ?? iface?.gateway ?? '',
-      dnsFromDHCP: config.dns.fromDHCP,
-      primaryDNS: pending?.dns?.[0] ?? config.dns.dnsServers[0] ?? '',
-      secondaryDNS: pending?.dns?.[1] ?? config.dns.dnsServers[1] ?? '',
-      httpPort: config.protocols.http,
-      rtspPort: config.protocols.rtsp,
-      ...snmpFields,
     });
-  }, [config, overlay, diagnostics?.wifi?.ssid, form]);
+  }, [config, overlay, diagnostics?.wifi, form]);
 
   useEffect(() => {
     if (!snmpLoaded || !snmp || form.formState.isDirty) return;
@@ -269,14 +297,15 @@ export default function NetworkPage() {
 
   const mutation = useMutation({
     mutationFn: async (values: NetworkFormData) => {
-      const iface = config?.interfaces[0];
+      const iface = pickPrimaryNetworkInterface(config?.interfaces);
       if (!iface) throw new Error('No interface found');
 
       // diagnostics reports ssid: null when wlan0 is not associated; the patch
       // builder takes string | undefined, so collapse null into undefined.
       const liveSsid = overlay?.pending?.ssid ?? diagnostics?.wifi?.ssid ?? undefined;
       const liveSecurity =
-        (overlay?.pending?.security as NetworkFormData['security'] | undefined) ?? 'wpa';
+        (overlay?.pending?.security as NetworkFormData['security'] | undefined) ??
+        wifiSecurityMode(diagnostics?.wifi);
       const wifiPatch = buildWifiOverlayPatch(values, liveSsid, liveSecurity);
       if (wifiPatch) {
         await runNetworkStep('Wi-Fi configuration failed', () => putNetworkOverlay(wifiPatch));
@@ -352,22 +381,8 @@ export default function NetworkPage() {
 
   const handleReset = () => {
     if (config) {
-      const iface = config.interfaces[0];
-      const pending = overlay?.pending;
-      const parsed = parseOverlayAddress(pending?.address);
       form.reset({
-        ssid: pending?.ssid ?? diagnostics?.wifi?.ssid ?? '',
-        password: '',
-        security: (pending?.security as NetworkFormData['security']) ?? 'wpa',
-        dhcp: pending?.dhcp ?? iface?.dhcp ?? true,
-        address: parsed?.ip ?? iface?.address ?? '',
-        prefixLength: parsed?.prefix ?? iface?.prefixLength ?? 24,
-        gateway: pending?.gateway ?? iface?.gateway ?? '',
-        dnsFromDHCP: config.dns.fromDHCP,
-        primaryDNS: pending?.dns?.[0] ?? config.dns.dnsServers[0] ?? '',
-        secondaryDNS: pending?.dns?.[1] ?? config.dns.dnsServers[1] ?? '',
-        httpPort: config.protocols.http,
-        rtspPort: config.protocols.rtsp,
+        ...formValuesFrom(config, overlay, diagnostics?.wifi),
         snmpEnabled: snmp?.enabled ?? false,
         snmpPort: snmp?.port ?? 161,
         snmpCommunity: snmp?.community ?? '',
@@ -455,6 +470,15 @@ export default function NetworkPage() {
           </StatusCardImage>
           <StatusCardContent>
             <StatusCardItem
+              label="IP Address"
+              value={
+                primaryInterface?.address
+                  ? `${primaryInterface.address}/${primaryInterface.prefixLength}`
+                  : '—'
+              }
+              data-testid="network-ip-address"
+            />
+            <StatusCardItem
               label="MAC Address"
               value={primaryInterface?.hwAddress || '—'}
               data-testid="network-mac-address"
@@ -523,9 +547,7 @@ export default function NetworkPage() {
                         <Input
                           {...field}
                           type="password"
-                          placeholder={
-                            overlay?.pending.has_password ? 'Saved (leave blank to keep)' : ''
-                          }
+                          placeholder={passwordPlaceholder}
                           className="border-[#3a3a3c] bg-transparent text-white focus:border-[#0a84ff]"
                           data-testid="network-password-input"
                         />

@@ -14,10 +14,9 @@ use parking_lot::RwLock;
 use super::common::{
     AudioEncoder, AudioEncoderConfig, AudioEncoding, AudioInput, AudioSourceConfig, BitrateMode,
     DeviceInfo, DnsInfo, ImagingControl, ImagingOptions, ImagingSettings, NetworkInfo,
-    NetworkInterfaceInfo, NetworkProtocolInfo, NtpInfo, PTZControl, Platform, PlatformError,
-    PlatformResult, PtzLimits, PtzPosition, PtzPreset, PtzVelocity, Resolution, VideoControl,
-    VideoEncoder, VideoEncoderConfig, VideoEncoderOptions, VideoEncoding, VideoInput,
-    VideoSourceConfig,
+    NetworkInterfaceInfo, NtpInfo, PTZControl, Platform, PlatformError, PlatformResult, PtzLimits,
+    PtzPosition, PtzPreset, PtzVelocity, Resolution, VideoControl, VideoEncoder,
+    VideoEncoderConfig, VideoEncoderOptions, VideoEncoding, VideoInput, VideoSourceConfig,
 };
 
 /// Builder for configuring stub platform behavior.
@@ -1098,21 +1097,6 @@ impl NetworkInfo for StubNetworkInfo {
         })
     }
 
-    async fn get_network_protocols(&self) -> PlatformResult<Vec<NetworkProtocolInfo>> {
-        Ok(vec![
-            NetworkProtocolInfo {
-                name: "HTTP".to_string(),
-                enabled: true,
-                ports: vec![80],
-            },
-            NetworkProtocolInfo {
-                name: "RTSP".to_string(),
-                enabled: true,
-                ports: vec![554],
-            },
-        ])
-    }
-
     async fn set_network_interface(
         &self,
         _token: &str,
@@ -1669,17 +1653,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_stub_network_info_protocols() {
+    async fn test_stub_network_info_reports_no_default_gateway() {
         let platform = StubPlatformBuilder::new()
             .network_info_supported(true)
             .build();
 
         let network = platform.network_info().unwrap();
-        let protocols = network.get_network_protocols().await.unwrap();
-        assert_eq!(protocols.len(), 2);
-        let names: Vec<&str> = protocols.iter().map(|p| p.name.as_str()).collect();
-        assert!(names.contains(&"HTTP"));
-        assert!(names.contains(&"RTSP"));
+
+        // The stub does not override the trait default, and GetNetworkDefaultGateway
+        // must fall through to config rather than inherit a made-up address.
+        assert_eq!(network.get_default_gateway().await.unwrap(), None);
     }
 
     #[tokio::test]

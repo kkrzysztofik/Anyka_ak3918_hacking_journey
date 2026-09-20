@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import { formatWifiChannel, formatWifiQuality, formatWifiSecurity } from '@/utils/wifiStatus';
+import {
+  formatWifiChannel,
+  formatWifiQuality,
+  formatWifiSecurity,
+  wifiSecurityMode,
+} from '@/utils/wifiStatus';
 
 describe('wifiStatus', () => {
   it('should format channel, quality, and security when connected', () => {
@@ -51,5 +56,31 @@ describe('wifiStatus', () => {
     expect(formatWifiQuality(disconnected)).toBe('—');
     expect(formatWifiSecurity(disconnected)).toBe('—');
     expect(formatWifiChannel(undefined)).toBe('—');
+  });
+
+  it.each([
+    ['WPA2', 'wpa'],
+    ['WPA', 'wpa'],
+    ['Enterprise', 'wpa'],
+    ['WEP', 'wep'],
+    ['Open', 'open'],
+  ] as const)('should map live security %s to form mode %s', (security, expected) => {
+    expect(
+      wifiSecurityMode({
+        interface: 'wlan0',
+        connected: true,
+        ssid: 'kmk',
+        frequency_mhz: 2437,
+        channel: 6,
+        security,
+        signal_dbm: -52,
+        link_quality: '66/70',
+      }),
+    ).toBe(expected);
+  });
+
+  it('should default the form mode to wpa when nothing is associated', () => {
+    expect(wifiSecurityMode(undefined)).toBe('wpa');
+    expect(wifiSecurityMode(null)).toBe('wpa');
   });
 });

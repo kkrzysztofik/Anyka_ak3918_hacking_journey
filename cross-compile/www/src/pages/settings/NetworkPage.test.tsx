@@ -132,6 +132,70 @@ describe('NetworkPage', () => {
     expect(screen.getByTestId('network-gateway-input')).toHaveValue('192.168.1.1');
   });
 
+  it('should show the live IP address in the status card', async () => {
+    await renderNetworkPage();
+
+    expect(screen.getByTestId('network-ip-address')).toHaveTextContent('192.168.2.198/24');
+  });
+
+  it('should mark the Wi-Fi password as saved while associated to a secured network', async () => {
+    await renderNetworkPage();
+
+    expect(screen.getByTestId('network-password-input')).toHaveAttribute(
+      'placeholder',
+      'Saved (leave blank to keep)',
+    );
+  });
+
+  it('should leave the password placeholder empty on an open network', async () => {
+    vi.mocked(getDiagnostics).mockResolvedValue({
+      ...MOCK_DIAGNOSTICS,
+      wifi: { ...MOCK_DIAGNOSTICS.wifi, security: 'Open' },
+    });
+    await renderNetworkPage();
+
+    expect(screen.getByTestId('network-password-input')).toHaveAttribute('placeholder', '');
+  });
+
+  it('should bind the form to the uplink, not to a down interface listed first', async () => {
+    vi.mocked(getNetworkConfig).mockResolvedValue({
+      ...MOCK_DATA.network,
+      interfaces: [
+        {
+          token: 'p2p0',
+          name: 'p2p0',
+          enabled: false,
+          ipv4Enabled: true,
+          dhcp: false,
+          address: '',
+          prefixLength: 24,
+          gateway: '',
+          hwAddress: 'C0:4B:24:DA:4D:EB',
+          linkSpeedMbps: null,
+        },
+        {
+          token: 'wlan0',
+          name: 'wlan0',
+          enabled: true,
+          ipv4Enabled: true,
+          dhcp: true,
+          address: '192.168.2.198',
+          prefixLength: 24,
+          gateway: '192.168.2.1',
+          hwAddress: 'C0:4B:24:DA:4D:EA',
+          linkSpeedMbps: null,
+        },
+      ],
+    });
+
+    await renderNetworkPage();
+
+    // wlan0 is on DHCP, so the static fields stay hidden; p2p0 would have
+    // forced them open with an empty address.
+    expect(screen.getByTestId('network-dhcp-switch')).toBeChecked();
+    expect(screen.queryByTestId('network-ip-address-input')).toBeNull();
+  });
+
   it.each([
     ['network-hostname-input', 'hostname; Identification owns it'],
     ['network-onvif-discovery-switch', 'ONVIF discovery; Identification owns it'],
