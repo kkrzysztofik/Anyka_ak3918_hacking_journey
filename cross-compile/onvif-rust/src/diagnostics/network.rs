@@ -341,7 +341,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_empty_overlay_file_is_not_pending() {
+    async fn test_handle_get_network_empty_overlay_reports_not_pending() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("network.toml");
         std::fs::write(&path, "").expect("write empty overlay");

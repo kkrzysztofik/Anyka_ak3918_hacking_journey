@@ -12,6 +12,11 @@ use async_trait::async_trait;
 
 const PROC_ROUTE: &str = "/proc/net/route";
 
+/// `RTF_UP` — the route is live. Down routes linger in the table.
+const RTF_UP: u32 = 0x0001;
+/// `RTF_GATEWAY` — the route goes via a next hop rather than being on-link.
+const RTF_GATEWAY: u32 = 0x0002;
+
 /// One parsed row of `/proc/net/route`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct RouteEntry {
@@ -19,6 +24,8 @@ pub(super) struct RouteEntry {
     dest: Ipv4Addr,
     gateway: Ipv4Addr,
     mask: Ipv4Addr,
+    flags: u32,
+    metric: u32,
 }
 
 /// Parse `/proc/net/route`.
@@ -45,6 +52,10 @@ pub(super) fn parse_proc_route(text: &str) -> Vec<RouteEntry> {
                 dest: addr(fields[1])?,
                 gateway: addr(fields[2])?,
                 mask: addr(fields[7])?,
+                // Flags are hex, metric is decimal — the kernel prints them
+                // that way in the same row.
+                flags: u32::from_str_radix(fields[3], 16).ok()?,
+                metric: fields[6].parse().ok()?,
             })
         })
         .collect()
@@ -60,24 +71,53 @@ fn read_default_gateway() -> Option<String> {
     default_gateway(&routes)
 }
 
-/// Gateway of the default route, if one exists.
+/// Gateway of the default route the kernel would actually use.
+///
+/// Table order is not precedence: a down route stays listed, and a camera
+/// recovering its lease can briefly hold two default routes. The kernel picks
+/// the live gateway route with the lowest metric, so this does too — otherwise
+/// ONVIF advertises a gateway nothing is routed through.
 pub(super) fn default_gateway(routes: &[RouteEntry]) -> Option<String> {
     routes
         .iter()
-        .find(|r| r.dest.is_unspecified() && r.mask.is_unspecified() && !r.gateway.is_unspecified())
+        .filter(|r| {
+            r.dest.is_unspecified()
+                && r.mask.is_unspecified()
+                && !r.gateway.is_unspecified()
+                && r.flags & (RTF_UP | RTF_GATEWAY) == (RTF_UP | RTF_GATEWAY)
+        })
+        .min_by_key(|r| r.metric)
         .map(|r| r.gateway.to_string())
 }
 
-/// Prefix length of the on-link subnet route that `ip` belongs to on `iface`.
-fn subnet_prefix(routes: &[RouteEntry], iface: &str, ip: Ipv4Addr) -> Option<u8> {
-    routes
-        .iter()
-        .find(|r| {
-            r.iface == iface
-                && !r.mask.is_unspecified()
-                && Ipv4Addr::from(u32::from(ip) & u32::from(r.mask)) == r.dest
-        })
-        .map(|r| u32::from(r.mask).count_ones() as u8)
+/// An address inside `route`'s on-link subnet, to aim a source lookup at.
+///
+/// Any address in the prefix does; nothing is ever sent to it. `dest | 1` is
+/// the first host, and on a /31 or /32 there is no spare host bit, so the
+/// destination itself is the only candidate.
+fn probe_address(route: &RouteEntry) -> Option<Ipv4Addr> {
+    if route.mask.is_unspecified() {
+        return None;
+    }
+    let dest = u32::from(route.dest);
+    let host_bits = u32::from(route.mask).count_zeros();
+    Some(Ipv4Addr::from(if host_bits >= 2 { dest | 1 } else { dest }))
+}
+
+/// The address the kernel would send from when addressing `probe`.
+///
+/// `connect` on a UDP socket runs the route lookup and binds a source address
+/// without emitting a packet. Aiming it at each on-link subnet in turn, rather
+/// than at a fixed public address, is what makes it work on a camera with no
+/// default route at all — an isolated VLAN — and on an interface that is not
+/// the uplink.
+fn source_address_for(probe: Ipv4Addr) -> Option<Ipv4Addr> {
+    let socket = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
+    socket.connect((probe, 9)).ok()?;
+    match socket.local_addr().ok()?.ip() {
+        std::net::IpAddr::V4(ip) if !ip.is_unspecified() => Some(ip),
+        _ => None,
+    }
 }
 
 /// True when this `/proc/[pid]/cmdline` is a `udhcpc` bound to `interface`.
@@ -153,7 +193,7 @@ impl AnykaNetworkInfo {
     ///
     /// Blocking: walks `/sys/class/net` and all of `/proc`. Call it from
     /// `spawn_blocking`, not straight from an async handler.
-    pub(super) fn read_interfaces(local_ip: Option<Ipv4Addr>) -> Vec<NetworkInterfaceInfo> {
+    pub(super) fn read_interfaces() -> Vec<NetworkInterfaceInfo> {
         use std::fs;
         use std::path::Path;
 
@@ -194,8 +234,7 @@ impl AnykaNetworkInfo {
                     .ok()
                     .and_then(|s| s.trim().parse::<u32>().ok());
 
-                let (ipv4_address, ipv4_prefix_length) =
-                    Self::interface_address(&routes, &name, local_ip);
+                let (ipv4_address, ipv4_prefix_length) = Self::interface_address(&routes, &name);
                 let ipv4_dhcp = dhcp_ifaces.contains(&name);
 
                 interfaces.push(NetworkInterfaceInfo {
@@ -216,25 +255,33 @@ impl AnykaNetworkInfo {
 
     /// IPv4 address and prefix length of `interface`.
     ///
-    /// `local_ip` is the outbound source address (the UDP-connect trick). It is
-    /// claimed by whichever interface owns an on-link route it falls inside,
-    /// which also yields the prefix from that route's netmask.
-    ///
-    // ponytail: only the interface carrying the outbound route gets an address;
-    // a second, non-default-route NIC still reports None. Switch to getifaddrs
-    // if these cameras ever become multi-homed.
+    /// Each on-link route the interface owns gives the prefix; the kernel then
+    /// names the address it would send from inside that subnet. The result is
+    /// only accepted if it actually falls in the subnet — otherwise the lookup
+    /// escaped out of a different interface and says nothing about this one.
     pub(super) fn interface_address(
         routes: &[RouteEntry],
         interface: &str,
-        local_ip: Option<Ipv4Addr>,
     ) -> (Option<String>, Option<u8>) {
-        let Some(ip) = local_ip else {
-            return (None, None);
-        };
-        match subnet_prefix(routes, interface, ip) {
-            Some(prefix) => (Some(ip.to_string()), Some(prefix)),
-            None => (None, None),
+        let on_link = routes.iter().filter(|r| {
+            r.iface == interface && !r.mask.is_unspecified() && r.flags & RTF_UP == RTF_UP
+        });
+
+        for route in on_link {
+            let Some(probe) = probe_address(route) else {
+                continue;
+            };
+            let Some(ip) = source_address_for(probe) else {
+                continue;
+            };
+            if Ipv4Addr::from(u32::from(ip) & u32::from(route.mask)) == route.dest {
+                return (
+                    Some(ip.to_string()),
+                    Some(u32::from(route.mask).count_ones() as u8),
+                );
+            }
         }
+        (None, None)
     }
 
     /// Read DNS configuration from /etc/resolv.conf.
@@ -360,10 +407,7 @@ where
 #[async_trait]
 impl NetworkInfo for AnykaNetworkInfo {
     async fn get_network_interfaces(&self) -> PlatformResult<Vec<NetworkInterfaceInfo>> {
-        // Resolved out here: the UDP-connect trick sends nothing and needs no
-        // blocking pool, and it keeps the closure free of `&self`.
-        let local_ip = self.detect_local_ip().and_then(|s| s.parse().ok());
-        off_runtime(move || Self::read_interfaces(local_ip)).await
+        off_runtime(Self::read_interfaces).await
     }
 
     async fn get_default_gateway(&self) -> PlatformResult<Option<String>> {
@@ -437,6 +481,14 @@ wlan0\t0002A8C0\t00000000\t0001\t0\t0\t0\t00FFFFFF\t0\t0\t0
     }
 
     #[test]
+    fn test_parse_proc_route_reads_flags_as_hex_and_metric_as_decimal() {
+        let routes = parse_proc_route(PROC_ROUTE_SAMPLE);
+        assert_eq!(routes[0].flags, RTF_UP | RTF_GATEWAY);
+        assert_eq!(routes[1].flags, RTF_UP);
+        assert_eq!(routes[0].metric, 0);
+    }
+
+    #[test]
     fn test_default_gateway_picks_the_zero_route() {
         assert_eq!(
             default_gateway(&parse_proc_route(PROC_ROUTE_SAMPLE)).as_deref(),
@@ -446,23 +498,66 @@ wlan0\t0002A8C0\t00000000\t0001\t0\t0\t0\t00FFFFFF\t0\t0\t0
     }
 
     #[test]
-    fn test_interface_address_claims_the_on_link_subnet() {
-        let routes = parse_proc_route(PROC_ROUTE_SAMPLE);
-        let local = Some(Ipv4Addr::new(192, 168, 2, 198));
+    fn test_default_gateway_prefers_the_live_lowest_metric_route() {
+        // eth0 is down but still listed, wlan0 sits at metric 600, and a
+        // freshly renewed wlan0 lease adds a metric-0 route.
+        let table = "\
+Iface\tDestination\tGateway\tFlags\tRefCnt\tUse\tMetric\tMask\tMTU\tWindow\tIRTT
+eth0\t00000000\t0104A8C0\t0002\t0\t0\t0\t00000000\t0\t0\t0
+wlan0\t00000000\t0102A8C0\t0003\t0\t0\t600\t00000000\t0\t0\t0
+wlan0\t00000000\tFE02A8C0\t0003\t0\t0\t0\t00000000\t0\t0\t0
+";
+        assert_eq!(
+            default_gateway(&parse_proc_route(table)).as_deref(),
+            Some("192.168.2.254"),
+            "a down route and a higher-metric one must not win over the live default"
+        );
+    }
+
+    #[test]
+    fn test_probe_address_stays_inside_the_prefix() {
+        let route = |dest: [u8; 4], mask: [u8; 4]| RouteEntry {
+            iface: "wlan0".into(),
+            dest: Ipv4Addr::from(dest),
+            gateway: Ipv4Addr::UNSPECIFIED,
+            mask: Ipv4Addr::from(mask),
+            flags: RTF_UP,
+            metric: 0,
+        };
 
         assert_eq!(
-            AnykaNetworkInfo::interface_address(&routes, "wlan0", local),
-            (Some("192.168.2.198".to_string()), Some(24)),
-            "the netmask of the on-link route is the interface prefix"
+            probe_address(&route([192, 168, 2, 0], [255, 255, 255, 0])),
+            Some(Ipv4Addr::new(192, 168, 2, 1))
         );
         assert_eq!(
-            AnykaNetworkInfo::interface_address(&routes, "p2p0", local),
-            (None, None),
-            "an interface with no matching route must not inherit wlan0's address"
+            probe_address(&route([10, 0, 0, 7], [255, 255, 255, 255])),
+            Some(Ipv4Addr::new(10, 0, 0, 7)),
+            "a /32 has no spare host bit, so the destination is the only candidate"
         );
         assert_eq!(
-            AnykaNetworkInfo::interface_address(&routes, "wlan0", None),
+            probe_address(&route([0, 0, 0, 0], [0, 0, 0, 0])),
+            None,
+            "the default route is not on-link and names no subnet to probe"
+        );
+    }
+
+    #[test]
+    fn test_interface_address_rejects_a_subnet_the_host_is_not_on() {
+        // TEST-NET-3 is reserved, so no build host holds an address in it; the
+        // source lookup must escape to another interface and be discarded
+        // rather than reported as wlan0's address.
+        let table = "\
+Iface\tDestination\tGateway\tFlags\tRefCnt\tUse\tMetric\tMask\tMTU\tWindow\tIRTT
+wlan0\t007100CB\t00000000\t0001\t0\t0\t0\t00FFFFFF\t0\t0\t0
+";
+        assert_eq!(
+            AnykaNetworkInfo::interface_address(&parse_proc_route(table), "wlan0"),
             (None, None)
+        );
+        assert_eq!(
+            AnykaNetworkInfo::interface_address(&parse_proc_route(table), "p2p0"),
+            (None, None),
+            "an interface with no route of its own must not inherit another's"
         );
     }
 
@@ -486,24 +581,31 @@ wlan0\t0002A8C0\t00000000\t0001\t0\t0\t0\t00FFFFFF\t0\t0\t0
     }
 
     #[test]
-    fn test_read_interfaces_skips_loopback_and_invents_no_address() {
+    fn test_read_interfaces_skips_loopback_and_pairs_address_with_prefix() {
         // Runs against the host's real /sys/class/net; only invariants that
         // hold on any Linux box are asserted.
-        let interfaces = AnykaNetworkInfo::read_interfaces(None);
+        let interfaces = AnykaNetworkInfo::read_interfaces();
 
         assert!(
             interfaces.iter().all(|i| i.name != "lo"),
             "loopback must never be offered as an ONVIF interface"
         );
         assert!(
-            interfaces
-                .iter()
-                .all(|i| i.ipv4_address.is_none() && i.ipv4_prefix_length.is_none()),
-            "with no outbound address known, no interface may claim one"
-        );
-        assert!(
             interfaces.iter().all(|i| !i.token.is_empty()),
             "an empty token cannot be addressed by SetNetworkInterfaces"
+        );
+        assert!(
+            interfaces
+                .iter()
+                .all(|i| i.ipv4_address.is_some() == i.ipv4_prefix_length.is_some()),
+            "an address without its prefix renders as a bare IP with a made-up /24"
+        );
+        assert!(
+            interfaces
+                .iter()
+                .filter_map(|i| i.ipv4_address.as_deref())
+                .all(|a| a.parse::<Ipv4Addr>().is_ok_and(|ip| !ip.is_loopback())),
+            "a reported address must be a real non-loopback IPv4"
         );
     }
 

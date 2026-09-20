@@ -103,6 +103,54 @@ describe('networkService', () => {
       expect(result[0].address).toBe('192.168.2.198');
       expect(result[0].prefixLength).toBe(24);
     });
+
+    it('should ignore a stale Manual entry while DHCP is on', async () => {
+      vi.mocked(apiClient.post).mockResolvedValueOnce(
+        createMockSOAPResponse(`
+        <GetNetworkInterfacesResponse>
+          <NetworkInterfaces token="wlan0">
+            <Enabled>true</Enabled>
+            <Info><Name>wlan0</Name><HwAddress>C0:4B:24:DA:4D:EA</HwAddress></Info>
+            <IPv4>
+              <Enabled>true</Enabled>
+              <Config>
+                <DHCP>true</DHCP>
+                <Manual><Address>10.0.0.5</Address><PrefixLength>8</PrefixLength></Manual>
+                <FromDHCP><Address>192.168.2.198</Address><PrefixLength>24</PrefixLength></FromDHCP>
+              </Config>
+            </IPv4>
+          </NetworkInterfaces>
+        </GetNetworkInterfacesResponse>
+      `),
+      );
+
+      const result = await getNetworkInterfaces();
+
+      expect(result[0].address).toBe('192.168.2.198');
+      expect(result[0].prefixLength).toBe(24);
+    });
+
+    it('should fall back to FromDHCP when DHCP is off but no Manual exists', async () => {
+      vi.mocked(apiClient.post).mockResolvedValueOnce(
+        createMockSOAPResponse(`
+        <GetNetworkInterfacesResponse>
+          <NetworkInterfaces token="eth0">
+            <Enabled>true</Enabled>
+            <Info><Name>eth0</Name><HwAddress>00:11:22:33:44:55</HwAddress></Info>
+            <IPv4>
+              <Enabled>true</Enabled>
+              <Config>
+                <DHCP>false</DHCP>
+                <FromDHCP><Address>192.168.9.9</Address><PrefixLength>24</PrefixLength></FromDHCP>
+              </Config>
+            </IPv4>
+          </NetworkInterfaces>
+        </GetNetworkInterfacesResponse>
+      `),
+      );
+
+      await expect(getNetworkInterfaces()).resolves.toMatchObject([{ address: '192.168.9.9' }]);
+    });
   });
 
   describe('getNetworkDefaultGateway', () => {

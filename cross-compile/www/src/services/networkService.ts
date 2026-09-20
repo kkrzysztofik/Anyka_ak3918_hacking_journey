@@ -108,9 +108,14 @@ export async function getNetworkInterfaces(): Promise<NetworkInterface[]> {
     const config = ipv4?.Config as Record<string, unknown> | undefined;
     // ONVIF reports the live address under FromDHCP when DHCP is on and under
     // Manual when it is off; reading only Manual leaves every DHCP camera
-    // looking like it has no IP at all.
-    const manualEntry = config?.Manual ?? config?.FromDHCP;
-    const manual = (Array.isArray(manualEntry) ? manualEntry[0] : manualEntry) as
+    // looking like it has no IP at all. The DHCP flag picks which one is
+    // authoritative, because a device may keep a stale Manual entry alongside
+    // its lease — the other branch is only a fallback.
+    const dhcp = parseBoolean(config?.DHCP);
+    const addressEntry = dhcp
+      ? (config?.FromDHCP ?? config?.Manual)
+      : (config?.Manual ?? config?.FromDHCP);
+    const address = (Array.isArray(addressEntry) ? addressEntry[0] : addressEntry) as
       Record<string, unknown> | undefined;
     const link = iface.Link as Record<string, unknown> | undefined;
     const operSettings = link?.OperSettings as Record<string, unknown> | undefined;
@@ -131,9 +136,9 @@ export async function getNetworkInterfaces(): Promise<NetworkInterface[]> {
       hwAddress: safeString(info?.HwAddress, ''),
       linkSpeedMbps,
       ipv4Enabled: parseBoolean(ipv4?.Enabled),
-      dhcp: parseBoolean(config?.DHCP),
-      address: safeString(manual?.Address, ''),
-      prefixLength: Number(manual?.PrefixLength || 24),
+      dhcp,
+      address: safeString(address?.Address, ''),
+      prefixLength: Number(address?.PrefixLength || 24),
       gateway: '',
     };
   });
