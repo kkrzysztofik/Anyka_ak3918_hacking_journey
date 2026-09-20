@@ -446,6 +446,20 @@ fn strip_comment(line: &str) -> &str {
     line.split('#').next().unwrap_or("").trim()
 }
 
+/// A server string safe to embed in a TOML basic string without escaping.
+///
+/// Validated here as well as at the ONVIF boundary: this function writes into
+/// the operator's config, and a stray quote or newline would either corrupt
+/// the file or smuggle in a second key. `verified()` would catch the corrupt
+/// case, but refusing the input is the clearer failure.
+fn valid_ntp_server(s: &str) -> bool {
+    !s.is_empty()
+        && s.len() <= 255
+        && !s.chars().any(|c| {
+            c.is_whitespace() || c.is_control() || c == '"' || c == '\\' || c == '#'
+        })
+}
+
 /// The key a `key = value` line assigns, unquoted, or `None` for a line that
 /// assigns nothing (a comment, a blank, a bare header).
 ///
@@ -623,6 +637,33 @@ impl Config {
     ) -> Result<(), ConfigError> {
         let text = read_config_text(path)?;
         let new_text = set_bool_in_text(&text, &format!("[services.{name}]"), "enabled", enabled)?;
+        persist_text(path, &new_text)
+    }
+
+    /// Persist `[time].servers`. Same file-first atomic-write discipline as
+    /// `set_service_enabled`; updating the in-memory `Config` is the caller's
+    /// job, in that order.
+    pub fn set_time_servers(path: &std::path::Path, servers: &[String]) -> Result<(), ConfigError> {
+        if servers.is_empty() {
+            return Err(ConfigError::Invalid(
+                "at least one NTP server is required".to_string(),
+            ));
+        }
+        if let Some(bad) = servers.iter().find(|s| !valid_ntp_server(s)) {
+            return Err(ConfigError::Invalid(format!(
+                "rejected NTP server {bad:?}: must be non-empty and free of whitespace, quotes, backslashes and '#'"
+            )));
+        }
+        let raw = format!(
+            "[{}]",
+            servers
+                .iter()
+                .map(|s| format!("\"{s}\""))
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+        let text = read_config_text(path)?;
+        let new_text = set_value_in_text(&text, "[time]", "servers", &raw)?;
         persist_text(path, &new_text)
     }
 
@@ -1406,6 +1447,51 @@ timezone = \"UTC0\"
         let src = "[services.snmp]\nenabled = false\n";
         let out = set_bool_in_text(src, "[services.snmp]", "enabled", true).unwrap();
         assert!(out.contains("enabled = true"));
+    }
+
+    #[test]
+    fn test_set_time_servers_rewrites_the_array() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("anyka.toml");
+        std::fs::write(
+            &path,
+            "[time]\n# keep me\nservers = [\"old.example\"]\ntimezone = \"UTC0\"\n",
+        )
+        .unwrap();
+
+        Config::set_time_servers(&path, &["a.example".into(), "192.168.2.1".into()]).unwrap();
+
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("servers = [\"a.example\", \"192.168.2.1\"]"));
+        assert!(text.contains("# keep me"));
+        // The written file must still parse as the real config.
+        let parsed: toml::Value = toml::from_str(&text).unwrap();
+        assert_eq!(parsed["time"]["servers"][1].as_str(), Some("192.168.2.1"));
+    }
+
+    #[test]
+    fn test_set_time_servers_rejects_quotes_and_whitespace() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("anyka.toml");
+        let original = "[time]\nservers = [\"old.example\"]\n";
+        std::fs::write(&path, original).unwrap();
+
+        for bad in ["a\"b", "a b", "a\\b", "", "a\nb"] {
+            assert!(
+                Config::set_time_servers(&path, &[bad.to_string()]).is_err(),
+                "{bad:?} must be refused"
+            );
+        }
+        // Nothing was written on any of those.
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), original);
+    }
+
+    #[test]
+    fn test_set_time_servers_rejects_an_empty_list() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("anyka.toml");
+        std::fs::write(&path, "[time]\nservers = [\"old.example\"]\n").unwrap();
+        assert!(Config::set_time_servers(&path, &[]).is_err());
     }
 
     #[test]
