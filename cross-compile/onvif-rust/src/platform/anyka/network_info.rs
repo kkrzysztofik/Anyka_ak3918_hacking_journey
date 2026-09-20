@@ -359,9 +359,11 @@ impl AnykaNetworkInfo {
         dns_info
     }
 
-    /// Real servers come from the supervisor's status file. The `/etc/ntp.conf`
-    /// and `timesyncd.conf` parsers below stay for the stub platform only —
-    /// neither file exists on this camera.
+    /// Real servers come from the supervisor's status file.
+    ///
+    /// There were once `/etc/ntp.conf` and `timesyncd.conf` parsers here.
+    /// Neither file exists on this rootfs and nothing called them, so they are
+    /// gone; the stub platform returns its own canned `NtpInfo`.
     pub(super) fn read_ntp_config(&self) -> NtpInfo {
         if let Ok(text) = std::fs::read_to_string(&self.ntp_status_path)
             && let Some(status) = crate::time::ntp_status::parse(&text)
@@ -374,55 +376,6 @@ impl AnykaNetworkInfo {
             };
         }
         NtpInfo::default()
-    }
-
-    /// Parse /etc/ntp.conf file.
-    pub(super) fn parse_ntp_conf() -> Option<Vec<String>> {
-        use std::fs;
-
-        let content = fs::read_to_string("/etc/ntp.conf").ok()?;
-        let mut servers = Vec::new();
-
-        for line in content.lines() {
-            let line = line.trim();
-            if line.starts_with('#') {
-                continue;
-            }
-
-            if let Some(server) = line.strip_prefix("server ") {
-                let server = server.split_whitespace().next()?.to_string();
-                if !server.is_empty() {
-                    servers.push(server);
-                }
-            }
-        }
-
-        if servers.is_empty() {
-            None
-        } else {
-            Some(servers)
-        }
-    }
-
-    /// Parse /etc/systemd/timesyncd.conf file.
-    pub(super) fn parse_timesyncd_conf() -> Option<Vec<String>> {
-        use std::fs;
-
-        let content = fs::read_to_string("/etc/systemd/timesyncd.conf").ok()?;
-        let mut servers = Vec::new();
-
-        for line in content.lines() {
-            let line = line.trim();
-            if let Some(servers_str) = line.strip_prefix("NTP=") {
-                servers.extend(servers_str.split_whitespace().map(String::from));
-            }
-        }
-
-        if servers.is_empty() {
-            None
-        } else {
-            Some(servers)
-        }
     }
 }
 

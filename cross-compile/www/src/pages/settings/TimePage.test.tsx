@@ -118,6 +118,26 @@ describe('TimePage', () => {
       vi.useRealTimers();
     });
 
+    it('should fill the manual fields from the browser clock without writing', async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2026-09-20T12:34:56'));
+
+      renderWithProviders(<TimePage />);
+      await flush();
+
+      await act(async () => {
+        fireEvent.click(screen.getByTestId('time-page-use-computer-time'));
+      });
+
+      expect(screen.getByTestId('time-page-manual-date-input')).toHaveValue('2026-09-20');
+      expect(screen.getByTestId('time-page-manual-time-input')).toHaveValue('12:34:56');
+      // The write belongs to Save: a fire-and-forget setDateTime here
+      // reported success before the request resolved and switched the camera
+      // to Manual while the form still showed NTP.
+      expect(setDateTime).not.toHaveBeenCalled();
+      vi.useRealTimers();
+    });
+
     it('should keep ticking from the camera offset', async () => {
       vi.useFakeTimers();
       vi.setSystemTime(new Date('2026-09-20T12:00:00Z'));
@@ -269,11 +289,32 @@ describe('TimePage', () => {
     expect(screen.getByTestId('time-sync-state')).toHaveTextContent('pool.example');
   });
 
-  it('should show a warning when no sync has completed', async () => {
+  it('should show a warning when the camera reports no completed sync', async () => {
+    vi.mocked(getDiagnostics).mockResolvedValue(
+      mockDiagnostics({
+        last_sync_unix: null,
+        last_server: null,
+        last_delta_s: null,
+        servers: ['pool.example'],
+      }),
+    );
+
     await renderTimePage();
 
-    expect(mockToast.error).toHaveBeenCalled();
+    await waitFor(() => {
+      expect(mockToast.error).toHaveBeenCalled();
+    });
     expect(screen.getByTestId('time-no-sync')).toBeInTheDocument();
+  });
+
+  it('should stay quiet when sync status is simply unavailable', async () => {
+    // A null `time` block means NTP off, no status file, or an older
+    // supervisor — none of which is evidence that a sync failed.
+    vi.mocked(getDiagnostics).mockResolvedValue(mockDiagnostics(null));
+
+    await renderTimePage();
+
+    expect(mockToast.error).not.toHaveBeenCalled();
   });
 
   it('should select Manual mode and show date/time inputs', async () => {

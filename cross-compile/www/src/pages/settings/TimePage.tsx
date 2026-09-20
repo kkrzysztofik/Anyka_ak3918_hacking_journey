@@ -40,7 +40,12 @@ import { TIMEZONES } from '@/utils/timezones';
 // Validation Schema
 const timeSchema = z.object({
   mode: z.enum(['ntp', 'manual']),
-  ntpServers: z.array(z.string()).min(1, 'At least one NTP server is required'),
+  // `min(1)` would accept the [''] an empty textarea produces: the submit
+  // handler drops the blank, calls setNtp([]), and the operator gets a save
+  // error instead of a field error. Validate what actually gets sent.
+  ntpServers: z.array(z.string()).refine((v) => v.some((s) => s.trim().length > 0), {
+    message: 'At least one NTP server is required',
+  }),
   timezone: z.string().min(1, 'Timezone is required'),
   manualDate: z.string().optional(),
   manualTime: z.string().optional(),
@@ -129,9 +134,18 @@ export default function TimePage() {
   }, [config, form, ntpQuery.data, ntpQuery.isPending]);
 
   // Warn once when the camera reports that no sync has completed.
+  //
+  // A null `time` block is ambiguous — NTP disabled, status file missing, or
+  // an older supervisor that never publishes one — so it is not evidence of a
+  // failed sync. Only a present block with no `last_sync_unix` says that.
   const warnedNoSync = React.useRef(false);
   useEffect(() => {
-    if (config?.ntp.enabled && diagnostics && diagnostics.time === null && !warnedNoSync.current) {
+    if (
+      config?.ntp.enabled &&
+      diagnostics?.time &&
+      diagnostics.time.last_sync_unix === null &&
+      !warnedNoSync.current
+    ) {
       warnedNoSync.current = true;
       toast.error('No NTP sync has completed yet');
     }
@@ -168,16 +182,19 @@ export default function TimePage() {
     mutation.mutate(values);
   };
 
-  // "Use Computer Time" is an action, not a mode: it stamps the browser's
-  // clock onto the camera once and leaves NTP/manual selection alone.
+  // "Use Computer Time" fills the manual fields from the browser clock and
+  // selects Manual; the ordinary Save flow applies them.
+  //
+  // It deliberately does not write on its own. Doing so discarded the
+  // setDateTime promise, so a rejected write still reported success, never
+  // invalidated `timeConfig`, and switched the camera to Manual while the
+  // form still showed NTP selected.
   const handleSyncComputer = () => {
     const now = new Date();
-    void setDateTime(
-      now.toISOString(),
-      form.getValues('timezone'),
-      config?.daylightSavings ?? false,
-    );
-    toast.success('Time synced from computer');
+    const opts = { shouldDirty: true } as const;
+    form.setValue('mode', 'manual', opts);
+    form.setValue('manualDate', now.toISOString().split('T')[0], opts);
+    form.setValue('manualTime', now.toTimeString().split(' ')[0], opts);
   };
 
   if (isLoading)
@@ -241,6 +258,7 @@ export default function TimePage() {
           <div
             className="mb-[24px] rounded-[12px] border border-[#ff453a] bg-[#ff453a]/10 p-[16px] text-[14px] text-[#ff453a]"
             data-testid="time-clock-stale"
+            role="alert"
           >
             The camera's clock is not set. Authenticated requests will fail until NTP syncs.
           </div>
@@ -357,14 +375,25 @@ export default function TimePage() {
                     <div
                       className="space-y-[4px] rounded-[12px] border border-[#3a3a3c] bg-[#2c2c2e] p-4"
                       data-testid="time-sync-status"
+                      aria-live="polite"
                     >
-                      {diagnostics?.time ? (
+                      {/* Three states, not two: an absent block means the
+                          camera cannot tell us (NTP off, no status file, older
+                          supervisor), which is not the same as a sync that has
+                          never succeeded. */}
+                      {!diagnostics?.time ? (
+                        <div className="text-[14px] text-[#a1a1a6]" data-testid="time-sync-unknown">
+                          Sync status unavailable.
+                        </div>
+                      ) : diagnostics.time.last_sync_unix === null ? (
+                        <div className="text-[14px] text-[#ff9f0a]" data-testid="time-no-sync">
+                          No NTP sync has completed yet.
+                        </div>
+                      ) : (
                         <>
                           <div className="text-[14px] text-white" data-testid="time-sync-state">
                             Last sync:{' '}
-                            {diagnostics.time.last_sync_unix !== null
-                              ? new Date(diagnostics.time.last_sync_unix * 1000).toLocaleString()
-                              : 'never'}
+                            {new Date(diagnostics.time.last_sync_unix * 1000).toLocaleString()}
                             {diagnostics.time.last_server
                               ? ` via ${diagnostics.time.last_server}`
                               : ''}
@@ -379,10 +408,6 @@ export default function TimePage() {
                             </div>
                           )}
                         </>
-                      ) : (
-                        <div className="text-[14px] text-[#ff9f0a]" data-testid="time-no-sync">
-                          No NTP sync has completed yet.
-                        </div>
                       )}
                     </div>
                   </div>

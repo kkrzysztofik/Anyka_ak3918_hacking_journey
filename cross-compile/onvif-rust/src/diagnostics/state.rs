@@ -290,7 +290,14 @@ impl DiagnosticsState {
         let ptz = self.platform.as_ref().and_then(|p| p.ptz_diagnostics());
 
         // Display-only: a missing or malformed status file means "unknown".
-        let time = crate::time::ntp_status::read(&self.update_root);
+        // An empty root is `new()`'s "no root configured" marker — joining it
+        // would resolve `state/ntp.status` against the process CWD and report
+        // some unrelated file as this camera's sync state.
+        let time = if self.update_root.as_os_str().is_empty() {
+            None
+        } else {
+            crate::time::ntp_status::read(&self.update_root)
+        };
 
         let wifi = match tokio::task::spawn_blocking(|| {
             super::wifi::read_wifi_diagnostics(super::wifi::DEFAULT_WIFI_IFACE)
@@ -426,7 +433,7 @@ mod tests {
         }
         let state = DiagnosticsState::new(Instant::now(), None, Vec::new());
         let _ = state.snapshot().await;
-        std::thread::sleep(std::time::Duration::from_millis(50));
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         let snap = state.snapshot().await;
         assert!(snap.cpu_percent.is_some(), "a second sample yields a rate");
     }
@@ -555,7 +562,7 @@ mod tests {
         }
         let state = DiagnosticsState::new(Instant::now(), None, Vec::new());
         let _ = state.snapshot().await;
-        std::thread::sleep(std::time::Duration::from_millis(50));
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         let baseline = state.snapshot().await;
         let too_soon = state.snapshot().await;
         assert!(

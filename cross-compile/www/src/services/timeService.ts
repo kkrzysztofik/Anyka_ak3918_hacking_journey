@@ -158,7 +158,11 @@ export async function getNtp(): Promise<string[]> {
     .filter((s) => s.length > 0);
 }
 
-const IPV4_RE = /^\d{1,3}(?:\.\d{1,3}){3}$/;
+// Octet-accurate on purpose: `\d{1,3}` alone accepts 999.999.999.999 and
+// would ship it as <tt:IPv4Address>, which the camera rejects, instead of
+// letting it through as a (also invalid, but correctly typed) DNS name.
+const IPV4_OCTET = '(?:25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)';
+const IPV4_RE = new RegExp(`^${IPV4_OCTET}(?:\\.${IPV4_OCTET}){3}$`);
 
 /**
  * Set the NTP server list. One `<tds:NTPManual>` per server; an IPv4 literal
