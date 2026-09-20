@@ -1202,10 +1202,11 @@ impl Application {
         let server_config = Self::build_server_config(&config_runtime);
         let port = server_config.port;
 
-        let diagnostics = Arc::new(crate::diagnostics::state::DiagnosticsState::new(
+        let diagnostics = Arc::new(crate::diagnostics::state::DiagnosticsState::with_update_root(
             started_at,
             app_state.platform().cloned(),
             progress.degraded_services().to_vec(),
+            config_runtime.read().update.root.clone(),
         ));
 
         let server = Arc::new(

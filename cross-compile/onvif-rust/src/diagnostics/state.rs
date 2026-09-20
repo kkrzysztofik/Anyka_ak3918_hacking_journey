@@ -84,6 +84,9 @@ pub struct Snapshot {
     pub ptz: Option<PtzDiagnostics>,
     /// Wi-Fi association snapshot from `wpa_cli`, when available.
     pub wifi: Option<super::wifi::WifiDiagnostics>,
+    /// NTP sync state from the supervisor. `None` when NTP is disabled or the
+    /// supervisor is an older build that does not publish it.
+    pub time: Option<crate::time::ntp_status::NtpStatus>,
 }
 
 /// Holds platform handles and the last `/proc` sample for computing deltas.
@@ -109,6 +112,7 @@ pub struct DiagnosticsState {
     /// degraded would be a false alarm.
     streaming_active: AtomicBool,
     previous: Mutex<Option<RawSample>>,
+    update_root: std::path::PathBuf,
 }
 
 impl DiagnosticsState {
@@ -121,12 +125,26 @@ impl DiagnosticsState {
         platform: Option<Arc<dyn Platform>>,
         degraded_services: Vec<String>,
     ) -> Self {
+        // No update root: the NTP status field reports `None` rather than
+        // guessing at a path. Production uses `with_update_root`.
+        Self::with_update_root(started_at, platform, degraded_services, std::path::PathBuf::new())
+    }
+
+    /// Like [`new`](Self::new) with the update root that holds `state/`;
+    /// the snapshot reads `state/ntp.status` from it.
+    pub fn with_update_root(
+        started_at: Instant,
+        platform: Option<Arc<dyn Platform>>,
+        degraded_services: Vec<String>,
+        update_root: impl Into<std::path::PathBuf>,
+    ) -> Self {
         Self {
             started_at,
             platform,
             degraded_services: Mutex::new(degraded_services),
             streaming_active: AtomicBool::new(false),
             previous: Mutex::new(None),
+            update_root: update_root.into(),
         }
     }
 
@@ -266,6 +284,9 @@ impl DiagnosticsState {
 
         let ptz = self.platform.as_ref().and_then(|p| p.ptz_diagnostics());
 
+        // Display-only: a missing or malformed status file means "unknown".
+        let time = crate::time::ntp_status::read(&self.update_root);
+
         let wifi = match tokio::task::spawn_blocking(|| {
             super::wifi::read_wifi_diagnostics(super::wifi::DEFAULT_WIFI_IFACE)
         })
@@ -295,6 +316,7 @@ impl DiagnosticsState {
             vision,
             ptz,
             wifi,
+            time,
         }
     }
 }
@@ -341,6 +363,36 @@ fn read_file(path: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(test)]
+    impl DiagnosticsState {
+        fn for_test_with_update_root(dir: &std::path::Path) -> Self {
+            Self::with_update_root(Instant::now(), None, Vec::new(), dir.to_path_buf())
+        }
+    }
+
+    #[tokio::test]
+    async fn test_snapshot_carries_ntp_status_when_the_file_exists() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("state")).unwrap();
+        std::fs::write(
+            dir.path().join("state/ntp.status"),
+            "1760000000\t192.168.2.1\t-3\t192.168.2.1\n",
+        )
+        .unwrap();
+
+        let state = DiagnosticsState::for_test_with_update_root(dir.path());
+        let snap = state.snapshot().await;
+        let time = snap.time.expect("status file present");
+        assert_eq!(time.last_server.as_deref(), Some("192.168.2.1"));
+    }
+
+    #[tokio::test]
+    async fn test_snapshot_time_is_none_without_the_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = DiagnosticsState::for_test_with_update_root(dir.path());
+        assert!(state.snapshot().await.time.is_none());
+    }
 
     #[tokio::test]
     async fn test_snapshot_first_call_has_no_rates() {
