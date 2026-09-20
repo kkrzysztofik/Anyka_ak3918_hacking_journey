@@ -19,10 +19,10 @@ export interface SystemDateTime {
 export interface DateTimeConfig {
   ntp: {
     enabled: boolean;
-    fromDHCP: boolean;
   };
+  daylightSavings: boolean;
   timezone: string;
-  datetime: Date;
+  utcDateTime: Date;
 }
 
 /**
@@ -114,31 +114,64 @@ export async function getDateTime(): Promise<DateTimeConfig> {
   return {
     ntp: {
       enabled: sys.dateTimeType === 'NTP',
-      fromDHCP: true, // Stub
     },
+    daylightSavings: sys.daylightSavings,
     timezone: sys.timezone,
-    datetime: sys.utcDateTime,
+    utcDateTime: sys.utcDateTime,
   };
 }
 
 /**
- * Set NTP mode
+ * Get the NTP server list reported by the camera.
+ *
+ * fast-xml-parser collapses a one-element NTPManual list to a single object;
+ * tolerate both shapes.
  */
-export async function setNTP(_fromDHCP: boolean): Promise<void> {
-  // We preserve current timezone and assume NTP mode
-  const current = await getSystemDateAndTime();
-  await setSystemDateAndTime('NTP', current.daylightSavings, current.timezone);
-  // Note: fromDHCP logic might require lower-level network interface changes (DNS/NTP from DHCP)
-  // which might be handled in Network settings, but here we just enable NTP mode.
+export async function getNtp(): Promise<string[]> {
+  const data = await soapRequest<Record<string, unknown>>(
+    ENDPOINTS.device,
+    '<tds:GetNTP />',
+    'GetNTPResponse',
+  );
+
+  const raw = (data?.NTPInformation as Record<string, unknown> | undefined)?.NTPManual;
+  const entries = raw === undefined || raw === null ? [] : (Array.isArray(raw) ? raw : [raw]);
+  return entries
+    .map((entry) => {
+      const e = entry as Record<string, unknown>;
+      const value = e.DNSname ?? e.IPv4Address ?? e.IPv6Address;
+      return typeof value === 'string' ? value : '';
+    })
+    .filter((s) => s.length > 0);
+}
+
+const IPV4_RE = /^\d{1,3}(?:\.\d{1,3}){3}$/;
+
+/**
+ * Set the NTP server list. One `<tds:NTPManual>` per server; an IPv4 literal
+ * goes out as `<tt:IPv4Address>`, everything else as `<tt:DNSname>`.
+ */
+export async function setNtp(servers: string[]): Promise<void> {
+  const manual = servers
+    .map((s) => {
+      const escaped = escapeXml(s);
+      return IPV4_RE.test(s)
+        ? `<tds:NTPManual><tt:Type>IPv4</tt:Type><tt:IPv4Address>${escaped}</tt:IPv4Address></tds:NTPManual>`
+        : `<tds:NTPManual><tt:Type>DNS</tt:Type><tt:DNSname>${escaped}</tt:DNSname></tds:NTPManual>`;
+    })
+    .join('');
+
+  const body = `<tds:SetNTP><tds:FromDHCP>false</tds:FromDHCP>${manual}</tds:SetNTP>`;
+  await soapRequest(ENDPOINTS.device, body, 'SetNTPResponse');
 }
 
 /**
  * Set DateTime manual
  */
 export async function setDateTime(
-  mode: 'manual',
   isoDate: string,
   timezone: string,
+  daylightSavings: boolean,
 ): Promise<void> {
-  await setSystemDateAndTime('Manual', false, timezone, new Date(isoDate));
+  await setSystemDateAndTime('Manual', daylightSavings, timezone, new Date(isoDate));
 }
