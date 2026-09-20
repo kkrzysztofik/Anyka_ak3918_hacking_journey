@@ -350,6 +350,7 @@ pub fn resync_loop(
     cfg: &TimeCfg,
     ntp_disabled: &Path,
     config_path: &Path,
+    update_root: &Path,
 ) {
     // Until the clock has been set once, retry at `retry_interval_sec`, not
     // `resync_interval_sec`. P2.5 gives up after 15s so that boot is not held
@@ -357,16 +358,11 @@ pub fn resync_loop(
     // lands here with the clock still at the epoch. Sleeping the full 6h resync
     // interval first would leave ws_security.rs:85 (clock_skew_seconds = 300)
     // rejecting every authenticated ONVIF request for those 6 hours.
-    let update_root = ntp_disabled
-        .parent()
-        .and_then(|p| p.parent())
-        .unwrap_or(Path::new("/"))
-        .to_path_buf();
     let mut cfg = cfg.clone();
     let mut synced = false;
     let mut last: Option<(i64, String, i64)> = None;
 
-    write_status(&update_root, None, &cfg.servers);
+    write_status(update_root, None, &cfg.servers);
 
     loop {
         std::thread::sleep(Duration::from_secs(resync_wait_secs(synced, &cfg)));
@@ -380,7 +376,7 @@ pub fn resync_loop(
             last = Some((now_unix(sys), server, delta));
         }
         let borrowed = last.as_ref().map(|(u, s, d)| (*u, s.as_str(), *d));
-        write_status(&update_root, borrowed, &cfg.servers);
+        write_status(update_root, borrowed, &cfg.servers);
     }
 }
 
@@ -656,11 +652,7 @@ mod status_tests {
     fn test_reload_time_cfg_picks_up_a_changed_server_list() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("anyka.toml");
-        std::fs::write(
-            &path,
-            minimal_cfg_with("\"new.example\", \"pool.example\""),
-        )
-        .unwrap();
+        std::fs::write(&path, minimal_cfg_with("\"new.example\", \"pool.example\"")).unwrap();
 
         let current = TimeCfg {
             servers: vec!["old.example".into()],

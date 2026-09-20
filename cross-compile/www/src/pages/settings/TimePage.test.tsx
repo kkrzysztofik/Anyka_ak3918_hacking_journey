@@ -216,6 +216,29 @@ describe('TimePage', () => {
     expect(screen.getByTestId('time-page-ntp-servers-input')).toBeInTheDocument();
   });
 
+  it('should not seed the server list while GetNTP is still in flight', async () => {
+    // GetSystemDateAndTime and GetNTP are independent SOAP calls. Resetting
+    // the form on whichever lands first would show a server the camera does
+    // not use — and saving in that window would write it to anyka.toml.
+    vi.mocked(getNtp).mockImplementation(() => new Promise(() => {}));
+
+    await renderTimePage();
+
+    expect(screen.getByTestId('time-page-ntp-servers-input')).toHaveValue('');
+  });
+
+  it('should load the camera servers once GetNTP resolves', async () => {
+    vi.mocked(getNtp).mockResolvedValue(['192.168.2.1', 'pool.example']);
+
+    await renderTimePage();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('time-page-ntp-servers-input')).toHaveValue(
+        '192.168.2.1\npool.example',
+      );
+    });
+  });
+
   it('should send every listed NTP server', async () => {
     const user = userEvent.setup();
     await renderTimePage();

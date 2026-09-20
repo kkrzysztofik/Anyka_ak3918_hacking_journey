@@ -97,7 +97,9 @@ export default function TimePage() {
     resolver: zodResolver(timeSchema),
     defaultValues: {
       mode: 'ntp',
-      ntpServers: ['pool.ntp.org'],
+      // No literal default: a server the camera does not use must never sit
+      // in this form, or saving mid-load would write it to anyka.toml.
+      ntpServers: [],
       timezone: 'UTC',
       manualDate: new Date().toISOString().split('T')[0],
       manualTime: new Date().toTimeString().split(' ')[0],
@@ -106,18 +108,25 @@ export default function TimePage() {
 
   const mode = useWatch({ control: form.control, name: 'mode' });
 
-  // Load initial values
+  // Load initial values.
+  //
+  // Gated on the server query too, not just the config: they are independent
+  // SOAP calls, and resetting on whichever lands first would seed the form
+  // with a placeholder server list, then wipe the operator's edits when the
+  // real one arrives. `isPending` is false on error as well, so a failed
+  // GetNTP still loads the rest of the page — with an empty list that zod
+  // refuses to save.
   useEffect(() => {
-    if (config) {
+    if (config && !ntpQuery.isPending) {
       form.reset({
         mode: config.ntp.enabled ? 'ntp' : 'manual',
-        ntpServers: ntpQuery.data ?? ['pool.ntp.org'],
+        ntpServers: ntpQuery.data ?? [],
         timezone: config.timezone || 'UTC',
         manualDate: new Date().toISOString().split('T')[0],
         manualTime: new Date().toTimeString().split(' ')[0],
       });
     }
-  }, [config, form, ntpQuery.data]);
+  }, [config, form, ntpQuery.data, ntpQuery.isPending]);
 
   // Warn once when the camera reports that no sync has completed.
   const warnedNoSync = React.useRef(false);
@@ -130,10 +139,6 @@ export default function TimePage() {
 
   const mutation = useMutation({
     mutationFn: async (values: TimeFormData) => {
-      // 1. Set Timezone
-      // await setTimezone(values.timezone) // If separate API existed
-
-      // 2. Set Mode
       if (values.mode === 'ntp') {
         const servers = values.ntpServers.map((s) => s.trim()).filter((s) => s.length > 0);
         // The server list goes to the supervisor ([time].servers); the NTP
