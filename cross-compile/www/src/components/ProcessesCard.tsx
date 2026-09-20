@@ -182,42 +182,44 @@ export default function ProcessesCard() {
     [invalidate],
   );
 
+  // Disable/enable involves no reboot — except disabling onvif, which takes
+  // down the very HTTP server serving this page.
+  const runToggle = useCallback(
+    async (service: ServiceStatus, action: 'enable' | 'disable') => {
+      const isOnvifOff = action === 'disable' && service.name === 'onvif';
+      const reportOnvifOff = () => {
+        setOnvifOff(true);
+        toast.success('onvif disabled — the camera is reachable via FTP only');
+      };
+      try {
+        await serviceAction(service.name, action);
+        if (isOnvifOff) reportOnvifOff();
+        else toast.success(`${service.name} ${action === 'enable' ? 'enabled' : 'disabled'}`);
+        invalidate();
+      } catch (err) {
+        if (err instanceof Error && err.name === 'ApiError') {
+          toast.error(err.message);
+        } else if (isOnvifOff) {
+          // Network-level failure on an onvif disable: the only cause is the
+          // camera killing our own connection — i.e. it worked.
+          reportOnvifOff();
+        } else {
+          toast.error(err instanceof Error ? err.message : 'Toggle failed');
+        }
+      }
+    },
+    [invalidate],
+  );
+
   // The caller's onClick already preventDefault()s to keep the dialog open
   // until the request settles.
   const handleConfirm = useCallback(async () => {
     const p = pending;
     if (!p) return;
     setPending(null);
-
-    if (p.action === 'restart') {
-      await runRestart(p.service);
-      return;
-    }
-
-    // Disable/enable involves no reboot — except disabling onvif, which
-    // takes down the very HTTP server serving this page.
-    const isOnvifOff = p.action === 'disable' && p.service.name === 'onvif';
-    const reportOnvifOff = () => {
-      setOnvifOff(true);
-      toast.success('onvif disabled — the camera is reachable via FTP only');
-    };
-    try {
-      await serviceAction(p.service.name, p.action);
-      if (isOnvifOff) reportOnvifOff();
-      else toast.success(`${p.service.name} ${p.action === 'enable' ? 'enabled' : 'disabled'}`);
-      invalidate();
-    } catch (err) {
-      if (err instanceof Error && err.name === 'ApiError') {
-        toast.error(err.message);
-      } else if (isOnvifOff) {
-        // Network-level failure on an onvif disable: the only cause is the
-        // camera killing our own connection — i.e. it worked.
-        reportOnvifOff();
-      } else {
-        toast.error(err instanceof Error ? err.message : 'Toggle failed');
-      }
-    }
-  }, [invalidate, pending, runRestart]);
+    if (p.action === 'restart') await runRestart(p.service);
+    else await runToggle(p.service, p.action);
+  }, [pending, runRestart, runToggle]);
 
   const supervised = data?.supervised ?? null;
 
@@ -318,11 +320,10 @@ export default function ProcessesCard() {
                             className="font-mono text-white"
                             data-testid={`diagnostics-processes-uptime-${service.name}`}
                           >
-                            {service.name === 'telnetd'
-                              ? '—' // unsupervised: no uptime or restart history to show
-                              : service.state === 'running'
-                                ? formatDuration(service.uptime_s)
-                                : '—'}
+                            {/* telnetd is unsupervised: no uptime or restart history to show. */}
+                            {service.name === 'telnetd' || service.state !== 'running'
+                              ? '—'
+                              : formatDuration(service.uptime_s)}
                             {service.state === 'backoff' && (
                               <span
                                 className="text-muted-foreground"

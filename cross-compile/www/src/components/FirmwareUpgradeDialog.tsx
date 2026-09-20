@@ -24,7 +24,7 @@ import {
 import { cn } from '@/lib/utils';
 import { isAbortError, waitForCameraBack } from '@/lib/waitForCameraBack';
 import { ApiError } from '@/services/api';
-import { getDiagnostics, uploadFirmware } from '@/services/diagnosticsService';
+import { type Diagnostics, getDiagnostics, uploadFirmware } from '@/services/diagnosticsService';
 
 const MAX_BYTES = 64 * 1024 * 1024;
 const POLL_INTERVAL_MS = 2000;
@@ -107,17 +107,25 @@ export function FirmwareUpgradeDialog({
 
   const pollUntilBack = useCallback(
     async (signal: AbortSignal) => {
-      const outcome = await waitForCameraBack((sig) => getDiagnostics(sig ?? signal), {
-        intervalMs: POLL_INTERVAL_MS,
-        timeoutMs: POLL_TIMEOUT_MS,
-        signal,
-      });
+      // The probe stashes the latest snapshot on a holder object (a bare `let` would
+      // get narrowed to its initial `null` across the closure boundary). Reading it
+      // here rather than re-fetching keeps this function free of any throw site after
+      // the loop: `startUpload` has already set step='waiting', and its catch does not
+      // reset the step, so a rejection here would lock the dialog open (dismissLocked).
+      const latest: { current: Diagnostics | null } = { current: null };
+      const outcome = await waitForCameraBack(
+        async (sig) => {
+          latest.current = await getDiagnostics(sig ?? signal);
+        },
+        {
+          intervalMs: POLL_INTERVAL_MS,
+          timeoutMs: POLL_TIMEOUT_MS,
+          signal,
+        },
+      );
 
       if (outcome === 'back') {
-        // One more call rather than stashing the winning probe's snapshot: the
-        // camera just answered, and this runs once after a poll that already
-        // took minutes.
-        const next = (await getDiagnostics(signal)).firmware_version;
+        const next = latest.current?.firmware_version ?? 'unknown';
         if (next !== previousVersion) {
           setResultMessage(`Upgrade committed. Firmware version is now ${next}.`);
         } else {
