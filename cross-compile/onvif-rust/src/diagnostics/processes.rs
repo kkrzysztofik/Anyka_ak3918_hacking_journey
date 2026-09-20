@@ -114,9 +114,16 @@ pub async fn handle_processes() -> impl IntoResponse {
         let supervised = crate::diagnostics::services::query_status(std::path::Path::new(
             crate::diagnostics::services::SOCKET_PATH,
         ));
+        let processes = collect();
+        // telnetd is the one row that is not a supervised service; it is
+        // synthesized from the raw scan so the UI can show and toggle it.
+        let supervised = supervised.map(|mut rows| {
+            insert_telnet_row(&mut rows, &processes);
+            rows
+        });
         ProcessesResponse {
             supervised,
-            processes: collect(),
+            processes,
         }
     })
     .await;
@@ -128,6 +135,39 @@ pub async fn handle_processes() -> impl IntoResponse {
             StatusCode::INTERNAL_SERVER_ERROR.into_response()
         }
     }
+}
+
+/// `telnetd` is not a supervised service — the P0 wrapper starts it before
+/// anyka-init exists and a kill must stay final (anyka-init's
+/// `handle_toggle_telnet` owns the switch) — but the Diagnostics table wants
+/// it as a row with a toggle. Synthesize it from the raw scan: truth, not
+/// intent. `running` with a pid when a telnetd process exists, `disabled`
+/// when none does. Uptime/restarts are zero by construction: this is not a
+/// supervised service, it has no backoff history.
+fn insert_telnet_row(
+    rows: &mut Vec<crate::diagnostics::services::ServiceStatus>,
+    processes: &[Process],
+) {
+    rows.retain(|r| r.name != "telnetd");
+    let telnet = processes.iter().find(|p| p.comm == "telnetd");
+    let row = crate::diagnostics::services::ServiceStatus {
+        name: "telnetd".to_string(),
+        state: if telnet.is_some() {
+            "running".to_string()
+        } else {
+            "disabled".to_string()
+        },
+        pid: telnet.map(|p| p.pid),
+        uptime_s: 0,
+        restarts: 0,
+        retry_in_s: 0,
+    };
+    // Sorted position: the socket rows arrive in BTreeMap (name) order.
+    let pos = rows
+        .iter()
+        .position(|r| r.name.as_str() > "telnetd")
+        .unwrap_or(rows.len());
+    rows.insert(pos, row);
 }
 
 /// POST /api/services/{name}/restart
@@ -243,6 +283,67 @@ mod tests {
         assert_eq!(got.comm, "onvif-rust.bin");
         assert_eq!(got.state, "S");
         assert_eq!(got.ppid, 1);
+    }
+
+    fn row(name: &str) -> crate::diagnostics::services::ServiceStatus {
+        crate::diagnostics::services::ServiceStatus {
+            name: name.to_string(),
+            state: "running".to_string(),
+            pid: Some(1),
+            uptime_s: 10,
+            restarts: 0,
+            retry_in_s: 0,
+        }
+    }
+
+    #[test]
+    fn test_insert_telnet_row_running_is_inserted_in_sorted_position() {
+        let mut rows = vec![row("onvif"), row("snmp"), row("udhcpc")];
+        let procs = vec![Process {
+            pid: 42,
+            ppid: 1,
+            comm: "telnetd".to_string(),
+            state: "S".to_string(),
+            rss_kb: 0,
+            cpu_time_s: 0,
+        }];
+        insert_telnet_row(&mut rows, &procs);
+        let names: Vec<&str> = rows.iter().map(|r| r.name.as_str()).collect();
+        assert_eq!(names, vec!["onvif", "snmp", "telnetd", "udhcpc"]);
+        let t = rows
+            .iter()
+            .find(|r| r.name == "telnetd")
+            .expect("telnetd row");
+        assert_eq!(t.state, "running");
+        assert_eq!(t.pid, Some(42));
+    }
+
+    #[test]
+    fn test_insert_telnet_row_absent_process_is_disabled_with_null_pid() {
+        let mut rows = vec![row("snmp")];
+        let procs = vec![Process {
+            pid: 7,
+            ppid: 1,
+            comm: "ntpd".to_string(),
+            state: "S".to_string(),
+            rss_kb: 0,
+            cpu_time_s: 0,
+        }];
+        insert_telnet_row(&mut rows, &procs);
+        let t = rows
+            .iter()
+            .find(|r| r.name == "telnetd")
+            .expect("telnetd row");
+        assert_eq!(t.state, "disabled");
+        assert_eq!(t.pid, None);
+    }
+
+    #[test]
+    fn test_insert_telnet_row_replaces_a_stale_synthetic_row() {
+        let mut rows = vec![row("snmp")];
+        insert_telnet_row(&mut rows, &[]);
+        insert_telnet_row(&mut rows, &[]);
+        assert_eq!(rows.iter().filter(|r| r.name == "telnetd").count(), 1);
     }
 
     /// utime=150 + stime=30 jiffies at 100 Hz = 1 second.
