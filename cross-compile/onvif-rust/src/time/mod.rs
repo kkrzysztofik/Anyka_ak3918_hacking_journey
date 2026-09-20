@@ -2,4 +2,5 @@
 //! manual-clock NTP marker shared with anyka-init.
 
 pub mod ntp_marker;
+pub mod ntp_status;
 pub mod tz;

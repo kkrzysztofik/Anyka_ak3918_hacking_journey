@@ -184,18 +184,30 @@ fn udhcpc_interfaces() -> Vec<String> {
 /// values if system files cannot be read.
 pub(super) struct AnykaNetworkInfo {
     overlay_path: std::path::PathBuf,
+    ntp_status_path: std::path::PathBuf,
 }
 
 impl AnykaNetworkInfo {
     pub(super) fn new() -> Self {
         Self {
             overlay_path: std::path::PathBuf::from(crate::config::netoverlay::DEFAULT_OVERLAY_PATH),
+            ntp_status_path: crate::time::ntp_status::path(
+                crate::diagnostics::update::DEFAULT_UPDATE_ROOT,
+            ),
         }
     }
 
     #[cfg(test)]
     pub(super) fn with_overlay_path(overlay_path: std::path::PathBuf) -> Self {
-        Self { overlay_path }
+        Self { overlay_path, ..Self::new() }
+    }
+
+    #[cfg(test)]
+    pub(super) fn with_ntp_status_path(ntp_status_path: std::path::PathBuf) -> Self {
+        Self {
+            ntp_status_path,
+            ..Self::new()
+        }
     }
 
     /// Read the overlay, hand it to `edit`, write it back.
@@ -344,17 +356,21 @@ impl AnykaNetworkInfo {
         dns_info
     }
 
-    /// Read NTP configuration from /etc/ntp.conf or similar.
-    pub(super) fn read_ntp_config() -> NtpInfo {
-        let mut ntp_info = NtpInfo::default();
-
-        if let Some(servers) = Self::parse_ntp_conf() {
-            ntp_info.ntp_manual = servers;
-        } else if let Some(servers) = Self::parse_timesyncd_conf() {
-            ntp_info.ntp_manual = servers;
+    /// Real servers come from the supervisor's status file. The `/etc/ntp.conf`
+    /// and `timesyncd.conf` parsers below stay for the stub platform only —
+    /// neither file exists on this camera.
+    pub(super) fn read_ntp_config(&self) -> NtpInfo {
+        if let Ok(text) = std::fs::read_to_string(&self.ntp_status_path)
+            && let Some(status) = crate::time::ntp_status::parse(&text)
+        {
+            return NtpInfo {
+                // udhcpc here never supplies NTP; saying otherwise would be a lie.
+                from_dhcp: false,
+                ntp_from_dhcp: vec![],
+                ntp_manual: status.servers,
+            };
         }
-
-        ntp_info
+        NtpInfo::default()
     }
 
     /// Parse /etc/ntp.conf file.
@@ -438,7 +454,7 @@ impl NetworkInfo for AnykaNetworkInfo {
     }
 
     async fn get_ntp_info(&self) -> PlatformResult<NtpInfo> {
-        Ok(Self::read_ntp_config())
+        Ok(self.read_ntp_config())
     }
 
     async fn set_network_interface(
@@ -717,5 +733,28 @@ wlan0\t007100CB\t00000000\t0001\t0\t0\t0\t00FFFFFF\t0\t0\t0
             overlay.address.is_none(),
             "a stale address left behind DHCP would be applied on the next switch back to static"
         );
+    }
+
+    #[test]
+    fn test_read_ntp_config_reads_the_supervisor_status_file() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let status = dir.path().join("ntp.status");
+        std::fs::write(
+            &status,
+            "1760000000\tpool.example\t0\tpool.example,192.168.2.1\n",
+        )
+        .unwrap();
+        let info = AnykaNetworkInfo::with_ntp_status_path(status);
+        let ntp = info.read_ntp_config();
+        assert!(!ntp.from_dhcp);
+        assert_eq!(ntp.ntp_manual, vec!["pool.example", "192.168.2.1"]);
+    }
+
+    #[test]
+    fn test_read_ntp_config_is_empty_when_the_status_file_is_absent() {
+        let info = AnykaNetworkInfo::with_ntp_status_path(
+            std::path::PathBuf::from("/nonexistent/update-root/state/ntp.status"),
+        );
+        assert!(info.read_ntp_config().ntp_manual.is_empty());
     }
 }
