@@ -1,12 +1,20 @@
 /**
  * TimePage Tests
  */
-import { act, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { getDateTime, setDateTime, setNtp, setSystemDateAndTime } from '@/services/timeService';
+import { type Diagnostics, getDiagnostics } from '@/services/diagnosticsService';
 import {
+  getDateTime,
+  getNtp,
+  setDateTime,
+  setNtp,
+  setSystemDateAndTime,
+} from '@/services/timeService';
+import {
+  mockToast,
   renderWithProviders,
   selectOption,
   waitForPageLoad,
@@ -28,6 +36,25 @@ vi.mock('@/services/timeService', () => ({
   getNtp: vi.fn(),
 }));
 
+vi.mock('@/services/diagnosticsService', () => ({
+  getDiagnostics: vi.fn(),
+}));
+
+const mockDiagnostics = (time: Diagnostics['time']): Diagnostics => ({
+  status: 'healthy',
+  firmware_version: 'test',
+  uptime: { process_s: 1, system_s: 1 },
+  cpu_percent: 0,
+  memory: null,
+  storage: null,
+  network: null,
+  stream_frame_age_ms: null,
+  components: [],
+  degraded_services: [],
+  vision: null,
+  time,
+});
+
 // Note: Timer mocking will be handled per test
 
 describe('TimePage', () => {
@@ -43,6 +70,8 @@ describe('TimePage', () => {
     vi.mocked(setDateTime).mockResolvedValue(undefined);
     vi.mocked(setNtp).mockResolvedValue(undefined);
     vi.mocked(setSystemDateAndTime).mockResolvedValue(undefined);
+    vi.mocked(getNtp).mockResolvedValue(['pool.ntp.org']);
+    vi.mocked(getDiagnostics).mockResolvedValue(mockDiagnostics(null));
   });
 
   const mockTimeConfig = {
@@ -183,41 +212,45 @@ describe('TimePage', () => {
   });
 
   it('should show NTP server fields when NTP mode is selected', async () => {
-    vi.mocked(getDateTime).mockResolvedValue({ ...mockTimeConfig, ntp: { enabled: true } });
-
-    renderWithProviders(<TimePage />);
-
-    await waitFor(() => {
-      expect(screen.getByTestId('time-title')).toBeInTheDocument();
-    });
-
-    // When NTP from DHCP is false, server fields should be visible
-    await waitFor(
-      () => {
-        // Check for NTP server input fields
-        const primaryServerInput = screen.queryByTestId('time-page-ntp-server1-input');
-        const secondaryServerInput = screen.queryByTestId('time-page-ntp-server2-input');
-        // At least verify NTP section is rendered
-        expect(screen.getByTestId('time-synchronization-title')).toBeInTheDocument();
-        expect(
-          primaryServerInput || secondaryServerInput || screen.queryByTestId('time-page-ntp-radio'),
-        ).toBeTruthy();
-      },
-      { timeout: 3000 },
-    );
+    await renderTimePage();
+    expect(screen.getByTestId('time-page-ntp-servers-input')).toBeInTheDocument();
   });
 
-  it('should sync time from the browser', async () => {
+  it('should send every listed NTP server', async () => {
     const user = userEvent.setup();
     await renderTimePage();
 
-    await user.click(screen.getByTestId('time-page-use-computer-time'));
+    const input = screen.getByTestId('time-page-ntp-servers-input') as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: 'pool.example\ntime.example' } });
 
-    expect(setDateTime).toHaveBeenCalledTimes(1);
-    const [iso, timezone, daylightSavings] = vi.mocked(setDateTime).mock.calls[0];
-    expect(iso).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
-    expect(timezone).toBe('UTC0');
-    expect(daylightSavings).toBe(false);
+    await user.click(screen.getByTestId('time-page-save-button'));
+
+    await waitFor(() => {
+      expect(setNtp).toHaveBeenCalledWith(['pool.example', 'time.example']);
+    });
+  });
+
+  it('should surface the last sync and its offset', async () => {
+    vi.mocked(getDiagnostics).mockResolvedValue(
+      mockDiagnostics({
+        last_sync_unix: 1761000000,
+        last_server: 'pool.example',
+        last_delta_s: 42,
+        servers: ['pool.example'],
+      }),
+    );
+
+    await renderTimePage();
+
+    expect(screen.getByTestId('time-sync-offset')).toHaveTextContent('+42s');
+    expect(screen.getByTestId('time-sync-state')).toHaveTextContent('pool.example');
+  });
+
+  it('should show a warning when no sync has completed', async () => {
+    await renderTimePage();
+
+    expect(mockToast.error).toHaveBeenCalled();
+    expect(screen.getByTestId('time-no-sync')).toBeInTheDocument();
   });
 
   it('should select Manual mode and show date/time inputs', async () => {

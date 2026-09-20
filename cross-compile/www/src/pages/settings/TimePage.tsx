@@ -26,10 +26,13 @@ import {
   SettingsCardHeader,
   SettingsCardTitle,
 } from '@/components/ui/settings-card';
+import { getDiagnostics } from '@/services/diagnosticsService';
 import {
   type DateTimeConfig,
   getDateTime,
+  getNtp,
   setDateTime,
+  setNtp,
   setSystemDateAndTime,
 } from '@/services/timeService';
 import { TIMEZONES } from '@/utils/timezones';
@@ -37,8 +40,7 @@ import { TIMEZONES } from '@/utils/timezones';
 // Validation Schema
 const timeSchema = z.object({
   mode: z.enum(['ntp', 'manual']),
-  ntpServer1: z.string().optional(),
-  ntpServer2: z.string().optional(),
+  ntpServers: z.array(z.string()).min(1, 'At least one NTP server is required'),
   timezone: z.string().min(1, 'Timezone is required'),
   manualDate: z.string().optional(),
   manualTime: z.string().optional(),
@@ -63,6 +65,18 @@ export default function TimePage() {
     queryFn: getDateTime,
   });
 
+  // The servers the camera actually uses, as it reports them.
+  const ntpQuery = useQuery({
+    queryKey: ['ntpServers'],
+    queryFn: getNtp,
+  });
+
+  const { data: diagnostics } = useQuery({
+    queryKey: ['diagnostics'],
+    queryFn: (ctx) => getDiagnostics(ctx.signal),
+    refetchInterval: 15000,
+  });
+
   useEffect(() => {
     if (config) {
       const src = config.localDateTime ?? config.utcDateTime;
@@ -83,8 +97,7 @@ export default function TimePage() {
     resolver: zodResolver(timeSchema),
     defaultValues: {
       mode: 'ntp',
-      ntpServer1: 'pool.ntp.org',
-      ntpServer2: 'time.google.com',
+      ntpServers: ['pool.ntp.org'],
       timezone: 'UTC',
       manualDate: new Date().toISOString().split('T')[0],
       manualTime: new Date().toTimeString().split(' ')[0],
@@ -98,14 +111,22 @@ export default function TimePage() {
     if (config) {
       form.reset({
         mode: config.ntp.enabled ? 'ntp' : 'manual',
-        ntpServer1: 'pool.ntp.org', // Stub as API generally doesn't return server list easily in simple calls
-        ntpServer2: 'time.google.com',
+        ntpServers: ntpQuery.data ?? ['pool.ntp.org'],
         timezone: config.timezone || 'UTC',
         manualDate: new Date().toISOString().split('T')[0],
         manualTime: new Date().toTimeString().split(' ')[0],
       });
     }
-  }, [config, form]);
+  }, [config, form, ntpQuery.data]);
+
+  // Warn once when the camera reports that no sync has completed.
+  const warnedNoSync = React.useRef(false);
+  useEffect(() => {
+    if (config?.ntp.enabled && diagnostics && diagnostics.time === null && !warnedNoSync.current) {
+      warnedNoSync.current = true;
+      toast.error('No NTP sync has completed yet');
+    }
+  }, [config, diagnostics]);
 
   const mutation = useMutation({
     mutationFn: async (values: TimeFormData) => {
@@ -114,8 +135,10 @@ export default function TimePage() {
 
       // 2. Set Mode
       if (values.mode === 'ntp') {
-        // ponytail: until the server-list work lands, NTP only clears the
-        // manual-clock marker; the supervisor keeps its own [time].servers.
+        const servers = values.ntpServers.map((s) => s.trim()).filter((s) => s.length > 0);
+        // The server list goes to the supervisor ([time].servers); the NTP
+        // type clears the manual-clock marker in the camera's network config.
+        await setNtp(servers);
         await setSystemDateAndTime('NTP', config?.daylightSavings ?? false, values.timezone);
       } else {
         // Manual
@@ -127,6 +150,7 @@ export default function TimePage() {
     onSuccess: () => {
       toast.success('Time settings saved');
       queryClient.invalidateQueries({ queryKey: ['timeConfig'] });
+      queryClient.invalidateQueries({ queryKey: ['ntpServers'] });
     },
     onError: (error) => {
       toast.error('Failed to save time settings', {
@@ -303,41 +327,58 @@ export default function TimePage() {
                 {/* NTP Settings */}
                 {mode === 'ntp' && (
                   <div className="animate-in fade-in slide-in-from-top-2 space-y-[16px] pt-[8px]">
-                    <div className="grid grid-cols-1 gap-[16px] md:grid-cols-2">
-                      <FormField
-                        control={form.control}
-                        name="ntpServer1"
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel className="text-[#a1a1a6]">Primary Server</FormLabel>
-                            <FormControl>
-                              <Input
-                                {...field}
-                                className="border-[#3a3a3c] bg-transparent text-white"
-                                data-testid="time-page-ntp-server1-input"
-                              />
-                            </FormControl>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-                      <FormField
-                        control={form.control}
-                        name="ntpServer2"
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel className="text-[#a1a1a6]">Secondary Server</FormLabel>
-                            <FormControl>
-                              <Input
-                                {...field}
-                                className="border-[#3a3a3c] bg-transparent text-white"
-                                data-testid="time-page-ntp-server2-input"
-                              />
-                            </FormControl>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
+                    <FormField
+                      control={form.control}
+                      name="ntpServers"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel className="text-[#a1a1a6]">
+                            NTP Servers (one per line)
+                          </FormLabel>
+                          <FormControl>
+                            <textarea
+                              value={field.value.join('\n')}
+                              onChange={(e) => field.onChange(e.target.value.split('\n'))}
+                              rows={3}
+                              className="border-[#3a3a3c] bg-transparent p-3 font-mono text-white"
+                              data-testid="time-page-ntp-servers-input"
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
+                    <div
+                      className="space-y-[4px] rounded-[12px] border border-[#3a3a3c] bg-[#2c2c2e] p-4"
+                      data-testid="time-sync-status"
+                    >
+                      {diagnostics?.time ? (
+                        <>
+                          <div className="text-[14px] text-white" data-testid="time-sync-state">
+                            Last sync:{' '}
+                            {diagnostics.time.last_sync_unix !== null
+                              ? new Date(diagnostics.time.last_sync_unix * 1000).toLocaleString()
+                              : 'never'}
+                            {diagnostics.time.last_server
+                              ? ` via ${diagnostics.time.last_server}`
+                              : ''}
+                          </div>
+                          {diagnostics.time.last_delta_s !== null && (
+                            <div
+                              className="text-[13px] text-[#a1a1a6]"
+                              data-testid="time-sync-offset"
+                            >
+                              Clock offset: {diagnostics.time.last_delta_s >= 0 ? '+' : ''}
+                              {diagnostics.time.last_delta_s}s
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        <div className="text-[14px] text-[#ff9f0a]" data-testid="time-no-sync">
+                          No NTP sync has completed yet.
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}
