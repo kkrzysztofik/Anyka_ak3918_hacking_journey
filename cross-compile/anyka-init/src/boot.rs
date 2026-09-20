@@ -170,8 +170,17 @@ pub fn hand_over_supplicant(sys: &dyn Sys, cfg: &mut Config, probed: SupplicantO
             // only route back and it must be able to open the ctrl socket. A
             // bring-up that associated and then failed at DHCP — or exhausted
             // the driver probe — leaves its own detached supplicant squatting
-            // on it, so clear the socket before the service starts.
+            // on it, so clear the socket before the service starts. The
+            // service then re-clears at its own start (the shim) because the
+            // vendor respawn loop refills a killed wpa within a second.
             let _ = sys.run_to_completion("killall", &["wpa_supplicant".to_string()]);
+            let _ = sys.run_to_completion("killall", &["wifi_run.sh".to_string()]);
+            if let Some(svc) = cfg.services.get_mut("wpa_supplicant")
+                && svc.enabled
+            {
+                svc.exec = "/bin/sh".into();
+                svc.args.insert(0, crate::wifi::KILL_WPA_SHIM.into());
+            }
         }
     }
 }
@@ -205,6 +214,9 @@ fn take_over_supplicant(sys: &dyn Sys, cfg: &mut Config, driver: &'static str) {
         );
         return;
     }
+    // Kill the respawn loop first, so it cannot refill the socket while the
+    // handover runs, then the instance that holds it.
+    let _ = sys.run_to_completion("killall", &["wifi_run.sh".to_string()]);
     // Only `Err` stands us down. A non-zero *status* is busybox killall
     // reporting that it matched no process, which means bring-up's supplicant
     // already exited and the socket is free — exactly when supervising is
@@ -217,6 +229,15 @@ fn take_over_supplicant(sys: &dyn Sys, cfg: &mut Config, driver: &'static str) {
             "could not run killall to release the ctrl socket; not supervising \
              wpa_supplicant this boot"
         );
+    } else {
+        // The service clears every remaining squatter at its own start: the
+        // shim re-runs both killalls (including the respawn loop) and only
+        // then exec's the real supplicant. This closes the seconds-long gap
+        // between this killall and the supervisor's spawn, in which the
+        // vendor loop refills a killed wpa and the second instance exits 255
+        // forever — the 192.168.2.198 outage of 2026-09-20.
+        svc.exec = "/bin/sh".into();
+        svc.args.insert(0, crate::wifi::KILL_WPA_SHIM.into());
     }
 }
 
@@ -600,7 +621,14 @@ channel = 6
         cfg
     }
 
-    fn expect_one_supplicant_killall(sys: &mut MockSys) {
+    /// The handover kills the respawn loop first, then the instance holding
+    /// the ctrl socket — either order that refills the socket before the
+    /// service starts is the exit-255 crash loop.
+    fn expect_respawn_and_supplicant_killall(sys: &mut MockSys) {
+        sys.expect_run_to_completion()
+            .withf(|prog, args| prog == "killall" && args == ["wifi_run.sh".to_string()])
+            .times(1)
+            .returning(|_, _| Ok(ExitStatus::Code(0)));
         sys.expect_run_to_completion()
             .withf(|prog, args| prog == "killall" && args == ["wpa_supplicant".to_string()])
             .times(1)
@@ -610,7 +638,7 @@ channel = 6
     #[test]
     fn test_handover_kills_bring_up_only_once_the_service_takes_the_probed_driver() {
         let mut sys = MockSys::new();
-        expect_one_supplicant_killall(&mut sys);
+        expect_respawn_and_supplicant_killall(&mut sys);
         let mut cfg = config_with_supplicant(&["-i", "wlan0", "-D", "wext", "-c", "/tmp/wpa.conf"]);
 
         hand_over_supplicant(&sys, &mut cfg, SupplicantOwnership::Ours("nl80211"));
@@ -622,6 +650,35 @@ channel = 6
             "the service must start on the driver that actually associated, got {:?}",
             svc.args
         );
+        // The service re-clears squatters at its own start, closing the gap
+        // between this killall and the supervisor's spawn.
+        assert_eq!(svc.exec, "/bin/sh");
+        assert_eq!(svc.args[0], "/mnt/anyka_hack/kill-wpa.sh");
+    }
+
+    /// Older on-device `anyka.toml` files write the combined `-Dnl80211`
+    /// form, which the pre-shim `patch_driver_arg` could not patch and which
+    /// is exactly how 192.168.2.198 ended up supervising a second
+    /// supplicant against a held ctrl socket.
+    #[test]
+    fn test_handover_ours_patches_the_combined_driver_flag_and_wires_the_shim() {
+        let mut sys = MockSys::new();
+        expect_respawn_and_supplicant_killall(&mut sys);
+        let mut cfg = config_with_supplicant(&["-i", "wlan0", "-Dnl80211", "-c", "/tmp/wpa.conf"]);
+
+        hand_over_supplicant(&sys, &mut cfg, SupplicantOwnership::Ours("wext"));
+
+        let svc = &cfg.services["wpa_supplicant"];
+        assert!(svc.enabled);
+        assert_eq!(svc.exec, "/bin/sh");
+        assert_eq!(svc.args[0], "/mnt/anyka_hack/kill-wpa.sh");
+        assert!(
+            svc.args.contains(&"-Dwext".to_string()),
+            "the combined flag must be patched in place, got {:?}",
+            svc.args
+        );
+        // 5 fixture args + the shim: the combined flag was patched, not split.
+        assert_eq!(svc.args.len(), 6, "the argv shape must not change");
     }
 
     /// Without a service to take over, `killall` drops the one working link on
@@ -660,15 +717,20 @@ channel = 6
     #[test]
     fn test_handover_clears_a_leftover_supplicant_when_nothing_owns_the_link() {
         let mut sys = MockSys::new();
-        expect_one_supplicant_killall(&mut sys);
+        expect_respawn_and_supplicant_killall(&mut sys);
         let mut cfg = config_with_supplicant(&["-i", "wlan0", "-D", "wext"]);
 
         hand_over_supplicant(&sys, &mut cfg, SupplicantOwnership::Unowned);
 
+        let svc = &cfg.services["wpa_supplicant"];
         assert!(
-            cfg.services["wpa_supplicant"].enabled,
+            svc.enabled,
             "the supervised service is the only route back to a link"
         );
+        // The service re-clears at its own start: the respawn loop refills a
+        // killed wpa within a second, and this killall runs seconds earlier.
+        assert_eq!(svc.exec, "/bin/sh");
+        assert_eq!(svc.args[0], "/mnt/anyka_hack/kill-wpa.sh");
     }
 
     /// A disabled service is never started by `build_enabled_services`, so
@@ -697,6 +759,10 @@ channel = 6
     fn test_handover_stands_down_when_killall_cannot_run() {
         let mut sys = MockSys::new();
         sys.expect_run_to_completion()
+            .withf(|prog, args| prog == "killall" && args == ["wifi_run.sh".to_string()])
+            .times(1)
+            .returning(|_, _| Ok(ExitStatus::Code(0)));
+        sys.expect_run_to_completion()
             .withf(|prog, args| prog == "killall" && args == ["wpa_supplicant".to_string()])
             .times(1)
             .returning(|_, _| Err(SysError::Other("no such binary".into())));
@@ -716,6 +782,10 @@ channel = 6
     #[test]
     fn test_handover_still_supervises_when_killall_matched_no_process() {
         let mut sys = MockSys::new();
+        sys.expect_run_to_completion()
+            .withf(|prog, args| prog == "killall" && args == ["wifi_run.sh".to_string()])
+            .times(1)
+            .returning(|_, _| Ok(ExitStatus::Code(0)));
         sys.expect_run_to_completion()
             .withf(|prog, args| prog == "killall" && args == ["wpa_supplicant".to_string()])
             .times(1)

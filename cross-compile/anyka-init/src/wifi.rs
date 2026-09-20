@@ -321,6 +321,10 @@ const KO_DIR: &str = "/tmp/ko";
 /// the one path that is real on any revision: step 4 unpacks
 /// `/data/wifi_tool.tgz` into `/tmp`, which is where the binary comes from.
 const SUPPLICANT_BIN: &str = "/tmp/wpa_supplicant";
+/// Exec target the supervised service is rewired to at boot (see boot.rs).
+/// Clears every ctrl-socket squatter, including the vendor wifi_run.sh
+/// respawn loop, before exec-ing the real supplicant.
+pub const KILL_WPA_SHIM: &str = "/mnt/anyka_hack/kill-wpa.sh";
 pub const DRIVER_PROBE_ORDER: [&str; 2] = ["nl80211", "wext"];
 const BUSYBOX: &str = "/bin/busybox";
 const SYS_CLASS_NET: &str = "/sys/class/net";
@@ -696,15 +700,22 @@ pub fn udhcpc_oneshot_args(iface: &str) -> Vec<String> {
 /// Rewrite the `-D <driver>` pair in a service argv. Returns false when the
 /// service does not take a `-D` flag, which the caller logs.
 pub fn patch_driver_arg(args: &mut [String], driver: &str) -> bool {
-    let Some(i) = args.iter().position(|a| a == "-D") else {
-        return false;
-    };
-    let Some(slot) = args.get_mut(i + 1) else {
-        return false;
-    };
-    slot.clear();
-    slot.push_str(driver);
-    true
+    if let Some(i) = args.iter().position(|a| a == "-D") {
+        let Some(slot) = args.get_mut(i + 1) else {
+            return false;
+        };
+        slot.clear();
+        slot.push_str(driver);
+        return true;
+    }
+    // Older on-device anyka.toml files write the combined form `-Dnl80211`
+    // in a single argument. `wpa_supplicant` accepts both forms, so rewrite
+    // the slot in place and keep the argv shape.
+    if let Some(slot) = args.iter_mut().find(|a| a.len() > 2 && a.starts_with("-D")) {
+        *slot = format!("-D{driver}");
+        return true;
+    }
+    false
 }
 
 fn start_supplicant_probing_driver(
@@ -1193,6 +1204,40 @@ mod tests {
         let before = args.clone();
         assert!(!patch_driver_arg(&mut args, "wext"));
         assert_eq!(args, before);
+    }
+
+    /// Older on-device `anyka.toml` files write the flag in the combined
+    /// form `-Dnl80211`. `wpa_supplicant` accepts both forms, so the patch
+    /// rewrites the slot in place and keeps the argv shape.
+    #[test]
+    fn test_patch_driver_arg_rewrites_the_combined_form() {
+        let mut args = vec![
+            "-i".to_string(),
+            "wlan0".to_string(),
+            "-Dnl80211".to_string(),
+            "-c".to_string(),
+            "x".to_string(),
+        ];
+        assert!(patch_driver_arg(&mut args, "wext"));
+        assert_eq!(args[2], "-Dwext");
+        assert_eq!(args.len(), 5);
+    }
+
+    #[test]
+    fn test_patch_driver_arg_prefers_the_split_form_over_a_combined_one() {
+        let mut args = vec![
+            "-Dwext".to_string(),
+            "-i".to_string(),
+            "wlan0".to_string(),
+            "-D".to_string(),
+            "nl80211".to_string(),
+        ];
+        assert!(patch_driver_arg(&mut args, "nl80211"));
+        assert_eq!(args[4], "nl80211");
+        assert_eq!(
+            args[0], "-Dwext",
+            "the split form wins; others are untouched"
+        );
     }
 
     #[test]
