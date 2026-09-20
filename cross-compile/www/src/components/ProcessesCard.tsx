@@ -26,6 +26,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { cn } from '@/lib/utils';
 import { isAbortError, waitForCameraBack } from '@/lib/waitForCameraBack';
 import { getDiagnostics } from '@/services/diagnosticsService';
 import {
@@ -301,7 +302,10 @@ export default function ProcessesCard() {
                       return (
                         <tr
                           key={service.name}
-                          className={`border-border border-b last:border-b-0 ${isDisabled ? 'opacity-50' : ''}`}
+                          className={cn(
+                            'border-border border-b last:border-b-0',
+                            isDisabled && 'opacity-50',
+                          )}
                           data-testid={`diagnostics-processes-row-${service.name}`}
                         >
                           <td className="py-2 pr-4 font-mono">{service.name}</td>

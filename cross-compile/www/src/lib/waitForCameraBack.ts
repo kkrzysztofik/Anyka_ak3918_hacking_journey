@@ -22,7 +22,9 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
       signal?.removeEventListener('abort', onAbort);
       resolve();
     }, ms);
-    signal?.addEventListener('abort', onAbort);
+    // `once` so the abort path cleans up too: this helper is called in a loop
+    // against a single long-lived signal, and only the resolve path detaches.
+    signal?.addEventListener('abort', onAbort, { once: true });
   });
 }
 

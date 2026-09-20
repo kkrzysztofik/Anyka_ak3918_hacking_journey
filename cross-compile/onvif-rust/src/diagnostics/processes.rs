@@ -220,39 +220,37 @@ pub async fn handle_restart_service(AxumPath(name): AxumPath<String>) -> impl In
 /// 202, not 200: accepted, not confirmed — the supervisor SIGTERMs (disable)
 /// or starts under backoff (enable) on its own schedule.
 async fn toggle_service(name: String, enabled: bool) -> impl IntoResponse {
-    let sock = std::path::Path::new(crate::diagnostics::services::SOCKET_PATH);
+    use crate::diagnostics::services::{SOCKET_PATH, ToggleReply, request_toggle};
+    let sock = std::path::Path::new(SOCKET_PATH);
 
-    // Validate against the live snapshot (which now includes disabled rows)
-    // so an unknown name is a 404, not a silently-accepted "ok".
-    let known = tokio::task::spawn_blocking(move || {
-        crate::diagnostics::services::query_status(sock)
-            .map(|rows| rows.iter().any(|r| r.name == name))
-            .map(|found| (found, name))
-    })
-    .await;
-
-    let Ok(Some((found, name))) = known else {
-        return (StatusCode::SERVICE_UNAVAILABLE, "supervisor unreachable").into_response();
-    };
-    if !found {
-        return (StatusCode::NOT_FOUND, "unknown service").into_response();
-    }
-
-    let reply = tokio::task::spawn_blocking(move || {
-        crate::diagnostics::services::request_toggle(sock, &name, enabled)
-    })
-    .await;
+    // One round-trip. The restart route pre-flights `query_status` because the
+    // supervisor answers every `restart` with "ok", even for a name it has
+    // never heard of — the snapshot is its only route to a 404. The toggle
+    // protocol carries its own `unknown`, so a second round-trip here would
+    // only re-ask a question the first one already answers.
+    let reply = tokio::task::spawn_blocking(move || request_toggle(sock, &name, enabled)).await;
 
     match reply {
-        Ok(crate::diagnostics::services::ToggleReply::Accepted) => {
-            StatusCode::ACCEPTED.into_response()
-        }
-        Ok(crate::diagnostics::services::ToggleReply::Unknown) => {
+        Ok(ToggleReply::Accepted) => StatusCode::ACCEPTED.into_response(),
+        // 202 as well: accepted, outcome unconfirmed. The supervisor persists
+        // and applies before it replies, so a slow answer is not a failure —
+        // calling it one would report "nothing changed" for a change that did.
+        Ok(ToggleReply::Pending) => (
+            StatusCode::ACCEPTED,
+            "accepted; the supervisor did not confirm in time — re-check the service list",
+        )
+            .into_response(),
+        Ok(ToggleReply::Unknown) => {
             (StatusCode::NOT_FOUND, "unknown or non-toggleable service").into_response()
         }
-        _ => (
+        // Two distinct 503 bodies: on a camera with no shell, the body is the
+        // only thing separating "no supervisor" from "supervisor said no".
+        Ok(ToggleReply::Unreachable) | Err(_) => {
+            (StatusCode::SERVICE_UNAVAILABLE, "supervisor unreachable").into_response()
+        }
+        Ok(ToggleReply::Error) => (
             StatusCode::SERVICE_UNAVAILABLE,
-            "toggle not accepted by supervisor",
+            "supervisor rejected the toggle; nothing changed",
         )
             .into_response(),
     }

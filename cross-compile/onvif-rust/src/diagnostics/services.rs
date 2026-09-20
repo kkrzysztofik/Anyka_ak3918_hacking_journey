@@ -85,9 +85,16 @@ pub enum ToggleReply {
     Accepted,
     /// Not a configured service, or not toggleable.
     Unknown,
-    /// The supervisor refused: the config write failed, or its loop did not
-    /// answer within its own 1 s budget.
+    /// The supervisor refused outright: the config write failed, so nothing
+    /// changed.
     Error,
+    /// The supervisor accepted the request but did not confirm it in time.
+    ///
+    /// Distinct from `Error` because it is not a failure: the supervisor
+    /// persists and applies the change *before* replying, so a late answer
+    /// means the toggle is most likely in effect. Reporting it as a failure
+    /// would tell an admin nothing changed while it changed anyway.
+    Pending,
     /// Socket unreachable — an older anyka-init in the other A/B slot.
     Unreachable,
 }
@@ -100,6 +107,7 @@ pub fn request_toggle(path: &Path, name: &str, enabled: bool) -> ToggleReply {
         Some(r) => match r.trim() {
             "ok" => ToggleReply::Accepted,
             "unknown" => ToggleReply::Unknown,
+            "pending" => ToggleReply::Pending,
             _ => ToggleReply::Error,
         },
     }
@@ -220,9 +228,9 @@ mod tests {
         let listener = UnixListener::bind(&path).expect("bind");
         let server = std::thread::spawn(move || {
             use std::io::{BufRead, Write};
-            // Four connections: ok, unknown, error, garbage.
-            let replies: [&[u8]; 4] = [b"ok\n", b"unknown\n", b"error\n", b"nope\n"];
-            for (stream, reply) in listener.incoming().take(4).zip(replies) {
+            // Five connections: ok, unknown, error, pending, garbage.
+            let replies: [&[u8]; 5] = [b"ok\n", b"unknown\n", b"error\n", b"pending\n", b"nope\n"];
+            for (stream, reply) in listener.incoming().take(5).zip(replies) {
                 let Ok(mut stream) = stream else { continue };
                 let mut line = String::new();
                 if std::io::BufReader::new(&stream)
@@ -239,9 +247,12 @@ mod tests {
         assert_eq!(request_toggle(p, "snmp", true), ToggleReply::Accepted);
         assert_eq!(request_toggle(p, "snmp", false), ToggleReply::Unknown);
         assert_eq!(request_toggle(p, "snmp", true), ToggleReply::Error);
-        // Anything that is not one of the three words is a failure, not a
+        // A slow supervisor is not a failed one: the toggle is already
+        // persisted by the time it answers late.
+        assert_eq!(request_toggle(p, "snmp", false), ToggleReply::Pending);
+        // Anything that is not one of the four words is a failure, not a
         // success.
-        assert_eq!(request_toggle(p, "snmp", false), ToggleReply::Error);
+        assert_eq!(request_toggle(p, "snmp", true), ToggleReply::Error);
 
         server.join().expect("server thread");
         let _ = std::fs::remove_file(&path);

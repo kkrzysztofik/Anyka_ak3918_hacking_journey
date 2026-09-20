@@ -52,8 +52,8 @@ Two new request lines on the existing Unix socket
 (`/tmp/anyka-supervisor.sock`), same conventions as `restart`:
 
 ```
-enable  <name>\n   ->  ok\n | unknown\n | error\n
-disable <name>\n   ->  ok\n | unknown\n | error\n
+enable  <name>\n   ->  ok\n | unknown\n | pending\n | error\n
+disable <name>\n   ->  ok\n | unknown\n | pending\n | error\n
 ```
 
 - `ok` — applied (or the no-op case: the service already had that state; no
@@ -61,16 +61,27 @@ disable <name>\n   ->  ok\n | unknown\n | error\n
 - `unknown` — malformed line, name not present in `[services]`, or a name
   that is not toggleable (`wpa_supplicant`, §2.1).
 - `error` — **new reply word.** The config write failed (I/O or write
-  error). The action is then *not applied at all*: persistence is the first
-  step, and a "disabled" that silently re-enables itself on the next reboot
-  would defeat the escape-hatch use case.
+  error), or the loop is gone entirely. The action is then *not applied at
+  all*: persistence is the first step, and a "disabled" that silently
+  re-enables itself on the next reboot would defeat the escape-hatch use
+  case.
+- `pending` — the loop accepted the request but did not answer within the
+  control thread's budget. **Not a failure.** `handle_toggle_service`
+  persists and applies the change *before* it replies, and dropping the
+  reply receiver cancels nothing, so a late answer means the toggle has most
+  likely taken effect. Reporting it as an error would tell an admin that
+  nothing changed while it changed a moment later. Maps to **202**, the same
+  "accepted, not confirmed" contract as `ok`, with a body telling the
+  operator to re-read the service list.
 
-Unlike `restart`, these two replies depend on work the supervisor loop has
-to do, so the control thread waits for the loop to answer. **That wait must
-be shorter than the client's socket timeout**, which is 2 s
-(`diagnostics/services.rs:26`) — a server that waits longer hands the user a
-503 for a toggle that was applied and persisted. The wait is 1 s; a loop
-that cannot answer in 1 s is wedged, and `error` is the honest reply.
+Unlike `restart`, these replies depend on work the supervisor loop has to
+do, so the control thread waits for the loop to answer. **That wait must be
+shorter than the client's socket timeout**, which is 2 s
+(`diagnostics/services.rs:26`) — a server that waits longer turns every slow
+reply into a connection error. The wait is 1 s (`CONTROL_REPLY_TIMEOUT`),
+and the `status` path is bounded by the same constant: the control thread
+serves connections one at a time, so an unbounded wait there would queue
+every later request behind a single wedged loop.
 
 `status` extends to one row per **configured** service (enabled and
 disabled alike), same six-field TSV:
@@ -96,11 +107,19 @@ so the index-based `by_pid` map is never disturbed and the crash-loop
 `Reboot` path (which exits the whole process) is unreachable for it:
 
 - `decide()` returns `{ action: None, next: Disabled }` for a `Disabled`
-  service, without touching `hist`. That single guard is sufficient: the
-  per-tick stepper acts only on `Action::Start`, and the exit-report path
-  records nothing of its own beyond the `by_pid` removal and one `warn!`.
-  No extra guards in `tick_services` / `handle_service_exited` — they would
-  be unreachable by effect.
+  service, without touching `hist`. That single guard covers the inert
+  state: the per-tick stepper acts only on `Action::Start`, and the
+  exit-report path records nothing of its own beyond the `by_pid` removal
+  and one `warn!`. No `Disabled` guard is needed in `tick_services`.
+- **`handle_service_exited` does need one guard, for a different reason.**
+  `disable` SIGTERMs the child but its exit report arrives up to a
+  reap-poll later, with the old pid still mapped in `by_pid`. Re-enabling
+  inside that window starts a fresh pid; the stale exit would then be
+  charged to the new instance — recording a restart it never had, knocking
+  it into backoff, and letting the next tick spawn a *second* copy beside
+  the one already running. So the handler ignores any exit whose pid is not
+  the service's current pid. Fixing it there rather than in the disable path
+  covers every producer of a stale mapping, not just this one.
 - **disable** (name must exist in `cfg.services` and not be
   `wpa_supplicant`, else `unknown`):
   1. `set_service_enabled(path, name, false)` — file first (section 3).
@@ -246,8 +265,11 @@ enabled)` mirroring `request_restart`, sending `enable <name>\n` /
 
 - reply `ok` → **202** (applied, same "accepted, not confirmed" contract as
   restart)
+- reply `pending` → **202** with an explanatory body (§1)
 - reply `unknown` → **404**
-- reply `error`, or supervisor unreachable → **503**
+- reply `error` → **503** "nothing changed"; supervisor unreachable → **503**
+  "supervisor unreachable". Two bodies, because on a camera with no shell the
+  body is the only thing that separates them.
 
 One consequence for the existing restart route: `status` now lists disabled
 services, so its "is this a known name" guard starts passing for them and a

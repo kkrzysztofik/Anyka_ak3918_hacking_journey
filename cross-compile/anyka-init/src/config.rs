@@ -403,8 +403,13 @@ pub fn set_bool_in_text(
 ) -> Result<String, ConfigError> {
     let value = if enabled { "true" } else { "false" };
 
-    let mut out: Vec<String> = text.split('\n').map(str::to_owned).collect();
-    let Some(hdr) = out.iter().position(|l| l.trim() == section) else {
+    // Preserve the file's line ending. Splitting on '\n' alone would leave a
+    // '\r' on every existing line while the rewritten one has none, producing
+    // a mixed-ending file out of a CRLF original.
+    let nl = if text.contains("\r\n") { "\r\n" } else { "\n" };
+    let mut out: Vec<String> = text.split(nl).map(str::to_owned).collect();
+
+    let Some(hdr) = out.iter().position(|l| strip_comment(l) == section) else {
         return Err(ConfigError::Invalid(format!(
             "no {section} stanza in config"
         )));
@@ -416,14 +421,55 @@ pub fn set_bool_in_text(
         .map(|i| i + hdr + 1)
         .unwrap_or(out.len());
 
-    let Some(i) = (hdr + 1..end).find(|&i| out[i].trim_start().starts_with(key)) else {
+    let Some(i) = (hdr + 1..end).find(|&i| line_key(&out[i]).is_some_and(|k| k == key)) else {
         out.insert(hdr + 1, format!("{key} = {value}"));
-        return Ok(out.join("\n"));
+        return verified(out.join(nl), section, key);
     };
     // Preserve the line's indentation, change only the value.
     let lead: String = out[i].chars().take_while(|c| c.is_whitespace()).collect();
     out[i] = format!("{lead}{key} = {value}");
-    Ok(out.join("\n"))
+    verified(out.join(nl), section, key)
+}
+
+/// A line with any trailing `# comment` removed, trimmed. Lets
+/// `[services.snmp]  # the SNMP agent` match its bare header.
+fn strip_comment(line: &str) -> &str {
+    line.split('#').next().unwrap_or("").trim()
+}
+
+/// The key a `key = value` line assigns, unquoted, or `None` for a line that
+/// assigns nothing (a comment, a blank, a bare header).
+///
+/// Matching the *parsed key* rather than a prefix is load-bearing twice over:
+/// `starts_with("enabled")` would overwrite a sibling `enabled_at_boot`, and
+/// it would skip the equally valid `"enabled" = true`, insert a second
+/// `enabled` key, and leave behind a duplicate-key document that no longer
+/// parses.
+fn line_key(line: &str) -> Option<&str> {
+    let (lhs, _) = line.split_once('=')?;
+    let lhs = lhs.trim();
+    if lhs.starts_with('#') {
+        return None;
+    }
+    Some(lhs.trim_matches(|c| c == '"' || c == '\''))
+}
+
+/// Re-parse the edited document before handing it back.
+///
+/// The editor scans lines rather than parsing TOML, which is what keeps
+/// comments and formatting byte-identical. The cost is that an unusual but
+/// legal input could, in principle, be mis-scanned into a document that no
+/// longer parses — and the caller would then write it over the operator's
+/// config, parking the supervisor on the next boot. Validating the *output*
+/// turns every such case into a refused edit rather than a bricked camera,
+/// without needing the scanner to understand all of TOML.
+fn verified(out: String, section: &str, key: &str) -> Result<String, ConfigError> {
+    match toml::from_str::<toml::Value>(&out) {
+        Ok(_) => Ok(out),
+        Err(e) => Err(ConfigError::Invalid(format!(
+            "editing {key} under {section} produced invalid TOML ({e}); config left unchanged"
+        ))),
+    }
 }
 
 fn read_config_text(path: &std::path::Path) -> Result<String, ConfigError> {
@@ -1253,6 +1299,63 @@ password = "overlaypass"
     fn test_set_bool_in_text_replaces_an_existing_line() {
         let got = set_bool_in_text(SAMPLE, "[services.onvif]", "enabled", false).expect("edit");
         assert!(got.contains("[services.onvif]\nenabled = false\nexec ="));
+    }
+
+    #[test]
+    fn test_set_bool_in_text_does_not_clobber_a_key_with_the_same_prefix() {
+        // A prefix match would overwrite this line, silently losing a key from
+        // the operator's file.
+        let src = "[services.x]\nenabled_at_boot = \"yes\"\nexec = \"/bin/true\"\n";
+        let got = set_bool_in_text(src, "[services.x]", "enabled", false).expect("edit");
+        assert!(got.contains("enabled_at_boot = \"yes\""));
+        assert!(got.contains("\nenabled = false\n"));
+    }
+
+    #[test]
+    fn test_set_bool_in_text_matches_a_quoted_key() {
+        // `"enabled" = true` is legal TOML. Skipping it would insert a second
+        // `enabled` key and produce a duplicate-key document.
+        let src = "[services.x]\n\"enabled\" = true\nexec = \"/bin/true\"\n";
+        let got = set_bool_in_text(src, "[services.x]", "enabled", false).expect("edit");
+        assert!(got.contains("enabled = false"));
+        toml::from_str::<toml::Value>(&got).expect("must stay valid TOML");
+    }
+
+    #[test]
+    fn test_set_bool_in_text_matches_a_header_with_a_trailing_comment() {
+        let src = "[services.x]  # the X service\nenabled = true\nexec = \"/bin/true\"\n";
+        let got = set_bool_in_text(src, "[services.x]", "enabled", false).expect("edit");
+        assert!(got.contains("# the X service"));
+        assert!(got.contains("enabled = false"));
+    }
+
+    #[test]
+    fn test_set_bool_in_text_ignores_a_commented_out_key() {
+        let src = "[services.x]\n# enabled = true\nexec = \"/bin/true\"\n";
+        let got = set_bool_in_text(src, "[services.x]", "enabled", false).expect("edit");
+        assert!(got.contains("# enabled = true"));
+        assert!(got.contains("\nenabled = false\n"));
+    }
+
+    #[test]
+    fn test_set_bool_in_text_preserves_crlf_line_endings() {
+        let src = "[services.x]\r\nenabled = true\r\nexec = \"/bin/true\"\r\n";
+        let got = set_bool_in_text(src, "[services.x]", "enabled", false).expect("edit");
+        assert!(!got.contains("\n\n"), "no bare LF may be introduced");
+        assert_eq!(got, src.replace("enabled = true", "enabled = false"));
+    }
+
+    #[test]
+    fn test_set_bool_in_text_refuses_to_return_invalid_toml() {
+        // The scanner cannot see that this `[` continues an array, so it ends
+        // the stanza early and would insert a duplicate `enabled`. The output
+        // check turns that into a refused edit instead of a config that fails
+        // to parse on the next boot.
+        let src = "[services.x]\nargs = [\n[\"a\"],\n]\nenabled = true\n";
+        match set_bool_in_text(src, "[services.x]", "enabled", false) {
+            Err(ConfigError::Invalid(m)) => assert!(m.contains("invalid TOML"), "{m}"),
+            other => panic!("expected refusal, got {other:?}"),
+        }
     }
 
     #[test]

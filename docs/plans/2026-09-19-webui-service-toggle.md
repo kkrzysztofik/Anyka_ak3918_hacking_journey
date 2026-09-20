@@ -10,6 +10,22 @@
 
 **Spec:** `docs/plans/2026-09-19-webui-service-toggle-design.md` (revised 2026-09-19)
 
+> **Status: executed.** Every task below is implemented and on
+> `design/webui-process-control` (PR #116). **The code is now authoritative** —
+> where a snippet here and the shipped source disagree, the source is right and
+> this file is the record of how it was arrived at. Known divergences, all from
+> the PR review on 2026-09-20:
+>
+> - `set_enabled_in_text` shipped generalised as `set_bool_in_text(text,
+>   section, key, enabled)` so `[system] telnet` could reuse it. It also now
+>   preserves CRLF, tolerates a trailing comment on the stanza header, matches
+>   quoted keys, and **re-parses its own output** before returning — the
+>   line scanner cannot see every legal TOML shape, so validating the result
+>   turns a mis-scan into a refused edit instead of a config that fails to
+>   parse on the next boot.
+> - The protocol gained a fourth reply word, `pending` (§1 of the spec).
+> - `handle_service_exited` ignores exits from a superseded pid (§2).
+
 ## Global Constraints
 
 - **Toolchain:** `source ./setenv.sh` before any Rust command; use `$CARGO` (never bare `cargo`). Host-side commands take `--target x86_64-unknown-linux-gnu`; ARM builds take the default cross target and must run from the crate directory, not the workspace root.
@@ -23,8 +39,15 @@
 - **Clippy budget:** `too_many_arguments` fires above **7**. `dispatch_msg` is already at exactly 7 — Task 4 introduces `LoopCtx` before adding anything, not after.
 - **WebUI tests:** Vitest + React Testing Library, `data-testid` selectors only, `vi.mock` (no MSW), shared helpers in `src/test/`.
 - **Work branch:** `design/webui-process-control` (current). Commit after every task with an **explicit pathspec** — this repo's index is usually fully staged, so a bare `git commit` sweeps in unrelated rework. Push when the plan is fully executed.
-- **Control-socket contract:** one-line request `\n`-terminated, one-line reply `\n`-terminated; status frame = TSV rows + blank line. Replies for toggles: `ok` / `unknown` / `error`.
-- **Camera for on-device verification:** 192.168.2.198, HTTP Basic `admin`/`admin`. Telnet (24) is dead by design on healthy boots; FTP (21) is up but both known credential pairs were refused in the 2026-09-19 session — assume **no shell access on a healthy boot**.
+- **Control-socket contract:** one-line request `\n`-terminated, one-line reply `\n`-terminated; status frame = TSV rows + blank line. Replies for toggles: `ok` / `unknown` / `pending` / `error`.
+- **Camera for on-device verification:** set these before running any command in Phase 4. This repo is public, so the address and credentials stay out of the file:
+
+  ```bash
+  export CAM=http://<camera-ip>
+  export CAM_AUTH=<user>:<password>
+  ```
+
+  Telnet (24) is dead by design on healthy boots; FTP (21) is up but both known credential pairs were refused in the 2026-09-19 session — assume **no shell access on a healthy boot**.
 
 ---
 
@@ -1950,7 +1973,7 @@ Expected: all green, and the prettier exit code is `0` — read the code, not th
 
 ## Phase 4 — End-to-end verification
 
-### Task 14: Deploy to camera 192.168.2.198 and verify on device
+### Task 14: Deploy to the test camera and verify on device
 
 Uses the `anyka-firmware-upgrade` skill.
 
@@ -1968,10 +1991,10 @@ Verify the manifest lists `anyka-init.bin`, `onvif-rust.bin`, and the `www` bund
 - [ ] **Step 2: Upload and monitor the trial**
 
 ```bash
-curl -u admin:admin --fail -X PUT \
+curl -u "$CAM_AUTH" --fail -X PUT \
   -H "Content-Type: application/octet-stream" \
   --data-binary @bundle.tar \
-  http://192.168.2.198/api/update
+  $CAM/api/update
 ```
 
 Expected: `202`. The camera reboots into the new slot; the trial (onvif still enabled → ports 80/554/8080) confirms after the ~30 s hold.
@@ -1979,7 +2002,7 @@ Expected: `202`. The camera reboots into the new slot; the trial (onvif still en
 ```bash
 for i in $(seq 1 30); do
   sleep 10
-  code=$(curl -s -o /dev/null -w '%{http_code}' -u admin:admin http://192.168.2.198/api/diagnostics)
+  code=$(curl -s -o /dev/null -w '%{http_code}' -u "$CAM_AUTH" $CAM/api/diagnostics)
   echo "t+$((i*10))s: $code"
   [ "$code" = "200" ] && break
 done
@@ -1990,7 +2013,7 @@ If the camera never returns (trial revert → old slot), the old slot still has 
 - [ ] **Step 3: Verify status includes disabled services**
 
 ```bash
-curl -s -u admin:admin http://192.168.2.198/api/processes \
+curl -s -u "$CAM_AUTH" $CAM/api/processes \
   | python3 -c 'import json,sys; [print(r["name"], r["state"], r["pid"]) for r in json.load(sys.stdin)["supervised"]]'
 ```
 
@@ -1999,17 +2022,17 @@ Expected: rows for all six configured services; `dropbear` shows `disabled` with
 - [ ] **Step 4: Toggle snmp, and check the error paths**
 
 ```bash
-S=http://192.168.2.198/api/services
-st() { curl -s -u admin:admin http://192.168.2.198/api/processes \
+S=$CAM/api/services
+st() { curl -s -u "$CAM_AUTH" $CAM/api/processes \
   | python3 -c 'import json,sys; print({r["name"]: r["state"] for r in json.load(sys.stdin)["supervised"]})'; }
 
-curl -s -o /dev/null -w 'disable: %{http_code}\n' -u admin:admin -X POST $S/snmp/disable   # 202
+curl -s -o /dev/null -w 'disable: %{http_code}\n' -u "$CAM_AUTH" -X POST $S/snmp/disable   # 202
 sleep 3; st                                                                                # snmp: disabled
-curl -s -o /dev/null -w 'idempotent: %{http_code}\n' -u admin:admin -X POST $S/snmp/disable # 202, no change
-curl -s -o /dev/null -w 'restart-disabled: %{http_code}\n' -u admin:admin -X POST $S/snmp/restart # 409
-curl -s -o /dev/null -w 'unknown: %{http_code}\n' -u admin:admin -X POST $S/nope/disable   # 404
-curl -s -o /dev/null -w 'wpa: %{http_code}\n' -u admin:admin -X POST $S/wpa_supplicant/disable # 404
-curl -s -o /dev/null -w 'enable: %{http_code}\n' -u admin:admin -X POST $S/snmp/enable     # 202
+curl -s -o /dev/null -w 'idempotent: %{http_code}\n' -u "$CAM_AUTH" -X POST $S/snmp/disable # 202, no change
+curl -s -o /dev/null -w 'restart-disabled: %{http_code}\n' -u "$CAM_AUTH" -X POST $S/snmp/restart # 409
+curl -s -o /dev/null -w 'unknown: %{http_code}\n' -u "$CAM_AUTH" -X POST $S/nope/disable   # 404
+curl -s -o /dev/null -w 'wpa: %{http_code}\n' -u "$CAM_AUTH" -X POST $S/wpa_supplicant/disable # 404
+curl -s -o /dev/null -w 'enable: %{http_code}\n' -u "$CAM_AUTH" -X POST $S/snmp/enable     # 202
 sleep 3; st                                                                                # snmp: running
 ```
 
@@ -2018,15 +2041,15 @@ Also confirm no `snmpd` appears in the raw process list while snmp is disabled, 
 - [ ] **Step 5: Verify persistence across a reboot**
 
 ```bash
-curl -s -o /dev/null -w '%{http_code}\n' -u admin:admin -X POST $S/snmp/disable   # 202
+curl -s -o /dev/null -w '%{http_code}\n' -u "$CAM_AUTH" -X POST $S/snmp/disable   # 202
 # Reboot: there is no reboot route, so re-upload the same bundle — the A/B
 # apply reboots the camera, which is what we need.
-curl -u admin:admin --fail -X PUT -H "Content-Type: application/octet-stream" \
-  --data-binary @bundle.tar http://192.168.2.198/api/update
+curl -u "$CAM_AUTH" --fail -X PUT -H "Content-Type: application/octet-stream" \
+  --data-binary @bundle.tar $CAM/api/update
 # wait for the camera as in Step 2, then:
 st   # snmp must still read "disabled" — proving the anyka.toml edit survived
      # both the reboot and the slot flip
-curl -s -o /dev/null -w '%{http_code}\n' -u admin:admin -X POST $S/snmp/enable   # restore
+curl -s -o /dev/null -w '%{http_code}\n' -u "$CAM_AUTH" -X POST $S/snmp/enable   # restore
 ```
 
 This is the only end-to-end check of §3's central claim (both slots read the same file). Do not skip it.
@@ -2036,14 +2059,14 @@ This is the only end-to-end check of §3's central claim (both slots read the sa
 This is the §2.1 regression check — the one that fails loudly if the heartbeat removal is missing.
 
 ```bash
-UP() { curl -s -u admin:admin http://192.168.2.198/api/diagnostics \
+UP() { curl -s -u "$CAM_AUTH" $CAM/api/diagnostics \
   | python3 -c 'import json,sys; print(json.load(sys.stdin)["uptime_s"])'; }
 UP
-curl -s -o /dev/null -w '%{http_code}\n' -u admin:admin -X POST $S/vendor-daemon/disable  # 202
+curl -s -o /dev/null -w '%{http_code}\n' -u "$CAM_AUTH" -X POST $S/vendor-daemon/disable  # 202
 sleep 600   # well past 5 monitor ticks
 UP          # must be MONOTONICALLY LARGER — a smaller value means it rebooted
 st          # vendor-daemon: disabled
-curl -s -o /dev/null -w '%{http_code}\n' -u admin:admin -X POST $S/vendor-daemon/enable
+curl -s -o /dev/null -w '%{http_code}\n' -u "$CAM_AUTH" -X POST $S/vendor-daemon/enable
 sleep 20; st  # vendor-daemon: running, video back
 ```
 
@@ -2056,11 +2079,11 @@ A drop in uptime here means the heartbeat file was not cleared — go back to Ta
 **Do this on a bench camera, or with physical access to the SD card. Do not run it on a remote `.198` you cannot walk to.**
 
 ```bash
-curl -s -o /dev/null -w '%{http_code}\n' -u admin:admin -X POST $S/onvif/disable
+curl -s -o /dev/null -w '%{http_code}\n' -u "$CAM_AUTH" -X POST $S/onvif/disable
 # 202, or a dropped connection — both mean it worked
 sleep 20
-curl -s -o /dev/null -w 'http:%{http_code}\n' --connect-timeout 3 http://192.168.2.198/   # expect 000
-ping -c 3 192.168.2.198   # the camera itself is still up
+curl -s -o /dev/null -w 'http:%{http_code}\n' --connect-timeout 3 $CAM/   # expect 000
+ping -c 3 "${CAM#http://}"   # the camera itself is still up
 ```
 
 Then recover: drop a bundle into `spool/` (FTP or SD card), or push a full SD payload — the latter replaces `anyka.toml` and resets every toggle to shipped defaults. Confirm `/api/diagnostics` returns 200 and `st` shows shipped defaults (`dropbear` disabled, the rest enabled).
@@ -2068,7 +2091,7 @@ Then recover: drop a bundle into `spool/` (FTP or SD card), or push a full SD pa
 - [ ] **Step 8: Final state + push**
 
 ```bash
-curl -s -u admin:admin http://192.168.2.198/api/diagnostics   # 200, services healthy
+curl -s -u "$CAM_AUTH" $CAM/api/diagnostics   # 200, services healthy
 st                                                            # shipped defaults
 rtk git status                                                # clean; no .vitest artifacts, no bundle.tar
 rtk git push

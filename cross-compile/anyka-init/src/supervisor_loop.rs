@@ -337,6 +337,23 @@ fn handle_service_exited(
         tracing::debug!(pid, ?st, "reaped an unknown child");
         return;
     };
+    // Only the service's *current* pid may drive its state machine.
+    //
+    // `disable` SIGTERMs the child and marks the service inert, but the exit
+    // report arrives up to a reap-poll later. Re-enabling inside that window
+    // starts a fresh pid while the old mapping is still in `by_pid`; without
+    // this check the stale exit would be charged to the new instance —
+    // recording a restart it never had, knocking it into backoff, and letting
+    // the next tick spawn a second copy alongside the one already running.
+    if services[i].state.pid() != Some(pid) {
+        tracing::debug!(
+            service = %services[i].name,
+            pid,
+            ?st,
+            "ignoring an exit from a superseded pid"
+        );
+        return;
+    }
     tracing::warn!(service = %services[i].name, pid, ?st, "service exited");
     let now = sys.now();
     let state = services[i].state;
@@ -535,7 +552,11 @@ fn handle_control_conn(mut stream: UnixStream, tx: &Sender<Msg>) -> std::io::Res
         Some(control::Request::Status) => {
             let (reply_tx, reply_rx) = channel();
             if tx.send(Msg::QueryStatus(reply_tx)).is_ok() {
-                let reply = reply_rx.recv();
+                // Bounded like `send_toggle`. This thread serves connections
+                // one at a time, so an unbounded wait on a wedged loop would
+                // not just hang this status call — every later status,
+                // restart, enable and disable would queue behind it forever.
+                let reply = reply_rx.recv_timeout(CONTROL_REPLY_TIMEOUT);
                 if let Ok(ControlMsg::Status(rows)) = reply {
                     let _ = stream.write_all(control::encode_status(&rows).as_bytes());
                 }
@@ -556,12 +577,15 @@ fn handle_control_conn(mut stream: UnixStream, tx: &Sender<Msg>) -> std::io::Res
     Ok(())
 }
 
+/// How long the control thread waits for the supervisor loop to answer.
+///
+/// Deliberately below the client's 2 s socket timeout
+/// (`onvif-rust/src/diagnostics/services.rs`): answering later than the client
+/// waits turns every slow reply into a connection error.
+const CONTROL_REPLY_TIMEOUT: Duration = Duration::from_secs(1);
+
 /// Ask the loop to toggle a service and write its verdict back to the
 /// connection.
-///
-/// The 1 s budget is deliberately below the client's 2 s socket timeout
-/// (`onvif-rust/src/diagnostics/services.rs`): if we answered later than the
-/// client waits, an applied-and-persisted toggle would surface as a 503.
 fn send_toggle<W: std::io::Write>(writer: &mut W, tx: &Sender<Msg>, name: String, enabled: bool) {
     let (reply_tx, reply_rx) = channel();
     let sent = tx.send(Msg::ToggleService {
@@ -569,16 +593,25 @@ fn send_toggle<W: std::io::Write>(writer: &mut W, tx: &Sender<Msg>, name: String
         enabled,
         reply: reply_tx,
     });
-    let outcome = match sent {
-        Ok(()) => reply_rx
-            .recv_timeout(Duration::from_secs(1))
-            .unwrap_or(control::ToggleOutcome::Error),
-        Err(_) => control::ToggleOutcome::Error,
-    };
-    let reply = match outcome {
-        control::ToggleOutcome::Ok => "ok\n",
-        control::ToggleOutcome::Unknown => "unknown\n",
-        control::ToggleOutcome::Error => "error\n",
+    let reply = match sent {
+        // A timeout is NOT a failure. The message is still queued, and
+        // `handle_toggle_service` writes `anyka.toml` and updates state
+        // *before* it replies — dropping the receiver cancels nothing. Saying
+        // "error" here would tell an admin nothing changed while the toggle
+        // lands a moment later. `pending` says what is actually true: it was
+        // accepted, the outcome is unconfirmed, go look at the service list.
+        Ok(()) => match reply_rx.recv_timeout(CONTROL_REPLY_TIMEOUT) {
+            Ok(control::ToggleOutcome::Ok) => "ok\n",
+            Ok(control::ToggleOutcome::Unknown) => "unknown\n",
+            Ok(control::ToggleOutcome::Error) => "error\n",
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                tracing::warn!("toggle reply timed out; the change may still apply");
+                "pending\n"
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => "error\n",
+        },
+        // The loop is gone entirely (reboot in progress): nothing was queued.
+        Err(_) => "error\n",
     };
     let _ = writer.write_all(reply.as_bytes());
 }
@@ -587,7 +620,16 @@ pub fn spawn_control_thread(tx: Sender<Msg>) -> std::io::Result<()> {
     let socket_path = control::SOCKET_PATH;
     let _ = std::fs::remove_file(socket_path);
     let listener = UnixListener::bind(socket_path)?;
-    let _ = std::fs::set_permissions(socket_path, std::fs::Permissions::from_mode(0o600));
+    // Not best-effort: this socket accepts restart/enable/disable. If it stays
+    // world-writable the toggles are open to any local process, so a failure
+    // here has to be visible rather than swallowed.
+    if let Err(e) = std::fs::set_permissions(socket_path, std::fs::Permissions::from_mode(0o600)) {
+        tracing::error!(
+            error = %e,
+            path = socket_path,
+            "could not restrict the control socket; it may be reachable by other local users"
+        );
+    }
 
     std::thread::Builder::new()
         .name("supervisor-ctl".into())
@@ -1006,6 +1048,88 @@ mod run_tests {
             log: "/nonexistent/svc.log".into(),
             core_dump: false,
         }
+    }
+
+    #[test]
+    fn test_handle_service_exited_ignores_a_superseded_pid() {
+        // The disable -> re-enable race: the old pid was SIGTERM'd and its
+        // mapping is still in by_pid when the service is already running again
+        // under a new pid. Charging that stale exit to the new instance would
+        // record a restart it never had, knock it into backoff, and let the
+        // next tick spawn a second copy beside the one already running.
+        let mut sys = MockSys::new();
+        sys.expect_now().returning(Instant::now);
+        let cfg = test_config(BTreeMap::new());
+
+        let running_since = Instant::now();
+        let mut services = vec![Service {
+            name: "snmp".into(),
+            spec: dummy_spec(),
+            state: SvcState::Running {
+                pid: 200,
+                since: running_since,
+            },
+            hist: RestartHistory::default(),
+        }];
+        let mut by_pid = BTreeMap::new();
+        by_pid.insert(100, 0); // the superseded pid
+        by_pid.insert(200, 0);
+
+        handle_service_exited(
+            &sys,
+            &cfg,
+            &mut services,
+            &mut by_pid,
+            &test_policy(),
+            100,
+            ExitStatus::Code(0),
+        );
+
+        // Still running under the new pid, no crash recorded, and the stale
+        // mapping is gone.
+        assert_eq!(
+            services[0].state,
+            SvcState::Running {
+                pid: 200,
+                since: running_since
+            }
+        );
+        assert_eq!(services[0].hist.len(), 0);
+        assert!(!by_pid.contains_key(&100));
+        assert_eq!(by_pid.get(&200), Some(&0));
+    }
+
+    #[test]
+    fn test_handle_service_exited_still_handles_the_current_pid() {
+        // The guard must not swallow the normal case.
+        let mut sys = MockSys::new();
+        sys.expect_now().returning(Instant::now);
+        let cfg = test_config(BTreeMap::new());
+
+        let mut services = vec![Service {
+            name: "snmp".into(),
+            spec: dummy_spec(),
+            state: SvcState::Running {
+                pid: 200,
+                since: Instant::now(),
+            },
+            hist: RestartHistory::default(),
+        }];
+        let mut by_pid = BTreeMap::new();
+        by_pid.insert(200, 0);
+
+        handle_service_exited(
+            &sys,
+            &cfg,
+            &mut services,
+            &mut by_pid,
+            &test_policy(),
+            200,
+            ExitStatus::Code(1),
+        );
+
+        assert!(matches!(services[0].state, SvcState::Backoff { .. }));
+        assert!(by_pid.is_empty());
     }
 
     /// Mirrors the `Policy` that `run` builds from `test_config`.
