@@ -38,18 +38,32 @@ import {
 import { TIMEZONES } from '@/utils/timezones';
 
 // Validation Schema
-const timeSchema = z.object({
-  mode: z.enum(['ntp', 'manual']),
-  // `min(1)` would accept the [''] an empty textarea produces: the submit
-  // handler drops the blank, calls setNtp([]), and the operator gets a save
-  // error instead of a field error. Validate what actually gets sent.
-  ntpServers: z.array(z.string()).refine((v) => v.some((s) => s.trim().length > 0), {
-    message: 'At least one NTP server is required',
-  }),
-  timezone: z.string().min(1, 'Timezone is required'),
-  manualDate: z.string().optional(),
-  manualTime: z.string().optional(),
-});
+//
+// The server requirement is object-level and NTP-only on purpose. A field-level
+// rule would also fire in Manual mode, where the NTP panel is hidden — so a
+// camera that reports no servers (or a failed GetNTP) would block the operator
+// from saving a manual time against an error they cannot even see.
+//
+// It is a refinement rather than `min(1)` because an empty textarea yields
+// [''], which `min(1)` accepts; the submit handler then drops the blank and
+// calls setNtp([]), turning a field error into a save error.
+const timeSchema = z
+  .object({
+    mode: z.enum(['ntp', 'manual']),
+    ntpServers: z.array(z.string()),
+    timezone: z.string().min(1, 'Timezone is required'),
+    manualDate: z.string().optional(),
+    manualTime: z.string().optional(),
+  })
+  .superRefine((values, ctx) => {
+    if (values.mode === 'ntp' && !values.ntpServers.some((s) => s.trim().length > 0)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['ntpServers'],
+        message: 'At least one NTP server is required',
+      });
+    }
+  });
 
 type TimeFormData = z.infer<typeof timeSchema>;
 
@@ -189,13 +203,13 @@ export default function TimePage() {
   // setDateTime promise, so a rejected write still reported success, never
   // invalidated `timeConfig`, and switched the camera to Manual while the
   // form still showed NTP selected.
-  const handleSyncComputer = () => {
+  const handleSyncComputer = React.useCallback(() => {
     const now = new Date();
     const opts = { shouldDirty: true } as const;
     form.setValue('mode', 'manual', opts);
     form.setValue('manualDate', now.toISOString().split('T')[0], opts);
     form.setValue('manualTime', now.toTimeString().split(' ')[0], opts);
-  };
+  }, [form]);
 
   if (isLoading)
     return (

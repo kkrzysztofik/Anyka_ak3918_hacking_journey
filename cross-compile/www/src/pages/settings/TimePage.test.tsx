@@ -259,6 +259,25 @@ describe('TimePage', () => {
     });
   });
 
+  it('should save manual time even when the camera reports no NTP servers', async () => {
+    // The NTP panel is hidden in Manual mode, so a server requirement that
+    // fired here would block the save against an invisible field error.
+    vi.mocked(getNtp).mockResolvedValue([]);
+    vi.mocked(getDateTime).mockResolvedValue({ ...mockTimeConfig, ntp: { enabled: false } });
+    const user = userEvent.setup();
+
+    await renderTimePage();
+    // Save is gated on isDirty, so edit the field the operator would edit.
+    fireEvent.change(screen.getByTestId('time-page-manual-time-input'), {
+      target: { value: '10:11:12' },
+    });
+    await user.click(screen.getByTestId('time-page-save-button'));
+
+    await waitFor(() => {
+      expect(setDateTime).toHaveBeenCalled();
+    });
+  });
+
   it('should send every listed NTP server', async () => {
     const user = userEvent.setup();
     await renderTimePage();
