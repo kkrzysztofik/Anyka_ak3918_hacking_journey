@@ -113,6 +113,20 @@ pub fn request_toggle(path: &Path, name: &str, enabled: bool) -> ToggleReply {
     }
 }
 
+/// Blocking. Sends `set-ntp <s1> <s2>…` to the supervisor, which owns
+/// `anyka.toml`. Servers must already be validated by the caller.
+pub fn request_set_ntp(path: &Path, servers: &[String]) -> ToggleReply {
+    match round_trip(path, &format!("set-ntp {}\n", servers.join(" "))) {
+        None => ToggleReply::Unreachable,
+        Some(r) => match r.trim() {
+            "ok" => ToggleReply::Accepted,
+            "unknown" => ToggleReply::Unknown,
+            "pending" => ToggleReply::Pending,
+            _ => ToggleReply::Error,
+        },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -291,6 +305,48 @@ mod tests {
         let missing = std::path::Path::new("/tmp/definitely-not-a-socket-xyz.sock");
         assert_eq!(
             request_toggle(missing, "snmp", true),
+            ToggleReply::Unreachable
+        );
+    }
+
+    #[test]
+    fn test_request_set_ntp_sends_space_separated_servers() {
+        use std::os::unix::net::UnixListener;
+
+        let path = format!("/tmp/onvif-ntp-verb-{}.sock", std::process::id());
+        let _ = std::fs::remove_file(&path);
+        let listener = UnixListener::bind(&path).expect("bind");
+        let server_path = path.clone();
+        let server = std::thread::spawn(move || {
+            use std::io::{BufRead, Write};
+            let mut seen = Vec::new();
+            for stream in listener.incoming().take(1) {
+                let Ok(mut stream) = stream else { break };
+                let mut line = String::new();
+                let _ = std::io::BufReader::new(&stream).read_line(&mut line);
+                seen.push(line);
+                let _ = stream.write_all(b"ok\n");
+            }
+            drop(listener);
+            let _ = std::fs::remove_file(&server_path);
+            seen
+        });
+
+        let p = std::path::Path::new(&path);
+        assert_eq!(
+            request_set_ntp(p, &["a.example".into(), "192.168.2.1".into()]),
+            ToggleReply::Accepted
+        );
+        let seen = server.join().expect("server thread");
+        assert_eq!(seen, vec!["set-ntp a.example 192.168.2.1\n"]);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn test_request_set_ntp_on_a_missing_socket_is_unreachable() {
+        let missing = std::path::Path::new("/tmp/definitely-not-a-socket-xyz.sock");
+        assert_eq!(
+            request_set_ntp(missing, &["a.example".into()]),
             ToggleReply::Unreachable
         );
     }

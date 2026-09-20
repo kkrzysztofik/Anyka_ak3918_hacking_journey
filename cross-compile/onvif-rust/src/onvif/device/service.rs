@@ -555,7 +555,11 @@ impl ServiceHandler for DeviceService {
 
             "SetNTP" => {
                 dispatch_async(body_xml, |request: SetNTP| async move {
-                    network_ops::handle_set_ntp(request).await
+                    network_ops::handle_set_ntp(
+                        std::path::Path::new(crate::diagnostics::services::SOCKET_PATH),
+                        request,
+                    )
+                    .await
                 })
                 .await
             }
