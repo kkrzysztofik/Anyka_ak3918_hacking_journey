@@ -55,6 +55,12 @@ pub enum Msg {
         enabled: bool,
         reply: Sender<control::ToggleOutcome>,
     },
+    /// Replace `[time].servers`. Persists to `anyka.toml` first, then updates
+    /// in-memory state, the same order as `ToggleService`.
+    SetNtpServers {
+        servers: Vec<String>,
+        reply: Sender<control::ToggleOutcome>,
+    },
 }
 
 struct Service {
@@ -435,6 +441,25 @@ const NON_TOGGLEABLE: [&str; 1] = ["wpa_supplicant"];
 /// `telnetd` is special-cased before any service lookup: it is not a
 /// supervised service, it is the `[system].telnet` switch (see
 /// `handle_toggle_telnet`).
+/// Replace `[time].servers`: persist to `anyka.toml` first, then update the
+/// in-memory config, the same visible order as `handle_toggle_service` — a
+/// failed write leaves memory untouched so the two can never disagree.
+fn handle_set_ntp(
+    cfg: &mut Config,
+    config_path: &Path,
+    servers: Vec<String>,
+    reply: &Sender<control::ToggleOutcome>,
+) {
+    if let Err(e) = Config::set_time_servers(config_path, &servers) {
+        tracing::error!(error = %e, "set-ntp: config write failed; not applied");
+        let _ = reply.send(control::ToggleOutcome::Error);
+        return;
+    }
+    tracing::info!(?servers, "NTP servers updated");
+    cfg.time.servers = servers;
+    let _ = reply.send(control::ToggleOutcome::Ok);
+}
+
 fn handle_toggle_service(
     ctx: &mut LoopCtx<'_>,
     services: &mut Vec<Service>,
@@ -570,6 +595,30 @@ fn handle_control_conn(mut stream: UnixStream, tx: &Sender<Msg>) -> std::io::Res
         }
         Some(control::Request::Enable(name)) => send_toggle(&mut stream, tx, name, true),
         Some(control::Request::Disable(name)) => send_toggle(&mut stream, tx, name, false),
+        Some(control::Request::SetNtp(servers)) => {
+            let (reply_tx, reply_rx) = channel();
+            if tx.send(Msg::SetNtpServers {
+                servers,
+                reply: reply_tx,
+            }).is_err()
+            {
+                let _ = stream.write_all(b"error\n");
+                return Ok(());
+            }
+            // Same reply semantics as `send_toggle`: a timeout is `pending`,
+            // not `error` — the message is still queued and may still apply.
+            let reply = match reply_rx.recv_timeout(CONTROL_REPLY_TIMEOUT) {
+                Ok(control::ToggleOutcome::Ok) => "ok\n",
+                Ok(control::ToggleOutcome::Unknown) => "unknown\n",
+                Ok(control::ToggleOutcome::Error) => "error\n",
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                    tracing::warn!("set-ntp reply timed out; the change may still apply");
+                    "pending\n"
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => "error\n",
+            };
+            let _ = stream.write_all(reply.as_bytes());
+        }
         None => {
             let _ = stream.write_all(b"unknown\n");
         }
@@ -692,6 +741,10 @@ fn dispatch_msg(
             reply,
         }) => {
             handle_toggle_service(ctx, services, name, enabled, &reply);
+            false
+        }
+        Ok(Msg::SetNtpServers { servers, reply }) => {
+            handle_set_ntp(ctx.cfg, ctx.config_path, servers, &reply);
             false
         }
         Ok(Msg::Shutdown) => {
@@ -986,6 +1039,7 @@ mod run_tests {
         WifiCfg,
     };
     use crate::sys::{MockSys, SysError};
+    use std::str::FromStr;
 
     fn minimal_wifi_cfg() -> WifiCfg {
         WifiCfg {
@@ -1494,6 +1548,61 @@ mod run_tests {
         let ControlMsg::Status(rows) = rx.recv().expect("status");
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].state, "backoff");
+    }
+
+    /// A minimal config that parses under `deny_unknown_fields`.
+    fn minimal_config() -> Config {
+        Config::from_str("[wifi]\nssid = \"t\"\npassword = \"p\"\n").expect("parses")
+    }
+
+    #[test]
+    fn test_handle_set_ntp_writes_the_file_then_memory() {
+        let dir = tempfile::tempdir().unwrap();
+        let cfg_path = dir.path().join("anyka.toml");
+        std::fs::write(&cfg_path, "[time]\nservers = [\"old.example\"]\n").unwrap();
+
+        let mut cfg = minimal_config();
+        cfg.time.servers = vec!["old.example".into()];
+        let (reply_tx, reply_rx) = channel();
+
+        handle_set_ntp(&mut cfg, &cfg_path, vec!["new.example".into()], &reply_tx);
+
+        assert_eq!(reply_rx.try_recv(), Ok(control::ToggleOutcome::Ok));
+        assert_eq!(cfg.time.servers, vec!["new.example".to_string()]);
+        let text = std::fs::read_to_string(&cfg_path).unwrap();
+        assert!(text.contains("servers = [\"new.example\"]"));
+    }
+
+    #[test]
+    fn test_handle_set_ntp_leaves_memory_alone_when_the_write_fails() {
+        let mut cfg = minimal_config();
+        cfg.time.servers = vec!["old.example".into()];
+        let (reply_tx, reply_rx) = channel();
+
+        handle_set_ntp(
+            &mut cfg,
+            Path::new("/nonexistent/anyka.toml"),
+            vec!["new.example".into()],
+            &reply_tx,
+        );
+
+        assert_eq!(reply_rx.try_recv(), Ok(control::ToggleOutcome::Error));
+        assert_eq!(cfg.time.servers, vec!["old.example".to_string()]);
+    }
+
+    #[test]
+    fn test_handle_set_ntp_rejects_a_bad_server_without_touching_the_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let cfg_path = dir.path().join("anyka.toml");
+        let original = "[time]\nservers = [\"old.example\"]\n";
+        std::fs::write(&cfg_path, original).unwrap();
+
+        let mut cfg = minimal_config();
+        let (reply_tx, reply_rx) = channel();
+        handle_set_ntp(&mut cfg, &cfg_path, vec!["bad host".into()], &reply_tx);
+
+        assert_eq!(reply_rx.try_recv(), Ok(control::ToggleOutcome::Error));
+        assert_eq!(std::fs::read_to_string(&cfg_path).unwrap(), original);
     }
 
     #[test]

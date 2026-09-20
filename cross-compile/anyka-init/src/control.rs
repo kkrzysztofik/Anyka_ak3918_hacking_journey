@@ -80,11 +80,13 @@ pub enum Request {
     Restart(String),
     Enable(String),
     Disable(String),
+    /// Replace `[time].servers`. One or more whitespace-separated hosts.
+    SetNtp(Vec<String>),
 }
 
 /// Parse one line: `"status\n"`, `"restart <name>\n"`, `"enable <name>\n"`,
-/// `"disable <name>\n"`. Blank or tab-bearing names are rejected; unknown
-/// verbs are `None`.
+/// `"disable <name>\n"`, `"set-ntp <s1> [s2…]\n"`. Blank or tab-bearing names
+/// are rejected; unknown verbs are `None`.
 pub fn parse_request(line: &str) -> Option<Request> {
     let line = line.trim_end_matches(['\r', '\n']);
     if line == "status" {
@@ -99,6 +101,13 @@ pub fn parse_request(line: &str) -> Option<Request> {
         "restart" => Some(Request::Restart(name.to_owned())),
         "enable" => Some(Request::Enable(name.to_owned())),
         "disable" => Some(Request::Disable(name.to_owned())),
+        "set-ntp" => {
+            let servers: Vec<String> = name.split_whitespace().map(str::to_owned).collect();
+            if servers.is_empty() {
+                return None;
+            }
+            Some(Request::SetNtp(servers))
+        }
         _ => None,
     }
 }
@@ -236,6 +245,24 @@ mod tests {
     fn test_parse_request_toggle_rejects_blank_or_tabbed_names() {
         assert_eq!(parse_request("disable \n"), None);
         assert_eq!(parse_request("enable a\tb\n"), None);
+    }
+
+    #[test]
+    fn test_parse_request_set_ntp_takes_one_or_more_servers() {
+        assert_eq!(
+            parse_request("set-ntp a.example\n"),
+            Some(Request::SetNtp(vec!["a.example".into()]))
+        );
+        assert_eq!(
+            parse_request("set-ntp a.example 192.168.2.1\n"),
+            Some(Request::SetNtp(vec!["a.example".into(), "192.168.2.1".into()]))
+        );
+    }
+
+    #[test]
+    fn test_parse_request_set_ntp_rejects_empty_and_tabs() {
+        assert_eq!(parse_request("set-ntp \n"), None);
+        assert_eq!(parse_request("set-ntp a\tb\n"), None);
     }
 
     #[test]
