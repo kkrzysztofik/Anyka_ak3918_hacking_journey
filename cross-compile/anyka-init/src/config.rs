@@ -389,20 +389,19 @@ fn default_trial_ports() -> Vec<u16> {
     crate::update::TRIAL_PORTS.to_vec()
 }
 
-/// Line-level edit of `enabled =` under `[services.<name>]`.
+/// Line-level edit of `key = <raw>` under `section`, where `raw` is already
+/// encoded TOML (`true`, `"text"`, `["a", "b"]`).
 ///
-/// Only the one boolean line changes — comments, ordering and formatting
-/// everywhere else survive byte-for-byte, which a TOML round-trip cannot
-/// guarantee. That matters because this file is the operator's: hand-edited,
-/// comment-rich, and holding the Wi-Fi credentials.
-pub fn set_bool_in_text(
+/// Only the one line changes — comments, ordering and formatting everywhere
+/// else survive byte-for-byte, which a TOML round-trip cannot guarantee. That
+/// matters because this file is the operator's: hand-edited, comment-rich, and
+/// holding the Wi-Fi credentials.
+pub fn set_value_in_text(
     text: &str,
     section: &str,
     key: &str,
-    enabled: bool,
+    raw: &str,
 ) -> Result<String, ConfigError> {
-    let value = if enabled { "true" } else { "false" };
-
     // Preserve the file's line ending. Splitting on '\n' alone would leave a
     // '\r' on every existing line while the rewritten one has none, producing
     // a mixed-ending file out of a CRLF original.
@@ -422,13 +421,23 @@ pub fn set_bool_in_text(
         .unwrap_or(out.len());
 
     let Some(i) = (hdr + 1..end).find(|&i| line_key(&out[i]).is_some_and(|k| k == key)) else {
-        out.insert(hdr + 1, format!("{key} = {value}"));
+        out.insert(hdr + 1, format!("{key} = {raw}"));
         return verified(out.join(nl), section, key);
     };
     // Preserve the line's indentation, change only the value.
     let lead: String = out[i].chars().take_while(|c| c.is_whitespace()).collect();
-    out[i] = format!("{lead}{key} = {value}");
+    out[i] = format!("{lead}{key} = {raw}");
     verified(out.join(nl), section, key)
+}
+
+/// Line-level edit of a boolean, e.g. `enabled =` under `[services.<name>]`.
+pub fn set_bool_in_text(
+    text: &str,
+    section: &str,
+    key: &str,
+    enabled: bool,
+) -> Result<String, ConfigError> {
+    set_value_in_text(text, section, key, if enabled { "true" } else { "false" })
 }
 
 /// A line with any trailing `# comment` removed, trimmed. Lets
@@ -1356,6 +1365,47 @@ password = "overlaypass"
             Err(ConfigError::Invalid(m)) => assert!(m.contains("invalid TOML"), "{m}"),
             other => panic!("expected refusal, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn test_set_value_in_text_writes_an_array_and_keeps_comments() {
+        let src = "\
+# the operator's note, must survive
+[time]
+# IP first, deliberately
+servers = [\"192.168.2.1\"]
+timezone = \"UTC0\"
+";
+        let out =
+            set_value_in_text(src, "[time]", "servers", "[\"a.example\", \"b.example\"]")
+                .expect("edit must succeed");
+        assert!(out.contains("servers = [\"a.example\", \"b.example\"]"));
+        assert!(out.contains("# the operator's note, must survive"));
+        assert!(out.contains("# IP first, deliberately"));
+        assert!(out.contains("timezone = \"UTC0\""));
+    }
+
+    #[test]
+    fn test_set_value_in_text_preserves_crlf() {
+        let src = "[time]\r\nservers = [\"old\"]\r\n";
+        let out = set_value_in_text(src, "[time]", "servers", "[\"new\"]").unwrap();
+        assert!(out.contains("servers = [\"new\"]\r\n"));
+        assert!(!out.contains("servers = [\"new\"]\n\r"));
+    }
+
+    #[test]
+    fn test_set_value_in_text_rejects_an_edit_that_breaks_toml() {
+        // `verified()` must catch a raw value that is not valid TOML.
+        let src = "[time]\nservers = [\"old\"]\n";
+        let err = set_value_in_text(src, "[time]", "servers", "[\"unterminated]");
+        assert!(err.is_err(), "a malformed raw value must be refused, not written");
+    }
+
+    #[test]
+    fn test_set_bool_in_text_still_works_after_generalization() {
+        let src = "[services.snmp]\nenabled = false\n";
+        let out = set_bool_in_text(src, "[services.snmp]", "enabled", true).unwrap();
+        assert!(out.contains("enabled = true"));
     }
 
     #[test]
