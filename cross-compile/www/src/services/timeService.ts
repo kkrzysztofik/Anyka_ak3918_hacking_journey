@@ -148,7 +148,9 @@ export async function getNtp(): Promise<string[]> {
   );
 
   const raw = (data?.NTPInformation as Record<string, unknown> | undefined)?.NTPManual;
-  const entries = raw === undefined || raw === null ? [] : Array.isArray(raw) ? raw : [raw];
+  // fast-xml-parser collapses a one-element list to a bare object.
+  const present = raw ?? [];
+  const entries = Array.isArray(present) ? present : [present];
   return entries
     .map((entry) => {
       const e = entry as Record<string, unknown>;
@@ -161,8 +163,8 @@ export async function getNtp(): Promise<string[]> {
 // Octet-accurate on purpose: `\d{1,3}` alone accepts 999.999.999.999 and
 // would ship it as <tt:IPv4Address>, which the camera rejects, instead of
 // letting it through as a (also invalid, but correctly typed) DNS name.
-const IPV4_OCTET = '(?:25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)';
-const IPV4_RE = new RegExp(`^${IPV4_OCTET}(?:\\.${IPV4_OCTET}){3}$`);
+const IPV4_OCTET = String.raw`(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)`;
+const IPV4_RE = new RegExp(String.raw`^${IPV4_OCTET}(?:\.${IPV4_OCTET}){3}$`);
 
 /**
  * Set the NTP server list. One `<tds:NTPManual>` per server; an IPv4 literal

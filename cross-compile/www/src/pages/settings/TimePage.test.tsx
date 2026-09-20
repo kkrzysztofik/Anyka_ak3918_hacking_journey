@@ -125,9 +125,7 @@ describe('TimePage', () => {
       renderWithProviders(<TimePage />);
       await flush();
 
-      await act(async () => {
-        fireEvent.click(screen.getByTestId('time-page-use-computer-time'));
-      });
+      fireEvent.click(screen.getByTestId('time-page-use-computer-time'));
 
       expect(screen.getByTestId('time-page-manual-date-input')).toHaveValue('2026-09-20');
       expect(screen.getByTestId('time-page-manual-time-input')).toHaveValue('12:34:56');

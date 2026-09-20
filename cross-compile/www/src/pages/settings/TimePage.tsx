@@ -112,6 +112,16 @@ export default function TimePage() {
   const deviceTime = offsetMs === null ? null : new Date(now + offsetMs);
   const clockIsStale = deviceTime !== null && deviceTime.getUTCFullYear() < 2020;
 
+  // Three states, not two: an absent block means the camera cannot tell us
+  // (NTP off, no status file, older supervisor), which is not the same as a
+  // sync that has never succeeded.
+  const ntpStatus = diagnostics?.time ?? null;
+  const syncedUnix = ntpStatus?.last_sync_unix ?? null;
+  let syncState: 'unknown' | 'never' | 'synced' = 'unknown';
+  if (ntpStatus !== null) {
+    syncState = syncedUnix === null ? 'never' : 'synced';
+  }
+
   const form = useForm<TimeFormData>({
     resolver: zodResolver(timeSchema),
     defaultValues: {
@@ -156,8 +166,7 @@ export default function TimePage() {
   useEffect(() => {
     if (
       config?.ntp.enabled &&
-      diagnostics?.time &&
-      diagnostics.time.last_sync_unix === null &&
+      diagnostics?.time?.last_sync_unix === null &&
       !warnedNoSync.current
     ) {
       warnedNoSync.current = true;
@@ -391,34 +400,29 @@ export default function TimePage() {
                       data-testid="time-sync-status"
                       aria-live="polite"
                     >
-                      {/* Three states, not two: an absent block means the
-                          camera cannot tell us (NTP off, no status file, older
-                          supervisor), which is not the same as a sync that has
-                          never succeeded. */}
-                      {!diagnostics?.time ? (
+                      {syncState === 'unknown' && (
                         <div className="text-[14px] text-[#a1a1a6]" data-testid="time-sync-unknown">
                           Sync status unavailable.
                         </div>
-                      ) : diagnostics.time.last_sync_unix === null ? (
+                      )}
+                      {syncState === 'never' && (
                         <div className="text-[14px] text-[#ff9f0a]" data-testid="time-no-sync">
                           No NTP sync has completed yet.
                         </div>
-                      ) : (
+                      )}
+                      {ntpStatus !== null && syncedUnix !== null && (
                         <>
                           <div className="text-[14px] text-white" data-testid="time-sync-state">
-                            Last sync:{' '}
-                            {new Date(diagnostics.time.last_sync_unix * 1000).toLocaleString()}
-                            {diagnostics.time.last_server
-                              ? ` via ${diagnostics.time.last_server}`
-                              : ''}
+                            Last sync: {new Date(syncedUnix * 1000).toLocaleString()}
+                            {ntpStatus.last_server ? ` via ${ntpStatus.last_server}` : ''}
                           </div>
-                          {diagnostics.time.last_delta_s !== null && (
+                          {ntpStatus.last_delta_s !== null && (
                             <div
                               className="text-[13px] text-[#a1a1a6]"
                               data-testid="time-sync-offset"
                             >
-                              Clock offset: {diagnostics.time.last_delta_s >= 0 ? '+' : ''}
-                              {diagnostics.time.last_delta_s}s
+                              Clock offset: {ntpStatus.last_delta_s >= 0 ? '+' : ''}
+                              {ntpStatus.last_delta_s}s
                             </div>
                           )}
                         </>
