@@ -227,7 +227,7 @@ rtk cargo clippy --target x86_64-unknown-linux-gnu -p onvif-rust -- -D warnings
 **Step 3: Device smoke (optional, if 198 up)**
 
 1. Restart or wait until main lacks SPS (hard to force); or temporarily verify logs on next cold boot.
-2. `curl -u admin:admin -m 3 http://192.168.2.198:8080/live/main.flv` while SPS missing → connection fails/ends quickly (not 200/0-byte hang).
+2. `curl -u "admin:$CAMERA_PASS" -m 3 http://192.168.2.198:8080/live/main.flv` while SPS missing → connection fails/ends quickly (not 200/0-byte hang).
 3. After IDR fills cache → FLV `FLV` magic + bytes; RTSP `/main` still works.
 
 ---

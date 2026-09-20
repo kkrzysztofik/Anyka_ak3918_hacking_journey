@@ -44,7 +44,7 @@
 
   ```bash
   export CAM=http://<camera-ip>
-  export CAM_AUTH=<user>:<password>
+  export CAMERA_PASS='<Administrator password from the secret store>'
   ```
 
   Telnet (24) is dead by design on healthy boots; FTP (21) is up but both known credential pairs were refused in the 2026-09-19 session — assume **no shell access on a healthy boot**.
@@ -1991,7 +1991,7 @@ Verify the manifest lists `anyka-init.bin`, `onvif-rust.bin`, and the `www` bund
 - [ ] **Step 2: Upload and monitor the trial**
 
 ```bash
-curl -u "$CAM_AUTH" --fail -X PUT \
+curl -u "admin:$CAMERA_PASS" --fail -X PUT \
   -H "Content-Type: application/octet-stream" \
   --data-binary @bundle.tar \
   $CAM/api/update
@@ -2002,7 +2002,7 @@ Expected: `202`. The camera reboots into the new slot; the trial (onvif still en
 ```bash
 for i in $(seq 1 30); do
   sleep 10
-  code=$(curl -s -o /dev/null -w '%{http_code}' -u "$CAM_AUTH" $CAM/api/diagnostics)
+  code=$(curl -s -o /dev/null -w '%{http_code}' -u "admin:$CAMERA_PASS" $CAM/api/diagnostics)
   echo "t+$((i*10))s: $code"
   [ "$code" = "200" ] && break
 done
@@ -2013,7 +2013,7 @@ If the camera never returns (trial revert → old slot), the old slot still has 
 - [ ] **Step 3: Verify status includes disabled services**
 
 ```bash
-curl -s -u "$CAM_AUTH" $CAM/api/processes \
+curl -s -u "admin:$CAMERA_PASS" $CAM/api/processes \
   | python3 -c 'import json,sys; [print(r["name"], r["state"], r["pid"]) for r in json.load(sys.stdin)["supervised"]]'
 ```
 
@@ -2023,16 +2023,16 @@ Expected: rows for all six configured services; `dropbear` shows `disabled` with
 
 ```bash
 S=$CAM/api/services
-st() { curl -s -u "$CAM_AUTH" $CAM/api/processes \
+st() { curl -s -u "admin:$CAMERA_PASS" $CAM/api/processes \
   | python3 -c 'import json,sys; print({r["name"]: r["state"] for r in json.load(sys.stdin)["supervised"]})'; }
 
-curl -s -o /dev/null -w 'disable: %{http_code}\n' -u "$CAM_AUTH" -X POST $S/snmp/disable   # 202
+curl -s -o /dev/null -w 'disable: %{http_code}\n' -u "admin:$CAMERA_PASS" -X POST $S/snmp/disable   # 202
 sleep 3; st                                                                                # snmp: disabled
-curl -s -o /dev/null -w 'idempotent: %{http_code}\n' -u "$CAM_AUTH" -X POST $S/snmp/disable # 202, no change
-curl -s -o /dev/null -w 'restart-disabled: %{http_code}\n' -u "$CAM_AUTH" -X POST $S/snmp/restart # 409
-curl -s -o /dev/null -w 'unknown: %{http_code}\n' -u "$CAM_AUTH" -X POST $S/nope/disable   # 404
-curl -s -o /dev/null -w 'wpa: %{http_code}\n' -u "$CAM_AUTH" -X POST $S/wpa_supplicant/disable # 404
-curl -s -o /dev/null -w 'enable: %{http_code}\n' -u "$CAM_AUTH" -X POST $S/snmp/enable     # 202
+curl -s -o /dev/null -w 'idempotent: %{http_code}\n' -u "admin:$CAMERA_PASS" -X POST $S/snmp/disable # 202, no change
+curl -s -o /dev/null -w 'restart-disabled: %{http_code}\n' -u "admin:$CAMERA_PASS" -X POST $S/snmp/restart # 409
+curl -s -o /dev/null -w 'unknown: %{http_code}\n' -u "admin:$CAMERA_PASS" -X POST $S/nope/disable   # 404
+curl -s -o /dev/null -w 'wpa: %{http_code}\n' -u "admin:$CAMERA_PASS" -X POST $S/wpa_supplicant/disable # 404
+curl -s -o /dev/null -w 'enable: %{http_code}\n' -u "admin:$CAMERA_PASS" -X POST $S/snmp/enable     # 202
 sleep 3; st                                                                                # snmp: running
 ```
 
@@ -2041,15 +2041,15 @@ Also confirm no `snmpd` appears in the raw process list while snmp is disabled, 
 - [ ] **Step 5: Verify persistence across a reboot**
 
 ```bash
-curl -s -o /dev/null -w '%{http_code}\n' -u "$CAM_AUTH" -X POST $S/snmp/disable   # 202
+curl -s -o /dev/null -w '%{http_code}\n' -u "admin:$CAMERA_PASS" -X POST $S/snmp/disable   # 202
 # Reboot: there is no reboot route, so re-upload the same bundle — the A/B
 # apply reboots the camera, which is what we need.
-curl -u "$CAM_AUTH" --fail -X PUT -H "Content-Type: application/octet-stream" \
+curl -u "admin:$CAMERA_PASS" --fail -X PUT -H "Content-Type: application/octet-stream" \
   --data-binary @bundle.tar $CAM/api/update
 # wait for the camera as in Step 2, then:
 st   # snmp must still read "disabled" — proving the anyka.toml edit survived
      # both the reboot and the slot flip
-curl -s -o /dev/null -w '%{http_code}\n' -u "$CAM_AUTH" -X POST $S/snmp/enable   # restore
+curl -s -o /dev/null -w '%{http_code}\n' -u "admin:$CAMERA_PASS" -X POST $S/snmp/enable   # restore
 ```
 
 This is the only end-to-end check of §3's central claim (both slots read the same file). Do not skip it.
@@ -2059,14 +2059,14 @@ This is the only end-to-end check of §3's central claim (both slots read the sa
 This is the §2.1 regression check — the one that fails loudly if the heartbeat removal is missing.
 
 ```bash
-UP() { curl -s -u "$CAM_AUTH" $CAM/api/diagnostics \
+UP() { curl -s -u "admin:$CAMERA_PASS" $CAM/api/diagnostics \
   | python3 -c 'import json,sys; print(json.load(sys.stdin)["uptime_s"])'; }
 UP
-curl -s -o /dev/null -w '%{http_code}\n' -u "$CAM_AUTH" -X POST $S/vendor-daemon/disable  # 202
+curl -s -o /dev/null -w '%{http_code}\n' -u "admin:$CAMERA_PASS" -X POST $S/vendor-daemon/disable  # 202
 sleep 600   # well past 5 monitor ticks
 UP          # must be MONOTONICALLY LARGER — a smaller value means it rebooted
 st          # vendor-daemon: disabled
-curl -s -o /dev/null -w '%{http_code}\n' -u "$CAM_AUTH" -X POST $S/vendor-daemon/enable
+curl -s -o /dev/null -w '%{http_code}\n' -u "admin:$CAMERA_PASS" -X POST $S/vendor-daemon/enable
 sleep 20; st  # vendor-daemon: running, video back
 ```
 
@@ -2079,7 +2079,7 @@ A drop in uptime here means the heartbeat file was not cleared — go back to Ta
 **Do this on a bench camera, or with physical access to the SD card. Do not run it on a remote `.198` you cannot walk to.**
 
 ```bash
-curl -s -o /dev/null -w '%{http_code}\n' -u "$CAM_AUTH" -X POST $S/onvif/disable
+curl -s -o /dev/null -w '%{http_code}\n' -u "admin:$CAMERA_PASS" -X POST $S/onvif/disable
 # 202, or a dropped connection — both mean it worked
 sleep 20
 curl -s -o /dev/null -w 'http:%{http_code}\n' --connect-timeout 3 $CAM/   # expect 000
@@ -2091,7 +2091,7 @@ Then recover: drop a bundle into `spool/` (FTP or SD card), or push a full SD pa
 - [ ] **Step 8: Final state + push**
 
 ```bash
-curl -s -u "$CAM_AUTH" $CAM/api/diagnostics   # 200, services healthy
+curl -s -u "admin:$CAMERA_PASS" $CAM/api/diagnostics   # 200, services healthy
 st                                                            # shipped defaults
 rtk git status                                                # clean; no .vitest artifacts, no bundle.tar
 rtk git push

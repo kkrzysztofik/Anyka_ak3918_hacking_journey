@@ -180,7 +180,7 @@ Confirm new PIDs; leave `ir_cut_filter` as needed for test.
 
 **Step 3: Live VLC check**
 
-1. Open VLC on `rtsp://192.168.2.198:554/stream` (admin/admin); leave playing.
+1. Open VLC on `rtsp://192.168.2.198:554/stream` (user `admin`, password from the secret store); leave playing.
 2. `SetImagingSettings` IrCutFilter=OFF then ON on `VideoSource_1`.
 3. Pass: no VLC timestamp conversion spam; session stays up; `event=timestamp_forward_clamp` may appear once per switch in `vendor_daemon.log`.
 4. Confirm IDR path: no hard requirement to decode bitstream; optional brief clean picture after switch.

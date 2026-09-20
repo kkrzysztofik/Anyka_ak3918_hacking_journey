@@ -392,7 +392,7 @@ From the dev host:
 ```bash
 timeout 25 ffprobe -rtsp_transport tcp -v error \
   -show_entries stream=codec_name,width,height -of default=nw=1 \
-  -i "rtsp://admin:admin@192.168.2.198:554/sub"
+  -i "rtsp://admin:$CAMERA_PASS@192.168.2.198:554/sub"
 ```
 
 Expected: `codec_name=h264`, `width=640`, `height=360`. This confirms the stream
