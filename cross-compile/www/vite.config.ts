@@ -97,6 +97,14 @@ export default defineConfig(() => ({
         changeOrigin: true,
         secure: false, // NOSONAR
       },
+      // Proxy the REST endpoints (/api/diagnostics, /api/network, /api/snmp, ...).
+      // Without this the SPA fallback answers them with index.html and every
+      // JSON parse fails, so dev renders a network page with no live data.
+      '/api': {
+        target: process.env.VITE_API_TARGET || 'http://192.168.2.198:80', // NOSONAR
+        changeOrigin: true,
+        secure: false, // NOSONAR
+      },
       // Proxy utilization requests
       '/utilization': {
         target: process.env.VITE_API_TARGET || 'http://192.168.2.198:80', // NOSONAR

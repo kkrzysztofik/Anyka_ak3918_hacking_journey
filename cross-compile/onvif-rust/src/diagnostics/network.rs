@@ -5,7 +5,7 @@
 //! `Dot11Configuration` type surface for one form.
 
 use std::net::Ipv4Addr;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use axum::Json;
@@ -94,8 +94,11 @@ pub struct NetworkStateResponse {
     pub last_failure: Option<NetworkOverlayView>,
 }
 
-fn overlay_exists(path: &Path) -> bool {
-    path.exists()
+/// An overlay file that parses back to all-defaults holds nothing to apply.
+/// `anyka-init` leaves a zero-byte `network.toml` behind, and treating that as
+/// pending puts a permanent "Pending reboot" state in front of the user.
+fn has_pending(overlay: &NetworkOverlay) -> bool {
+    overlay != &NetworkOverlay::default()
 }
 
 fn validate_patch(patch: &NetworkOverlayPatch) -> Result<(), String> {
@@ -189,7 +192,7 @@ pub async fn handle_get_network(
         .map(|o| NetworkOverlayView::from_overlay(&o));
 
     Ok(Json(NetworkStateResponse {
-        has_pending: overlay_exists(&state.overlay_path),
+        has_pending: has_pending(&pending),
         pending: NetworkOverlayView::from_overlay(&pending),
         last_failure,
     }))
@@ -335,5 +338,21 @@ mod tests {
             .expect("get must succeed");
         assert_eq!(response.pending.ssid.as_deref(), Some("TestNet"));
         assert!(response.has_pending);
+    }
+
+    #[tokio::test]
+    async fn test_empty_overlay_file_is_not_pending() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("network.toml");
+        std::fs::write(&path, "").expect("write empty overlay");
+
+        let response = handle_get_network(Extension(Arc::new(NetworkState::new(&path))))
+            .await
+            .expect("get must succeed");
+
+        assert!(
+            !response.has_pending,
+            "a zero-byte overlay carries nothing to apply after reboot"
+        );
     }
 }

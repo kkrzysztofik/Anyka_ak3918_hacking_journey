@@ -518,23 +518,30 @@ pub async fn handle_set_ntp(request: SetNTP) -> OnvifResult<SetNTPResponse> {
 ///
 /// Returns default gateway configuration.
 pub async fn handle_get_network_default_gateway(
+    platform: &Option<Arc<dyn Platform>>,
     config: &Arc<ConfigRuntime>,
     _request: GetNetworkDefaultGateway,
 ) -> OnvifResult<GetNetworkDefaultGatewayResponse> {
     tracing::debug!("GetNetworkDefaultGateway request");
 
-    // Get gateway from config (platform doesn't expose gateway info)
-    let gateway = {
-        let g = config.read().network.gateway.clone();
-        if g.is_empty() {
-            "192.168.1.1".to_string()
-        } else {
-            g
-        }
+    // The live routing table wins: under DHCP the configured value is stale or
+    // absent, and the old literal fallback advertised a gateway from a subnet
+    // the camera is not even on.
+    let live = match platform.as_ref().and_then(|p| p.network_info()) {
+        Some(network_info) => network_info.get_default_gateway().await.ok().flatten(),
+        None => None,
     };
 
+    let gateway = live.unwrap_or_else(|| config.read().network.gateway.clone());
+
+    // An empty IPv4Address list is the spec-legal way to say "no default route";
+    // inventing one sends the WebUI a gateway from a subnet we are not on.
     let network_gateway = NetworkGateway {
-        ipv4_address: vec![gateway],
+        ipv4_address: if gateway.is_empty() {
+            vec![]
+        } else {
+            vec![gateway]
+        },
         ipv6_address: vec![],
         extension: None,
     };
@@ -1056,14 +1063,29 @@ mod tests {
     // ========================================================================
 
     #[tokio::test]
-    async fn test_get_network_default_gateway() {
+    async fn test_get_network_default_gateway_uses_config() {
         let config = create_test_config();
-        let response = handle_get_network_default_gateway(&config, GetNetworkDefaultGateway {})
-            .await
-            .unwrap();
+        config.write().network.gateway = "192.168.2.1".to_string();
+        let response =
+            handle_get_network_default_gateway(&None, &config, GetNetworkDefaultGateway {})
+                .await
+                .unwrap();
 
-        // Should have gateway information
-        assert!(!response.network_gateway.is_empty());
+        assert_eq!(response.network_gateway[0].ipv4_address, ["192.168.2.1"]);
+    }
+
+    #[tokio::test]
+    async fn test_get_network_default_gateway_reports_none_when_unknown() {
+        let config = create_test_config();
+        let response =
+            handle_get_network_default_gateway(&None, &config, GetNetworkDefaultGateway {})
+                .await
+                .unwrap();
+
+        assert!(
+            response.network_gateway[0].ipv4_address.is_empty(),
+            "an unknown gateway must not be answered with a made-up 192.168.1.1"
+        );
     }
 
     // ========================================================================

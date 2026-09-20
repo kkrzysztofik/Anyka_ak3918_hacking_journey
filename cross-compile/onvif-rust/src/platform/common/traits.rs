@@ -755,6 +755,11 @@ pub trait NetworkInfo: Send + Sync {
     /// Get enabled network protocols.
     async fn get_network_protocols(&self) -> PlatformResult<Vec<NetworkProtocolInfo>>;
 
+    /// Get the live default gateway, when the platform can observe one.
+    async fn get_default_gateway(&self) -> PlatformResult<Option<String>> {
+        Ok(None)
+    }
+
     /// Detect the local IP address.
     ///
     /// Uses UDP socket trick to determine the outbound IP address without

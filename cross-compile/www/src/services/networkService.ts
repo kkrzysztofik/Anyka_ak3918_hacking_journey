@@ -5,6 +5,7 @@
  */
 import { ENDPOINTS, authorizedFetch } from '@/services/api';
 import { escapeXml, soapRequest } from '@/services/soap/client';
+import { pickPrimaryNetworkInterface } from '@/utils/identificationStatusCard';
 import { safeString } from '@/utils/safeString';
 
 /**
@@ -105,7 +106,12 @@ export async function getNetworkInterfaces(): Promise<NetworkInterface[]> {
     const info = iface.Info as Record<string, unknown> | undefined;
     const ipv4 = iface.IPv4 as Record<string, unknown> | undefined;
     const config = ipv4?.Config as Record<string, unknown> | undefined;
-    const manual = config?.Manual as Record<string, unknown> | undefined;
+    // ONVIF reports the live address under FromDHCP when DHCP is on and under
+    // Manual when it is off; reading only Manual leaves every DHCP camera
+    // looking like it has no IP at all.
+    const manualEntry = config?.Manual ?? config?.FromDHCP;
+    const manual = (Array.isArray(manualEntry) ? manualEntry[0] : manualEntry) as
+      Record<string, unknown> | undefined;
     const link = iface.Link as Record<string, unknown> | undefined;
     const operSettings = link?.OperSettings as Record<string, unknown> | undefined;
     const rawSpeed = operSettings?.Speed;
@@ -235,8 +241,12 @@ export async function getNetworkConfig(): Promise<NetworkConfig> {
     getNetworkProtocols(),
   ]);
 
-  if (interfaces[0]) {
-    interfaces[0] = { ...interfaces[0], gateway };
+  // The gateway belongs to the uplink, which is not necessarily index 0 — the
+  // camera lists a down `p2p0` alongside `wlan0`.
+  const primary = pickPrimaryNetworkInterface(interfaces);
+  const primaryIndex = primary ? interfaces.indexOf(primary) : -1;
+  if (primaryIndex >= 0) {
+    interfaces[primaryIndex] = { ...interfaces[primaryIndex], gateway };
   }
 
   return { interfaces, dns, protocols };
