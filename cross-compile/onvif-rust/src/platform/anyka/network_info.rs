@@ -2,7 +2,9 @@
 // Network Info Implementation
 // =============================================================================
 
-use std::net::Ipv4Addr;
+use std::net::{Ipv4Addr, SocketAddrV4};
+
+use socket2::{Domain, Protocol, Socket, Type};
 
 use crate::config::netoverlay::NetworkOverlay;
 use crate::platform::common::{
@@ -104,20 +106,36 @@ fn probe_address(route: &RouteEntry) -> Option<Ipv4Addr> {
     Some(Ipv4Addr::from(if host_bits >= 2 { dest | 1 } else { dest }))
 }
 
-/// The address the kernel would send from when addressing `probe`.
+/// The address `interface` would send from when addressing `probe`.
 ///
 /// `connect` on a UDP socket runs the route lookup and binds a source address
 /// without emitting a packet. Aiming it at each on-link subnet in turn, rather
 /// than at a fixed public address, is what makes it work on a camera with no
 /// default route at all — an isolated VLAN — and on an interface that is not
 /// the uplink.
-fn source_address_for(probe: Ipv4Addr) -> Option<Ipv4Addr> {
-    let socket = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
-    socket.connect((probe, 9)).ok()?;
-    match socket.local_addr().ok()?.ip() {
-        std::net::IpAddr::V4(ip) if !ip.is_unspecified() => Some(ip),
-        _ => None,
+fn source_address_for(interface: &str, probe: Ipv4Addr) -> Option<Ipv4Addr> {
+    let socket = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP)).ok()?;
+
+    // Pin the lookup to this interface, so a second one holding a lower-metric
+    // route to the same subnet cannot answer in its place. Before Linux 5.7
+    // this needs CAP_NET_RAW: onvif-rust runs as root on the camera, and an
+    // unprivileged host falls back to an unbound lookup, which the caller's
+    // subnet check still guards.
+    if let Err(error) = socket.bind_device(Some(interface.as_bytes())) {
+        tracing::debug!(
+            interface,
+            %error,
+            "SO_BINDTODEVICE unavailable; source lookup is not pinned"
+        );
     }
+
+    socket
+        .bind(&SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0).into())
+        .ok()?;
+    socket.connect(&SocketAddrV4::new(probe, 9).into()).ok()?;
+
+    let local = *socket.local_addr().ok()?.as_socket_ipv4()?.ip();
+    (!local.is_unspecified()).then_some(local)
 }
 
 /// True when this `/proc/[pid]/cmdline` is a `udhcpc` bound to `interface`.
@@ -256,9 +274,10 @@ impl AnykaNetworkInfo {
     /// IPv4 address and prefix length of `interface`.
     ///
     /// Each on-link route the interface owns gives the prefix; the kernel then
-    /// names the address it would send from inside that subnet. The result is
-    /// only accepted if it actually falls in the subnet — otherwise the lookup
-    /// escaped out of a different interface and says nothing about this one.
+    /// names the address that interface would send from inside that subnet.
+    /// The result is only accepted if it actually falls in the subnet — belt
+    /// and braces with the `SO_BINDTODEVICE` pin, and the only guard left when
+    /// the kernel refuses that option.
     pub(super) fn interface_address(
         routes: &[RouteEntry],
         interface: &str,
@@ -271,7 +290,7 @@ impl AnykaNetworkInfo {
             let Some(probe) = probe_address(route) else {
                 continue;
             };
-            let Some(ip) = source_address_for(probe) else {
+            let Some(ip) = source_address_for(interface, probe) else {
                 continue;
             };
             if Ipv4Addr::from(u32::from(ip) & u32::from(route.mask)) == route.dest {
