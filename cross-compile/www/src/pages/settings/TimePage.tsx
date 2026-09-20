@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Calendar, Clock, Globe, Monitor, RefreshCw, Save } from 'lucide-react';
+import { Calendar, Clock, Globe, RefreshCw, Save } from 'lucide-react';
 import { useForm, useWatch } from 'react-hook-form';
 import { toast } from 'sonner';
 import { z } from 'zod';
@@ -11,7 +11,6 @@ import { Button } from '@/components/ui/button';
 import {
   Form,
   FormControl,
-  FormDescription,
   FormField,
   FormItem,
   FormLabel,
@@ -27,7 +26,6 @@ import {
   SettingsCardHeader,
   SettingsCardTitle,
 } from '@/components/ui/settings-card';
-import { Switch } from '@/components/ui/switch';
 import {
   type DateTimeConfig,
   getDateTime,
@@ -38,8 +36,7 @@ import { TIMEZONES } from '@/utils/timezones';
 
 // Validation Schema
 const timeSchema = z.object({
-  mode: z.enum(['ntp', 'computer', 'manual']),
-  ntpFromDHCP: z.boolean(),
+  mode: z.enum(['ntp', 'manual']),
   ntpServer1: z.string().optional(),
   ntpServer2: z.string().optional(),
   timezone: z.string().min(1, 'Timezone is required'),
@@ -86,7 +83,6 @@ export default function TimePage() {
     resolver: zodResolver(timeSchema),
     defaultValues: {
       mode: 'ntp',
-      ntpFromDHCP: true,
       ntpServer1: 'pool.ntp.org',
       ntpServer2: 'time.google.com',
       timezone: 'UTC',
@@ -96,14 +92,12 @@ export default function TimePage() {
   });
 
   const mode = useWatch({ control: form.control, name: 'mode' });
-  const ntpFromDHCP = useWatch({ control: form.control, name: 'ntpFromDHCP' });
 
   // Load initial values
   useEffect(() => {
     if (config) {
       form.reset({
         mode: config.ntp.enabled ? 'ntp' : 'manual',
-        ntpFromDHCP: false,
         ntpServer1: 'pool.ntp.org', // Stub as API generally doesn't return server list easily in simple calls
         ntpServer2: 'time.google.com',
         timezone: config.timezone || 'UTC',
@@ -123,9 +117,6 @@ export default function TimePage() {
         // ponytail: until the server-list work lands, NTP only clears the
         // manual-clock marker; the supervisor keeps its own [time].servers.
         await setSystemDateAndTime('NTP', config?.daylightSavings ?? false, values.timezone);
-      } else if (values.mode === 'computer') {
-        const now = new Date();
-        await setDateTime(now.toISOString(), values.timezone, config?.daylightSavings ?? false);
       } else {
         // Manual
         const dateStr = `${values.manualDate}T${values.manualTime}`;
@@ -148,12 +139,16 @@ export default function TimePage() {
     mutation.mutate(values);
   };
 
+  // "Use Computer Time" is an action, not a mode: it stamps the browser's
+  // clock onto the camera once and leaves NTP/manual selection alone.
   const handleSyncComputer = () => {
-    form.setValue('mode', 'computer');
     const now = new Date();
-    form.setValue('manualDate', now.toISOString().split('T')[0]);
-    form.setValue('manualTime', now.toTimeString().split(' ')[0]);
-    toast.info('Selected computer time');
+    void setDateTime(
+      now.toISOString(),
+      form.getValues('timezone'),
+      config?.daylightSavings ?? false,
+    );
+    toast.success('Time synced from computer');
   };
 
   if (isLoading)
@@ -248,7 +243,7 @@ export default function TimePage() {
                     <RadioGroup
                       onValueChange={field.onChange}
                       defaultValue={field.value}
-                      className="grid grid-cols-1 gap-[16px] md:grid-cols-3"
+                      className="grid grid-cols-1 gap-[16px] md:grid-cols-2"
                     >
                       {/* NTP Mode */}
                       <div>
@@ -267,28 +262,6 @@ export default function TimePage() {
                           NTP Server
                           <p className="mt-1 text-center text-[11px] font-normal text-[#a1a1a6]">
                             Automatic sync
-                          </p>
-                        </Label>
-                      </div>
-
-                      {/* Computer Mode */}
-                      <div>
-                        <RadioGroupItem
-                          value="computer"
-                          id="computer"
-                          className="peer sr-only"
-                          data-testid="time-page-computer-radio-input"
-                        />
-                        <Label
-                          htmlFor="computer"
-                          onClick={handleSyncComputer}
-                          className="border-muted bg-popover hover:bg-accent hover:text-accent-foreground [&:has([data-state=checked])]:border-primary flex flex-col items-center justify-between rounded-md border-2 p-4 peer-data-[state=checked]:border-[#0a84ff] peer-data-[state=checked]:bg-[#0a84ff]/5"
-                          data-testid="time-page-computer-radio"
-                        >
-                          <Monitor className="mb-3 h-6 w-6" />
-                          Computer
-                          <p className="mt-1 text-center text-[11px] font-normal text-[#a1a1a6]">
-                            Sync with browser
                           </p>
                         </Label>
                       </div>
@@ -317,69 +290,55 @@ export default function TimePage() {
                   )}
                 />
 
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleSyncComputer}
+                  data-testid="time-page-use-computer-time"
+                >
+                  Use Computer Time
+                </Button>
+
                 {/* NTP Settings */}
                 {mode === 'ntp' && (
                   <div className="animate-in fade-in slide-in-from-top-2 space-y-[16px] pt-[8px]">
-                    <FormField
-                      control={form.control}
-                      name="ntpFromDHCP"
-                      render={({ field }) => (
-                        <FormItem className="flex flex-row items-center justify-between rounded-lg border border-[#3a3a3c] bg-[#2c2c2e] p-4">
-                          <div className="space-y-0.5">
-                            <FormLabel className="text-base text-white">NTP from DHCP</FormLabel>
-                            <FormDescription className="text-[#a1a1a6]">
-                              Obtain NTP servers automatically
-                            </FormDescription>
-                          </div>
-                          <FormControl>
-                            <Switch
-                              checked={field.value}
-                              onCheckedChange={field.onChange}
-                              data-testid="time-page-ntp-from-dhcp-switch"
-                            />
-                          </FormControl>
-                        </FormItem>
-                      )}
-                    />
-
-                    {!ntpFromDHCP && (
-                      <div className="grid grid-cols-1 gap-[16px] md:grid-cols-2">
-                        <FormField
-                          control={form.control}
-                          name="ntpServer1"
-                          render={({ field }) => (
-                            <FormItem>
-                              <FormLabel className="text-[#a1a1a6]">Primary Server</FormLabel>
-                              <FormControl>
-                                <Input
-                                  {...field}
-                                  className="border-[#3a3a3c] bg-transparent text-white"
-                                  data-testid="time-page-ntp-server1-input"
-                                />
-                              </FormControl>
-                              <FormMessage />
-                            </FormItem>
-                          )}
-                        />
-                        <FormField
-                          control={form.control}
-                          name="ntpServer2"
-                          render={({ field }) => (
-                            <FormItem>
-                              <FormLabel className="text-[#a1a1a6]">Secondary Server</FormLabel>
-                              <FormControl>
-                                <Input
-                                  {...field}
-                                  className="border-[#3a3a3c] bg-transparent text-white"
-                                  data-testid="time-page-ntp-server2-input"
-                                />
-                              </FormControl>
-                              <FormMessage />
-                            </FormItem>
-                          )}
-                        />
-                      </div>
-                    )}
+                    <div className="grid grid-cols-1 gap-[16px] md:grid-cols-2">
+                      <FormField
+                        control={form.control}
+                        name="ntpServer1"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel className="text-[#a1a1a6]">Primary Server</FormLabel>
+                            <FormControl>
+                              <Input
+                                {...field}
+                                className="border-[#3a3a3c] bg-transparent text-white"
+                                data-testid="time-page-ntp-server1-input"
+                              />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                      <FormField
+                        control={form.control}
+                        name="ntpServer2"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel className="text-[#a1a1a6]">Secondary Server</FormLabel>
+                            <FormControl>
+                              <Input
+                                {...field}
+                                className="border-[#3a3a3c] bg-transparent text-white"
+                                data-testid="time-page-ntp-server2-input"
+                              />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                    </div>
                   </div>
                 )}
 

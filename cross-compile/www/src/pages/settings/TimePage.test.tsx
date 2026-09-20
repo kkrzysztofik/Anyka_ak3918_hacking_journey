@@ -7,7 +7,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { getDateTime, setDateTime, setNtp, setSystemDateAndTime } from '@/services/timeService';
 import {
-  mockToast,
   renderWithProviders,
   selectOption,
   waitForPageLoad,
@@ -183,7 +182,7 @@ describe('TimePage', () => {
     );
   });
 
-  it('should show NTP server fields when NTP mode is selected and not from DHCP', async () => {
+  it('should show NTP server fields when NTP mode is selected', async () => {
     vi.mocked(getDateTime).mockResolvedValue({ ...mockTimeConfig, ntp: { enabled: true } });
 
     renderWithProviders(<TimePage />);
@@ -208,25 +207,17 @@ describe('TimePage', () => {
     );
   });
 
-  it('should select Computer mode', async () => {
+  it('should sync time from the browser', async () => {
     const user = userEvent.setup();
-    renderWithProviders(<TimePage />);
+    await renderTimePage();
 
-    await waitFor(() => {
-      expect(screen.getByTestId('time-title')).toBeInTheDocument();
-    });
+    await user.click(screen.getByTestId('time-page-use-computer-time'));
 
-    // Find Computer radio and click it
-    const computerRadio = screen.getByTestId('time-page-computer-radio');
-    expect(computerRadio).toBeTruthy();
-
-    await user.click(computerRadio);
-    await waitFor(
-      () => {
-        expect(mockToast.info).toHaveBeenCalledWith('Selected computer time');
-      },
-      { timeout: 3000 },
-    );
+    expect(setDateTime).toHaveBeenCalledTimes(1);
+    const [iso, timezone, daylightSavings] = vi.mocked(setDateTime).mock.calls[0];
+    expect(iso).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+    expect(timezone).toBe('UTC0');
+    expect(daylightSavings).toBe(false);
   });
 
   it('should select Manual mode and show date/time inputs', async () => {
@@ -251,51 +242,6 @@ describe('TimePage', () => {
         const dateInput = screen.queryByTestId('time-page-manual-date-input');
         const timeInput = screen.queryByTestId('time-page-manual-time-input');
         expect(dateInput || timeInput).toBeTruthy();
-      },
-      { timeout: 3000 },
-    );
-  });
-
-  it('should toggle NTP from DHCP', async () => {
-    const user = userEvent.setup();
-    renderWithProviders(<TimePage />);
-
-    await waitFor(() => {
-      expect(screen.getByTestId('time-title')).toBeInTheDocument();
-    });
-
-    // Ensure NTP mode is selected (switch only appears in NTP mode)
-    const ntpRadio = screen.getByTestId('time-page-ntp-radio');
-    await user.click(ntpRadio);
-    await waitFor(() => {
-      // RadioGroupItem is a button with aria-checked, not an input
-      const ntpRadioInput = screen.getByTestId('time-page-ntp-radio-input');
-      expect(ntpRadioInput?.getAttribute('aria-checked')).toBe('true');
-    });
-
-    // Find NTP from DHCP switch (only visible when NTP mode is selected)
-    await waitFor(
-      () => {
-        const ntpFromDHCPSwitch = screen.getByTestId('time-page-ntp-from-dhcp-switch');
-        expect(ntpFromDHCPSwitch).toBeTruthy();
-      },
-      { timeout: 3000 },
-    );
-
-    // Now toggle the switch
-    const ntpFromDHCPSwitch = screen.getByTestId('time-page-ntp-from-dhcp-switch');
-    expect(ntpFromDHCPSwitch).toBeTruthy();
-
-    const wasChecked =
-      ntpFromDHCPSwitch.getAttribute('aria-checked') === 'true' ||
-      (ntpFromDHCPSwitch as HTMLInputElement).checked === true;
-    await user.click(ntpFromDHCPSwitch);
-    await waitFor(
-      () => {
-        const isNowChecked =
-          ntpFromDHCPSwitch.getAttribute('aria-checked') === 'true' ||
-          (ntpFromDHCPSwitch as HTMLInputElement).checked === true;
-        expect(isNowChecked).toBe(!wasChecked);
       },
       { timeout: 3000 },
     );
