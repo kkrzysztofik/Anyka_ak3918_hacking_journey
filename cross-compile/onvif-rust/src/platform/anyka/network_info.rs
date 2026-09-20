@@ -140,7 +140,10 @@ impl AnykaNetworkInfo {
     }
 
     /// Read network interfaces from /sys/class/net and /proc/net/route.
-    pub(super) fn read_interfaces(&self) -> Vec<NetworkInterfaceInfo> {
+    ///
+    /// Blocking: walks `/sys/class/net` and all of `/proc`. Call it from
+    /// `spawn_blocking`, not straight from an async handler.
+    pub(super) fn read_interfaces(local_ip: Option<Ipv4Addr>) -> Vec<NetworkInterfaceInfo> {
         use std::fs;
         use std::path::Path;
 
@@ -152,7 +155,6 @@ impl AnykaNetworkInfo {
             .map(|text| parse_proc_route(&text))
             .unwrap_or_default();
         let dhcp_ifaces = udhcpc_interfaces();
-        let local_ip = self.detect_local_ip().and_then(|s| s.parse().ok());
 
         // Try to read available interfaces
         if let Ok(entries) = fs::read_dir(net_dir) {
@@ -226,6 +228,8 @@ impl AnykaNetworkInfo {
     }
 
     /// Read DNS configuration from /etc/resolv.conf.
+    ///
+    /// Blocking: `udhcpc_interfaces()` walks all of `/proc`.
     pub(super) fn read_dns_config() -> DnsInfo {
         use std::fs;
 
@@ -327,21 +331,43 @@ impl AnykaNetworkInfo {
     }
 }
 
+/// Run a blocking `/proc` or sysfs read off the async runtime.
+///
+/// Every getter below walks `/proc` (the `udhcpc` scan) or `/sys/class/net`,
+/// which is exactly what `diagnostics/processes.rs` warns must not run inline
+/// on a runtime thread. These are 30-second WebUI polls, so one task hop costs
+/// nothing here — unlike a streaming path, where it would.
+async fn off_runtime<T, F>(work: F) -> PlatformResult<T>
+where
+    F: FnOnce() -> T + Send + 'static,
+    T: Send + 'static,
+{
+    tokio::task::spawn_blocking(work)
+        .await
+        .map_err(|e| PlatformError::HardwareFailure(e.to_string()))
+}
+
 #[async_trait]
 impl NetworkInfo for AnykaNetworkInfo {
     async fn get_network_interfaces(&self) -> PlatformResult<Vec<NetworkInterfaceInfo>> {
-        Ok(self.read_interfaces())
+        // Resolved out here: the UDP-connect trick sends nothing and needs no
+        // blocking pool, and it keeps the closure free of `&self`.
+        let local_ip = self.detect_local_ip().and_then(|s| s.parse().ok());
+        off_runtime(move || Self::read_interfaces(local_ip)).await
     }
 
     async fn get_default_gateway(&self) -> PlatformResult<Option<String>> {
-        let routes = std::fs::read_to_string(PROC_ROUTE)
-            .map(|text| parse_proc_route(&text))
-            .unwrap_or_default();
-        Ok(default_gateway(&routes))
+        off_runtime(|| {
+            let routes = std::fs::read_to_string(PROC_ROUTE)
+                .map(|text| parse_proc_route(&text))
+                .unwrap_or_default();
+            default_gateway(&routes)
+        })
+        .await
     }
 
     async fn get_dns_info(&self) -> PlatformResult<DnsInfo> {
-        Ok(Self::read_dns_config())
+        off_runtime(Self::read_dns_config).await
     }
 
     async fn get_ntp_info(&self) -> PlatformResult<NtpInfo> {
