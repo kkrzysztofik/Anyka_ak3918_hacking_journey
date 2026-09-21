@@ -36,8 +36,8 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use super::Extension;
 use super::common::{
     AudioEncoderConfiguration, AudioSource, AudioSourceConfiguration, IntRange, MediaUri,
-    MetadataConfiguration, Name, Profile, ReferenceToken, StreamSetup, VideoEncoderConfiguration,
-    VideoResolution, VideoSource, VideoSourceConfiguration,
+    MetadataConfiguration, Name, PTZConfiguration, Profile, ReferenceToken, StreamSetup,
+    VideoEncoderConfiguration, VideoResolution, VideoSource, VideoSourceConfiguration,
 };
 
 // ============================================================================
@@ -1210,6 +1210,24 @@ pub struct RemovePTZConfiguration {
 #[serde(rename = "trt:RemovePTZConfigurationResponse")]
 pub struct RemovePTZConfigurationResponse {}
 
+/// GetCompatiblePTZConfigurations request.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename = "GetCompatiblePTZConfigurations")]
+pub struct GetCompatiblePTZConfigurations {
+    /// Profile token.
+    #[serde(rename = "ProfileToken")]
+    pub profile_token: ReferenceToken,
+}
+
+/// GetCompatiblePTZConfigurations response.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename = "trt:GetCompatiblePTZConfigurationsResponse")]
+pub struct GetCompatiblePTZConfigurationsResponse {
+    /// Compatible configurations.
+    #[serde(rename = "trt:Configurations", alias = "Configurations", default)]
+    pub configurations: Vec<PTZConfiguration>,
+}
+
 // ============================================================================
 // Service Capabilities
 // ============================================================================
@@ -1457,6 +1475,74 @@ pub struct SetMetadataConfiguration {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename = "trt:SetMetadataConfigurationResponse")]
 pub struct SetMetadataConfigurationResponse {}
+
+/// AddMetadataConfiguration request.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename = "AddMetadataConfiguration")]
+pub struct AddMetadataConfiguration {
+    /// Profile token.
+    #[serde(rename = "ProfileToken")]
+    pub profile_token: ReferenceToken,
+
+    /// Configuration token.
+    #[serde(rename = "ConfigurationToken")]
+    pub configuration_token: ReferenceToken,
+}
+
+/// AddMetadataConfiguration response.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename = "trt:AddMetadataConfigurationResponse")]
+pub struct AddMetadataConfigurationResponse {}
+
+/// RemoveMetadataConfiguration request.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename = "RemoveMetadataConfiguration")]
+pub struct RemoveMetadataConfiguration {
+    /// Profile token.
+    #[serde(rename = "ProfileToken")]
+    pub profile_token: ReferenceToken,
+}
+
+/// RemoveMetadataConfiguration response.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename = "trt:RemoveMetadataConfigurationResponse")]
+pub struct RemoveMetadataConfigurationResponse {}
+
+/// GetCompatibleMetadataConfigurations request.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename = "GetCompatibleMetadataConfigurations")]
+pub struct GetCompatibleMetadataConfigurations {
+    /// Profile token.
+    #[serde(rename = "ProfileToken")]
+    pub profile_token: ReferenceToken,
+}
+
+/// GetCompatibleMetadataConfigurations response.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename = "trt:GetCompatibleMetadataConfigurationsResponse")]
+pub struct GetCompatibleMetadataConfigurationsResponse {
+    /// Compatible configurations.
+    #[serde(rename = "trt:Configurations", alias = "Configurations", default)]
+    pub configurations: Vec<MetadataConfiguration>,
+}
+
+/// GetMetadataConfiguration request.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename = "GetMetadataConfiguration")]
+pub struct GetMetadataConfiguration {
+    /// Configuration token.
+    #[serde(rename = "ConfigurationToken")]
+    pub configuration_token: ReferenceToken,
+}
+
+/// GetMetadataConfiguration response.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename = "trt:GetMetadataConfigurationResponse")]
+pub struct GetMetadataConfigurationResponse {
+    /// The requested metadata configuration.
+    #[serde(rename = "trt:Configuration", alias = "Configuration")]
+    pub configuration: MetadataConfiguration,
+}
 
 // ============================================================================
 // Multicast Streaming (FR-002)

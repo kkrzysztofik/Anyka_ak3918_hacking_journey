@@ -9,8 +9,9 @@
 
 use onvif_rust::onvif::media::MediaService;
 use onvif_rust::onvif::types::common::{
-    AudioEncoding, H264Configuration, H264Profile, Name, ReferenceToken, StreamSetup, StreamType,
-    Transport, TransportProtocol, VideoEncoding, VideoRateControl, VideoResolution,
+    AudioEncoding, H264Configuration, H264Profile, MetadataConfiguration, Name, ReferenceToken,
+    StreamSetup, StreamType, Transport, TransportProtocol, VideoEncoding, VideoRateControl,
+    VideoResolution,
 };
 use onvif_rust::onvif::types::media::{
     AddAudioEncoderConfiguration, AddAudioSourceConfiguration, AddVideoEncoderConfiguration,
@@ -22,7 +23,7 @@ use onvif_rust::onvif::types::media::{
     GetServiceCapabilities, GetSnapshotUri, GetStreamUri, GetVideoEncoderConfiguration,
     GetVideoEncoderConfigurationOptions, GetVideoEncoderConfigurations,
     GetVideoSourceConfiguration, GetVideoSourceConfigurations, GetVideoSources,
-    MetadataConfiguration, RemoveAudioEncoderConfiguration, RemoveAudioSourceConfiguration,
+    RemoveAudioEncoderConfiguration, RemoveAudioSourceConfiguration,
     RemoveVideoEncoderConfiguration, RemoveVideoSourceConfiguration, SetAudioSourceConfiguration,
     SetMetadataConfiguration, SetVideoEncoderConfiguration, SetVideoSourceConfiguration,
     StartMulticastStreaming, StopMulticastStreaming,
@@ -795,7 +796,10 @@ fn test_metadata_handlers_return_expected_results() {
     let configurations = service
         .handle_get_metadata_configurations(GetMetadataConfigurations {})
         .unwrap();
-    assert!(configurations.configurations.is_empty());
+    assert!(
+        !configurations.configurations.is_empty(),
+        "the device exposes its default metadata configuration"
+    );
 
     let result = service.handle_set_metadata_configuration(SetMetadataConfiguration {
         configuration: MetadataConfiguration {
@@ -806,6 +810,7 @@ fn test_metadata_handlers_return_expected_results() {
             analytics: None,
             multicast: None,
             session_timeout: "PT60S".to_string(),
+            extension: None,
         },
         force_persistence: Some(false),
     });

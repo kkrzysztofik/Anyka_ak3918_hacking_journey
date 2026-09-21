@@ -538,7 +538,10 @@ height = 1080
         reloaded.load().unwrap();
         let data = reloaded.snapshot();
 
-        assert_eq!(data.profiles[0].metadata_config.as_deref(), Some("MetadataConfig_0"));
+        assert_eq!(
+            data.profiles[0].metadata_config.as_deref(),
+            Some("MetadataConfig_0")
+        );
         assert_eq!(data.metadata_configs.len(), 1);
         assert!(data.metadata_configs[0].ptz_position);
     }

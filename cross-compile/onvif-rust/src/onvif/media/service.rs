@@ -9,22 +9,24 @@ use crate::onvif::dispatcher::ServiceHandler;
 use crate::onvif::error::{OnvifError, OnvifResult};
 use crate::onvif::types::media::{
     AddAudioEncoderConfiguration, AddAudioEncoderConfigurationResponse,
-    AddAudioSourceConfiguration, AddAudioSourceConfigurationResponse, AddVideoEncoderConfiguration,
-    AddVideoEncoderConfigurationResponse, AddVideoSourceConfiguration,
-    AddVideoSourceConfigurationResponse, CreateProfile, CreateProfileResponse, DeleteProfile,
-    DeleteProfileResponse, GetAudioEncoderConfiguration, GetAudioEncoderConfigurationOptions,
-    GetAudioEncoderConfigurationOptionsResponse, GetAudioEncoderConfigurationResponse,
-    GetAudioEncoderConfigurations, GetAudioEncoderConfigurationsResponse,
-    GetAudioSourceConfiguration, GetAudioSourceConfigurationResponse, GetAudioSourceConfigurations,
+    AddAudioSourceConfiguration, AddAudioSourceConfigurationResponse, AddMetadataConfiguration,
+    AddPTZConfiguration, AddVideoEncoderConfiguration, AddVideoEncoderConfigurationResponse,
+    AddVideoSourceConfiguration, AddVideoSourceConfigurationResponse, CreateProfile,
+    CreateProfileResponse, DeleteProfile, DeleteProfileResponse, GetAudioEncoderConfiguration,
+    GetAudioEncoderConfigurationOptions, GetAudioEncoderConfigurationOptionsResponse,
+    GetAudioEncoderConfigurationResponse, GetAudioEncoderConfigurations,
+    GetAudioEncoderConfigurationsResponse, GetAudioSourceConfiguration,
+    GetAudioSourceConfigurationResponse, GetAudioSourceConfigurations,
     GetAudioSourceConfigurationsResponse, GetAudioSources, GetAudioSourcesResponse,
     GetCompatibleAudioEncoderConfigurations, GetCompatibleAudioEncoderConfigurationsResponse,
     GetCompatibleAudioSourceConfigurations, GetCompatibleAudioSourceConfigurationsResponse,
+    GetCompatibleMetadataConfigurations, GetCompatiblePTZConfigurations,
     GetCompatibleVideoEncoderConfigurations, GetCompatibleVideoEncoderConfigurationsResponse,
     GetCompatibleVideoSourceConfigurations, GetCompatibleVideoSourceConfigurationsResponse,
-    GetMetadataConfigurations, GetMetadataConfigurationsResponse, GetProfile, GetProfileResponse,
-    GetProfiles, GetProfilesResponse, GetServiceCapabilities, GetServiceCapabilitiesResponse,
-    GetSnapshotUri, GetSnapshotUriResponse, GetStreamUri, GetStreamUriResponse,
-    GetVideoEncoderConfiguration, GetVideoEncoderConfigurationOptions,
+    GetMetadataConfiguration, GetMetadataConfigurations, GetMetadataConfigurationsResponse,
+    GetProfile, GetProfileResponse, GetProfiles, GetProfilesResponse, GetServiceCapabilities,
+    GetServiceCapabilitiesResponse, GetSnapshotUri, GetSnapshotUriResponse, GetStreamUri,
+    GetStreamUriResponse, GetVideoEncoderConfiguration, GetVideoEncoderConfigurationOptions,
     GetVideoEncoderConfigurationOptionsResponse, GetVideoEncoderConfigurationResponse,
     GetVideoEncoderConfigurations, GetVideoEncoderConfigurationsResponse,
     GetVideoSourceConfiguration, GetVideoSourceConfigurationOptions,
@@ -32,11 +34,11 @@ use crate::onvif::types::media::{
     GetVideoSourceConfigurations, GetVideoSourceConfigurationsResponse, GetVideoSources,
     GetVideoSourcesResponse, RemoveAudioEncoderConfiguration,
     RemoveAudioEncoderConfigurationResponse, RemoveAudioSourceConfiguration,
-    RemoveAudioSourceConfigurationResponse, RemoveVideoEncoderConfiguration,
-    RemoveVideoEncoderConfigurationResponse, RemoveVideoSourceConfiguration,
-    RemoveVideoSourceConfigurationResponse, SetAudioEncoderConfiguration,
-    SetAudioEncoderConfigurationResponse, SetAudioSourceConfiguration,
-    SetAudioSourceConfigurationResponse, SetMetadataConfiguration,
+    RemoveAudioSourceConfigurationResponse, RemoveMetadataConfiguration, RemovePTZConfiguration,
+    RemoveVideoEncoderConfiguration, RemoveVideoEncoderConfigurationResponse,
+    RemoveVideoSourceConfiguration, RemoveVideoSourceConfigurationResponse,
+    SetAudioEncoderConfiguration, SetAudioEncoderConfigurationResponse,
+    SetAudioSourceConfiguration, SetAudioSourceConfigurationResponse, SetMetadataConfiguration,
     SetMetadataConfigurationResponse, SetVideoEncoderConfiguration,
     SetVideoEncoderConfigurationResponse, SetVideoSourceConfiguration,
     SetVideoSourceConfigurationResponse, StartMulticastStreaming, StartMulticastStreamingResponse,
@@ -666,9 +668,8 @@ impl MediaService {
         _request: GetMetadataConfigurations,
     ) -> OnvifResult<GetMetadataConfigurationsResponse> {
         tracing::debug!("GetMetadataConfigurations request");
-        Ok(GetMetadataConfigurationsResponse {
-            configurations: vec![],
-        })
+        let configurations = self.profile_manager.get_metadata_configurations();
+        Ok(GetMetadataConfigurationsResponse { configurations })
     }
 
     /// Handle SetMetadataConfiguration request.
@@ -680,13 +681,9 @@ impl MediaService {
             "SetMetadataConfiguration for token: {}",
             request.configuration.token
         );
-        Err(OnvifError::invalid_arg_val(
-            "ter:NoConfig",
-            format!(
-                "Metadata configuration '{}' not found",
-                request.configuration.token
-            ),
-        ))
+        self.profile_manager
+            .set_metadata_configuration(request.configuration)?;
+        Ok(SetMetadataConfigurationResponse {})
     }
 
     // ========================================================================
@@ -1091,6 +1088,81 @@ impl ServiceHandler for MediaService {
                 let request: SetMetadataConfiguration = quick_xml::de::from_str(body_xml)
                     .map_err(|e| OnvifError::WellFormed(format!("Invalid request XML: {}", e)))?;
                 let response = self.handle_set_metadata_configuration(request)?;
+                quick_xml::se::to_string(&response).map_err(|e| {
+                    OnvifError::Internal(format!("Failed to serialize response: {}", e))
+                })
+            }
+
+            // PTZ Configuration
+            "AddPTZConfiguration" => {
+                let request: AddPTZConfiguration = quick_xml::de::from_str(body_xml)
+                    .map_err(|e| OnvifError::WellFormed(format!("Invalid request XML: {}", e)))?;
+                let response = profile_ops::add_ptz_configuration(&self.profile_manager, request)?;
+                quick_xml::se::to_string(&response).map_err(|e| {
+                    OnvifError::Internal(format!("Failed to serialize response: {}", e))
+                })
+            }
+
+            "RemovePTZConfiguration" => {
+                let request: RemovePTZConfiguration = quick_xml::de::from_str(body_xml)
+                    .map_err(|e| OnvifError::WellFormed(format!("Invalid request XML: {}", e)))?;
+                let response =
+                    profile_ops::remove_ptz_configuration(&self.profile_manager, request)?;
+                quick_xml::se::to_string(&response).map_err(|e| {
+                    OnvifError::Internal(format!("Failed to serialize response: {}", e))
+                })
+            }
+
+            "GetCompatiblePTZConfigurations" => {
+                let request: GetCompatiblePTZConfigurations = quick_xml::de::from_str(body_xml)
+                    .map_err(|e| OnvifError::WellFormed(format!("Invalid request XML: {}", e)))?;
+                let response =
+                    profile_ops::get_compatible_ptz_configurations(&self.profile_manager, request)?;
+                quick_xml::se::to_string(&response).map_err(|e| {
+                    OnvifError::Internal(format!("Failed to serialize response: {}", e))
+                })
+            }
+
+            // Metadata Configuration
+            "AddMetadataConfiguration" => {
+                let request: AddMetadataConfiguration = quick_xml::de::from_str(body_xml)
+                    .map_err(|e| OnvifError::WellFormed(format!("Invalid request XML: {}", e)))?;
+                let response =
+                    profile_ops::add_metadata_configuration(&self.profile_manager, request)?;
+                quick_xml::se::to_string(&response).map_err(|e| {
+                    OnvifError::Internal(format!("Failed to serialize response: {}", e))
+                })
+            }
+
+            "RemoveMetadataConfiguration" => {
+                let request: RemoveMetadataConfiguration = quick_xml::de::from_str(body_xml)
+                    .map_err(|e| OnvifError::WellFormed(format!("Invalid request XML: {}", e)))?;
+                let response =
+                    profile_ops::remove_metadata_configuration(&self.profile_manager, request)?;
+                quick_xml::se::to_string(&response).map_err(|e| {
+                    OnvifError::Internal(format!("Failed to serialize response: {}", e))
+                })
+            }
+
+            "GetCompatibleMetadataConfigurations" => {
+                let request: GetCompatibleMetadataConfigurations =
+                    quick_xml::de::from_str(body_xml).map_err(|e| {
+                        OnvifError::WellFormed(format!("Invalid request XML: {}", e))
+                    })?;
+                let response = profile_ops::get_compatible_metadata_configurations(
+                    &self.profile_manager,
+                    request,
+                )?;
+                quick_xml::se::to_string(&response).map_err(|e| {
+                    OnvifError::Internal(format!("Failed to serialize response: {}", e))
+                })
+            }
+
+            "GetMetadataConfiguration" => {
+                let request: GetMetadataConfiguration = quick_xml::de::from_str(body_xml)
+                    .map_err(|e| OnvifError::WellFormed(format!("Invalid request XML: {}", e)))?;
+                let response =
+                    profile_ops::get_metadata_configuration(&self.profile_manager, request)?;
                 quick_xml::se::to_string(&response).map_err(|e| {
                     OnvifError::Internal(format!("Failed to serialize response: {}", e))
                 })

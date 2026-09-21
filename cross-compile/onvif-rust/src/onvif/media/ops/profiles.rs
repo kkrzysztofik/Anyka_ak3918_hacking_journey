@@ -6,8 +6,14 @@
 
 use crate::onvif::error::OnvifResult;
 use crate::onvif::types::media::{
-    CreateProfile, CreateProfileResponse, DeleteProfile, DeleteProfileResponse, GetProfile,
-    GetProfileResponse, GetProfilesResponse,
+    AddMetadataConfiguration, AddMetadataConfigurationResponse, AddPTZConfiguration,
+    AddPTZConfigurationResponse, CreateProfile, CreateProfileResponse, DeleteProfile,
+    DeleteProfileResponse, GetCompatibleMetadataConfigurations,
+    GetCompatibleMetadataConfigurationsResponse, GetCompatiblePTZConfigurations,
+    GetCompatiblePTZConfigurationsResponse, GetMetadataConfiguration,
+    GetMetadataConfigurationResponse, GetProfile, GetProfileResponse, GetProfilesResponse,
+    RemoveMetadataConfiguration, RemoveMetadataConfigurationResponse, RemovePTZConfiguration,
+    RemovePTZConfigurationResponse,
 };
 
 use super::ProfileManagerRef;
@@ -54,9 +60,102 @@ pub fn delete_profile(
     Ok(DeleteProfileResponse {})
 }
 
+/// Handle AddPTZConfiguration request.
+pub fn add_ptz_configuration(
+    pm: &ProfileManagerRef,
+    request: AddPTZConfiguration,
+) -> OnvifResult<AddPTZConfigurationResponse> {
+    tracing::debug!(
+        "AddPTZConfiguration: profile={} config={}",
+        request.profile_token,
+        request.configuration_token
+    );
+    pm.add_ptz_configuration(&request.profile_token, &request.configuration_token)?;
+    Ok(AddPTZConfigurationResponse {})
+}
+
+/// Handle RemovePTZConfiguration request.
+pub fn remove_ptz_configuration(
+    pm: &ProfileManagerRef,
+    request: RemovePTZConfiguration,
+) -> OnvifResult<RemovePTZConfigurationResponse> {
+    tracing::debug!("RemovePTZConfiguration: profile={}", request.profile_token);
+    pm.remove_ptz_configuration(&request.profile_token)?;
+    Ok(RemovePTZConfigurationResponse {})
+}
+
+/// Handle GetCompatiblePTZConfigurations request.
+pub fn get_compatible_ptz_configurations(
+    pm: &ProfileManagerRef,
+    request: GetCompatiblePTZConfigurations,
+) -> OnvifResult<GetCompatiblePTZConfigurationsResponse> {
+    tracing::debug!(
+        "GetCompatiblePTZConfigurations for profile: {}",
+        request.profile_token
+    );
+    let _ = pm.get_profile(&request.profile_token)?;
+    let configurations = pm.get_compatible_ptz_configurations(&request.profile_token);
+    Ok(GetCompatiblePTZConfigurationsResponse { configurations })
+}
+
+/// Handle AddMetadataConfiguration request.
+pub fn add_metadata_configuration(
+    pm: &ProfileManagerRef,
+    request: AddMetadataConfiguration,
+) -> OnvifResult<AddMetadataConfigurationResponse> {
+    tracing::debug!(
+        "AddMetadataConfiguration: profile={} config={}",
+        request.profile_token,
+        request.configuration_token
+    );
+    pm.add_metadata_configuration(&request.profile_token, &request.configuration_token)?;
+    Ok(AddMetadataConfigurationResponse {})
+}
+
+/// Handle RemoveMetadataConfiguration request.
+pub fn remove_metadata_configuration(
+    pm: &ProfileManagerRef,
+    request: RemoveMetadataConfiguration,
+) -> OnvifResult<RemoveMetadataConfigurationResponse> {
+    tracing::debug!(
+        "RemoveMetadataConfiguration: profile={}",
+        request.profile_token
+    );
+    pm.remove_metadata_configuration(&request.profile_token)?;
+    Ok(RemoveMetadataConfigurationResponse {})
+}
+
+/// Handle GetCompatibleMetadataConfigurations request.
+pub fn get_compatible_metadata_configurations(
+    pm: &ProfileManagerRef,
+    request: GetCompatibleMetadataConfigurations,
+) -> OnvifResult<GetCompatibleMetadataConfigurationsResponse> {
+    tracing::debug!(
+        "GetCompatibleMetadataConfigurations for profile: {}",
+        request.profile_token
+    );
+    let _ = pm.get_profile(&request.profile_token)?;
+    let configurations = pm.get_compatible_metadata_configurations(&request.profile_token);
+    Ok(GetCompatibleMetadataConfigurationsResponse { configurations })
+}
+
+/// Handle GetMetadataConfiguration request.
+pub fn get_metadata_configuration(
+    pm: &ProfileManagerRef,
+    request: GetMetadataConfiguration,
+) -> OnvifResult<GetMetadataConfigurationResponse> {
+    tracing::debug!(
+        "GetMetadataConfiguration for token: {}",
+        request.configuration_token
+    );
+    let configuration = pm.get_metadata_configuration(&request.configuration_token)?;
+    Ok(GetMetadataConfigurationResponse { configuration })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::onvif::media::types::{METADATA_CONFIG_PREFIX, PTZ_CONFIG_PREFIX};
 
     fn create_test_pm() -> ProfileManagerRef {
         crate::onvif::media::ProfileManager::new()
@@ -137,6 +236,228 @@ mod tests {
             &pm,
             DeleteProfile {
                 profile_token: "Profile_MainStream".to_string(),
+            },
+        );
+        assert!(result.is_err());
+    }
+
+    fn create_test_pm_with_ptz_disabled() -> ProfileManagerRef {
+        let config = std::sync::Arc::new(crate::config::ConfigRuntime::new(Default::default()));
+        config.write().ptz.enabled = false;
+        crate::onvif::media::ProfileManager::with_config(config)
+    }
+
+    #[test]
+    fn add_ptz_configuration_attaches_to_profile() {
+        let pm = create_test_pm();
+        let result = add_ptz_configuration(
+            &pm,
+            AddPTZConfiguration {
+                profile_token: "Profile_MainStream".to_string(),
+                configuration_token: format!("{}0", PTZ_CONFIG_PREFIX),
+            },
+        );
+        assert!(result.is_ok());
+        let profile = pm.get_profile(&"Profile_MainStream".to_string()).unwrap();
+        assert!(profile.ptz_configuration.is_some());
+    }
+
+    #[test]
+    fn add_ptz_configuration_rejects_unknown_profile() {
+        let pm = create_test_pm();
+        let result = add_ptz_configuration(
+            &pm,
+            AddPTZConfiguration {
+                profile_token: "NoSuchProfile".to_string(),
+                configuration_token: format!("{}0", PTZ_CONFIG_PREFIX),
+            },
+        );
+        assert!(
+            result.is_err(),
+            "an unknown profile must fault, not silently succeed"
+        );
+    }
+
+    #[test]
+    fn add_ptz_configuration_rejects_non_default_token() {
+        let pm = create_test_pm();
+        let result = add_ptz_configuration(
+            &pm,
+            AddPTZConfiguration {
+                profile_token: "Profile_MainStream".to_string(),
+                configuration_token: "BogusPTZ".to_string(),
+            },
+        );
+        assert!(result.is_err(), "a non-default PTZ token must fault");
+    }
+
+    #[test]
+    fn remove_ptz_configuration_detaches_from_profile() {
+        let pm = create_test_pm();
+        let result = remove_ptz_configuration(
+            &pm,
+            RemovePTZConfiguration {
+                profile_token: "Profile_MainStream".to_string(),
+            },
+        );
+        assert!(result.is_ok());
+        let profile = pm.get_profile(&"Profile_MainStream".to_string()).unwrap();
+        assert!(profile.ptz_configuration.is_none());
+    }
+
+    #[test]
+    fn remove_ptz_configuration_rejects_unknown_profile() {
+        let pm = create_test_pm();
+        let result = remove_ptz_configuration(
+            &pm,
+            RemovePTZConfiguration {
+                profile_token: "NoSuchProfile".to_string(),
+            },
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn get_compatible_ptz_configurations_lists_default_when_enabled() {
+        let pm = create_test_pm();
+        let result = get_compatible_ptz_configurations(
+            &pm,
+            GetCompatiblePTZConfigurations {
+                profile_token: "Profile_MainStream".to_string(),
+            },
+        )
+        .unwrap();
+        assert_eq!(result.configurations.len(), 1);
+    }
+
+    #[test]
+    fn get_compatible_ptz_configurations_empty_when_ptz_disabled() {
+        let pm = create_test_pm_with_ptz_disabled();
+        let result = get_compatible_ptz_configurations(
+            &pm,
+            GetCompatiblePTZConfigurations {
+                profile_token: "Profile_MainStream".to_string(),
+            },
+        )
+        .unwrap();
+        assert!(result.configurations.is_empty());
+    }
+
+    #[test]
+    fn get_compatible_ptz_configurations_rejects_unknown_profile() {
+        let pm = create_test_pm();
+        let result = get_compatible_ptz_configurations(
+            &pm,
+            GetCompatiblePTZConfigurations {
+                profile_token: "NoSuchProfile".to_string(),
+            },
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn add_metadata_configuration_attaches_to_profile() {
+        let pm = create_test_pm();
+        let result = add_metadata_configuration(
+            &pm,
+            AddMetadataConfiguration {
+                profile_token: "Profile_MainStream".to_string(),
+                configuration_token: format!("{}0", METADATA_CONFIG_PREFIX),
+            },
+        );
+        assert!(result.is_ok());
+        let profile = pm.get_profile(&"Profile_MainStream".to_string()).unwrap();
+        assert!(profile.metadata_configuration.is_some());
+    }
+
+    #[test]
+    fn add_metadata_configuration_rejects_unknown_profile() {
+        let pm = create_test_pm();
+        let result = add_metadata_configuration(
+            &pm,
+            AddMetadataConfiguration {
+                profile_token: "NoSuchProfile".to_string(),
+                configuration_token: format!("{}0", METADATA_CONFIG_PREFIX),
+            },
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn remove_metadata_configuration_detaches_from_profile() {
+        let pm = create_test_pm();
+        pm.add_metadata_configuration(
+            &"Profile_MainStream".to_string(),
+            &format!("{}0", METADATA_CONFIG_PREFIX),
+        )
+        .unwrap();
+        let result = remove_metadata_configuration(
+            &pm,
+            RemoveMetadataConfiguration {
+                profile_token: "Profile_MainStream".to_string(),
+            },
+        );
+        assert!(result.is_ok());
+        let profile = pm.get_profile(&"Profile_MainStream".to_string()).unwrap();
+        assert!(profile.metadata_configuration.is_none());
+    }
+
+    #[test]
+    fn remove_metadata_configuration_rejects_unknown_profile() {
+        let pm = create_test_pm();
+        let result = remove_metadata_configuration(
+            &pm,
+            RemoveMetadataConfiguration {
+                profile_token: "NoSuchProfile".to_string(),
+            },
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn get_compatible_metadata_configurations_lists_all() {
+        let pm = create_test_pm();
+        let result = get_compatible_metadata_configurations(
+            &pm,
+            GetCompatibleMetadataConfigurations {
+                profile_token: "Profile_MainStream".to_string(),
+            },
+        )
+        .unwrap();
+        assert!(!result.configurations.is_empty());
+    }
+
+    #[test]
+    fn get_compatible_metadata_configurations_rejects_unknown_profile() {
+        let pm = create_test_pm();
+        let result = get_compatible_metadata_configurations(
+            &pm,
+            GetCompatibleMetadataConfigurations {
+                profile_token: "NoSuchProfile".to_string(),
+            },
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn get_metadata_configuration_returns_default() {
+        let pm = create_test_pm();
+        let result = get_metadata_configuration(
+            &pm,
+            GetMetadataConfiguration {
+                configuration_token: format!("{}0", METADATA_CONFIG_PREFIX),
+            },
+        );
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn get_metadata_configuration_rejects_unknown_token() {
+        let pm = create_test_pm();
+        let result = get_metadata_configuration(
+            &pm,
+            GetMetadataConfiguration {
+                configuration_token: "NoSuchMetadata".to_string(),
             },
         );
         assert!(result.is_err());
