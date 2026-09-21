@@ -45,7 +45,7 @@ const ImagingPage = React.lazy(() => import('@/pages/settings/ImagingPage'));
 const OsdPage = React.lazy(() => import('@/pages/settings/OsdPage'));
 const UserManagementPage = React.lazy(() => import('@/pages/settings/UserManagementPage'));
 const MaintenancePage = React.lazy(() => import('@/pages/settings/MaintenancePage'));
-const ProfilesPage = React.lazy(() => import('@/pages/settings/ProfilesPage'));
+const ProfilesPage = React.lazy(() => import('@/pages/settings/profiles/ProfilesPage'));
 
 function AppRoutes() {
   return (
