@@ -6,9 +6,10 @@
 //!
 //! # Parameter Mapping
 //!
-//! ONVIF uses a 0.0-100.0 range for imaging parameters, while the SDK typically uses
-//! register values (e.g., 0-255). This module provides conversion functions to map
-//! between these ranges.
+//! ONVIF uses a 0.0-100.0 range for imaging parameters. The SDK does not take a
+//! register value: `ak_vpss_effect_set` accepts a signed offset in `[-50, 50]`
+//! from the ISP tuning profile, where 0 means "use the value in the ISP config
+//! file". This module maps the ONVIF midpoint (50.0) to that 0 offset.
 //!
 //! # Error Handling
 //!
@@ -26,14 +27,15 @@ use super::AK_FAILED_I32;
 use super::AK_SUCCESS_I32;
 use super::check_result;
 
-/// Default maximum value for SDK imaging parameters (typically 255 for 8-bit registers).
-pub(crate) const SDK_MAX_VALUE: i32 = 255;
-
 /// Minimum ONVIF imaging parameter value.
 const ONVIF_MIN: f32 = 0.0;
 
 /// Maximum ONVIF imaging parameter value.
 const ONVIF_MAX: f32 = 100.0;
+
+/// ONVIF midpoint, which the SDK represents as offset 0 ("ISP config default").
+/// Mirrors the vendor's `IMG_EFFECT_DEF_VAL` (`libapp/src/onvif/ja_media.h:10`).
+const ONVIF_MIDPOINT: f32 = 50.0;
 
 /// Live ISP auto-exposure limits, as reported by the sensor profile in force.
 ///
@@ -109,18 +111,17 @@ pub fn validate_onvif_range(value: f32, param_name: &str) -> PlatformResult<()> 
     }
 }
 
-/// Convert ONVIF parameter value (0.0-100.0) to SDK register value.
+/// Convert an ONVIF parameter value (0.0-100.0) to an Anyka ISP effect offset.
 ///
-/// # Arguments
+/// The SDK does not take a register value. `ak_vpss_effect_set` accepts a
+/// signed offset in `[-50, 50]` where **0 means "use the value in the ISP
+/// config file"**, and `isp_set_effect` rejects anything outside that range
+/// with `AK_FAILED` rather than clamping it. The vendor's own ONVIF layer
+/// maps the two scales by subtracting the midpoint, and so do we.
 ///
-/// * `onvif_value` - ONVIF parameter value (0.0-100.0)
-/// * `sdk_max` - Maximum SDK register value
-///
-/// # Returns
-///
-/// SDK register value (0 to sdk_max)
-pub(crate) fn onvif_to_sdk_value(onvif_value: f32, sdk_max: i32) -> i32 {
-    ((onvif_value / ONVIF_MAX) * sdk_max as f32).round() as i32
+/// See `docs/plans/2026-09-21-imaging-tab-completion-design.md`.
+pub(crate) fn onvif_to_effect_value(onvif_value: f32) -> i32 {
+    (onvif_value - ONVIF_MIDPOINT).round() as i32
 }
 
 /// Internal helper that takes FFI trait for testability.
@@ -129,7 +130,7 @@ pub(crate) async fn imaging_set_brightness(
     ffi: &dyn ImagingHalTrait,
 ) -> PlatformResult<()> {
     validate_onvif_range(value, "brightness")?;
-    let sdk_value = onvif_to_sdk_value(value, SDK_MAX_VALUE);
+    let sdk_value = onvif_to_effect_value(value);
     let ret = ffi.set_brightness(sdk_value).await;
     check_result(ret, "imaging_set_brightness")
 }
@@ -140,7 +141,7 @@ pub(crate) async fn imaging_set_contrast(
     ffi: &dyn ImagingHalTrait,
 ) -> PlatformResult<()> {
     validate_onvif_range(value, "contrast")?;
-    let sdk_value = onvif_to_sdk_value(value, SDK_MAX_VALUE);
+    let sdk_value = onvif_to_effect_value(value);
     let ret = ffi.set_contrast(sdk_value).await;
     check_result(ret, "imaging_set_contrast")
 }
@@ -151,7 +152,7 @@ pub(crate) async fn imaging_set_saturation(
     ffi: &dyn ImagingHalTrait,
 ) -> PlatformResult<()> {
     validate_onvif_range(value, "saturation")?;
-    let sdk_value = onvif_to_sdk_value(value, SDK_MAX_VALUE);
+    let sdk_value = onvif_to_effect_value(value);
     let ret = ffi.set_saturation(sdk_value).await;
     check_result(ret, "imaging_set_saturation")
 }
@@ -162,7 +163,7 @@ pub(crate) async fn imaging_set_sharpness(
     ffi: &dyn ImagingHalTrait,
 ) -> PlatformResult<()> {
     validate_onvif_range(value, "sharpness")?;
-    let sdk_value = onvif_to_sdk_value(value, SDK_MAX_VALUE);
+    let sdk_value = onvif_to_effect_value(value);
     let ret = ffi.set_sharpness(sdk_value).await;
     check_result(ret, "imaging_set_sharpness")
 }
@@ -211,15 +212,32 @@ mod tests {
     }
 
     #[test]
-    fn test_onvif_to_sdk_value() {
-        // 0.0 should map to 0
-        assert_eq!(onvif_to_sdk_value(0.0, SDK_MAX_VALUE), 0);
-        // 100.0 should map to 255
-        assert_eq!(onvif_to_sdk_value(100.0, SDK_MAX_VALUE), 255);
-        // 50.0 should map to approximately 128
-        assert_eq!(onvif_to_sdk_value(50.0, SDK_MAX_VALUE), 128);
-        // Custom max value
-        assert_eq!(onvif_to_sdk_value(50.0, 100), 50);
+    fn test_onvif_to_effect_value_maps_neutral_to_profile_default() {
+        // The SDK treats 0 as "use the value from the ISP config file", so the
+        // ONVIF midpoint must map to 0 and not to a register value.
+        assert_eq!(onvif_to_effect_value(50.0), 0);
+    }
+
+    #[test]
+    fn test_onvif_to_effect_value_maps_full_range_within_sdk_limits() {
+        assert_eq!(onvif_to_effect_value(0.0), -50);
+        assert_eq!(onvif_to_effect_value(100.0), 50);
+        assert_eq!(onvif_to_effect_value(25.0), -25);
+        assert_eq!(onvif_to_effect_value(75.0), 25);
+    }
+
+    /// Regression: every ONVIF value must land inside the SDK's accepted
+    /// `[-50, 50]`. Sending 20.0 previously produced 51, which
+    /// `isp_set_effect` rejects outright with AK_FAILED.
+    #[test]
+    fn test_onvif_to_effect_value_never_exceeds_sdk_range() {
+        for percent in 0..=100 {
+            let value = onvif_to_effect_value(percent as f32);
+            assert!(
+                (-50..=50).contains(&value),
+                "ONVIF {percent} produced out-of-range SDK value {value}"
+            );
+        }
     }
 
     #[tokio::test]
@@ -228,7 +246,7 @@ mod tests {
 
         mock_ffi
             .expect_set_brightness()
-            .with(eq(128)) // 50.0 maps to 128
+            .with(eq(0)) // 50.0 is the profile default
             .times(1)
             .returning(|_| AK_SUCCESS_I32);
 
@@ -276,7 +294,7 @@ mod tests {
 
         mock_ffi
             .expect_set_contrast()
-            .with(eq(255)) // 100.0 maps to 255
+            .with(eq(50)) // 100.0 is +50 offset
             .times(1)
             .returning(|_| AK_SUCCESS_I32);
 
@@ -290,7 +308,7 @@ mod tests {
 
         mock_ffi
             .expect_set_saturation()
-            .with(eq(0)) // 0.0 maps to 0
+            .with(eq(-50)) // 0.0 is the floor, not the default
             .times(1)
             .returning(|_| AK_SUCCESS_I32);
 
@@ -304,7 +322,7 @@ mod tests {
 
         mock_ffi
             .expect_set_sharpness()
-            .with(eq(64)) // 25.0 maps to approximately 64
+            .with(eq(-25)) // 25.0 is -25 offset
             .times(1)
             .returning(|_| AK_SUCCESS_I32);
 
