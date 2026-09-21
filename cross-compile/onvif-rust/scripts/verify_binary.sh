@@ -317,6 +317,45 @@ test_binary_size() {
   return 0
 }
 
+# Test 10: Check the build stamp survived optimisation and stripping
+#
+# `package_bundle.sh` greps the shipped binary for this exact delimited marker
+# to prove it was compiled for the version `manifest.meta` claims. That check
+# only runs at package time, so without this one a toolchain or build-flag
+# change lands green and is discovered later as a bundle that cannot be built.
+#
+# It happened: slicing the stamp in `build_version()` let LTO fold away the
+# delimiters, leaving them only in DWARF for `strip = true` to discard.
+#
+# Presence is all that is asserted here; matching the marker to a *specific*
+# version stays `package_bundle.sh`'s job, since this script has no opinion
+# about which version it is verifying.
+test_build_stamp() {
+  log_info "Test 10: Checking build stamp survives stripping..."
+
+  if ! command -v strings &> /dev/null; then
+    log_warn "strings not found, skipping build stamp check"
+    return 0
+  fi
+
+  # `grep -o`, because the surrounding `.rodata` is one undelimited blob and a
+  # whole-line match drags in neighbouring string literals. Without `-q` too:
+  # a quiet grep exits early and SIGPIPEs `strings` under `pipefail`
+  # (see scripts/package_bundle.sh).
+  local found
+  found=$(strings "${BINARY_PATH}" | grep -oE "<<ANYKA_BUILD_VERSION:[^>]*>>" | head -1)
+
+  if [[ -n "${found}" ]]; then
+    log_success "Build stamp present: ${found}"
+    return 0
+  fi
+
+  log_error "Build stamp '<<ANYKA_BUILD_VERSION:...>>' missing from the binary"
+  log_info "package_bundle.sh will refuse this binary; the stamp was optimised"
+  log_info "or stripped away. See BUILD_STAMP_ANCHOR in onvif-rust/src/lib.rs."
+  return 1
+}
+
 # Main execution
 main() {
   echo "=== Verifying ONVIF Rust Binary for ARMv5TEJ ==="
@@ -337,6 +376,7 @@ main() {
     test_abi_attributes
     test_dynamic_linking
     test_binary_size
+    test_build_stamp
   else
     log_error "Cannot proceed with verification - binary not found"
     TESTS_FAILED=$((TESTS_FAILED + 1))

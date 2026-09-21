@@ -61,12 +61,24 @@ pub fn allocated() -> usize {
 /// built from `abc123-dirty` and a mislabelled bundle passes. The delimiters
 /// make the match exact.
 ///
-/// `build_version()` returns a slice of this constant rather than `env!`
-/// directly, so the delimited form is what lands in `.rodata` and cannot be
-/// optimised away while anything reads the version.
+/// Kept in the binary by [`BUILD_STAMP_ANCHOR`], not by `build_version()`.
 const BUILD_STAMP: &str = concat!("<<ANYKA_BUILD_VERSION:", env!("ANYKA_BUILD_VERSION"), ">>");
 
 const BUILD_STAMP_PREFIX: &str = "<<ANYKA_BUILD_VERSION:";
+
+/// Forces the *delimited* stamp into the loadable image.
+///
+/// `build_version()` slices `BUILD_STAMP` at compile-time-constant bounds, so
+/// under `lto = true` + `opt-level = 3` LLVM folds the slice to a reference to
+/// the inner bytes alone and the delimiters never reach `.rodata`. They then
+/// survived only in DWARF — which `profile.release`'s `strip = true` discards,
+/// leaving `package_bundle.sh`'s grep to fail on every stripped release build
+/// while passing on unstripped ones.
+///
+/// `#[used]` puts the reference in `llvm.used`, so the pointer (and with it the
+/// full delimited string it points at) is emitted and kept.
+#[used]
+static BUILD_STAMP_ANCHOR: &[u8] = BUILD_STAMP.as_bytes();
 
 /// `git describe` at build time — the version reported as `FirmwareVersion`
 /// and in `/api/diagnostics`. Emitted by `build.rs`; never missing, so this
