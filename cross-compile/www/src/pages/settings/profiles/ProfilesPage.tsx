@@ -57,8 +57,10 @@ import {
   createProfile,
   deleteProfile,
   getProfiles,
+  removeConfiguration,
 } from '@/services/profileService';
 
+import { ConfigPickerDialog } from './ConfigPickerDialog';
 import { ConfigSection } from './ConfigSection';
 import { VideoEncoderDialog } from './VideoEncoderDialog';
 
@@ -69,6 +71,18 @@ const createProfileSchema = z.object({
 
 type CreateProfileData = z.infer<typeof createProfileSchema>;
 
+type ConfigFamily =
+  'VideoSource' | 'VideoEncoder' | 'AudioSource' | 'AudioEncoder' | 'PTZ' | 'Metadata';
+
+const FAMILY_TITLES: Record<ConfigFamily, string> = {
+  VideoSource: 'Video source',
+  VideoEncoder: 'Video encoder',
+  AudioSource: 'Audio source',
+  AudioEncoder: 'Audio encoder',
+  PTZ: 'PTZ',
+  Metadata: 'Metadata',
+};
+
 export default function ProfilesPage() {
   const queryClient = useQueryClient();
   const [showCreateDialog, setShowCreateDialog] = useState(false);
@@ -76,6 +90,10 @@ export default function ProfilesPage() {
   const [editingEncoder, setEditingEncoder] = useState<{
     profileToken: string;
     encoderToken: string;
+  } | null>(null);
+  const [picker, setPicker] = useState<{
+    profileToken: string;
+    family: ConfigFamily;
   } | null>(null);
 
   // Track open state for each profile card
@@ -117,6 +135,21 @@ export default function ProfilesPage() {
     },
     onError: (error) => {
       toast.error('Failed to delete profile', {
+        description: error instanceof Error ? error.message : 'An error occurred',
+      });
+    },
+  });
+
+  // Detach a configuration from a profile (a profile-field update, not a delete).
+  const removeMutation = useMutation({
+    mutationFn: (args: { profileToken: string; family: ConfigFamily }) =>
+      removeConfiguration(args.profileToken, args.family),
+    onSuccess: () => {
+      toast.success('Configuration removed');
+      queryClient.invalidateQueries({ queryKey: ['profiles'] });
+    },
+    onError: (error) => {
+      toast.error('Failed to remove configuration', {
         description: error instanceof Error ? error.message : 'An error occurred',
       });
     },
@@ -270,6 +303,15 @@ export default function ProfilesPage() {
                         active={!!profile.videoSourceConfiguration}
                         token={profile.videoSourceConfiguration?.token}
                         details={profile.videoSourceConfiguration?.name}
+                        onAdd={() =>
+                          setPicker({ profileToken: profile.token, family: 'VideoSource' })
+                        }
+                        onRemove={() =>
+                          removeMutation.mutate({
+                            profileToken: profile.token,
+                            family: 'VideoSource',
+                          })
+                        }
                         testId={`video-source-config-${profile.token}`}
                       />
 
@@ -293,6 +335,15 @@ export default function ProfilesPage() {
                                 })
                             : undefined
                         }
+                        onAdd={() =>
+                          setPicker({ profileToken: profile.token, family: 'VideoEncoder' })
+                        }
+                        onRemove={() =>
+                          removeMutation.mutate({
+                            profileToken: profile.token,
+                            family: 'VideoEncoder',
+                          })
+                        }
                         testId={`video-encoder-config-${profile.token}`}
                       />
 
@@ -303,6 +354,16 @@ export default function ProfilesPage() {
                         active={!!profile.audioSourceConfiguration}
                         token={profile.audioSourceConfiguration?.token}
                         details={profile.audioSourceConfiguration?.name}
+                        onAdd={() =>
+                          setPicker({ profileToken: profile.token, family: 'AudioSource' })
+                        }
+                        onRemove={() =>
+                          removeMutation.mutate({
+                            profileToken: profile.token,
+                            family: 'AudioSource',
+                          })
+                        }
+                        testId={`audio-source-config-${profile.token}`}
                       />
 
                       {/* Audio Encoder Config */}
@@ -312,6 +373,16 @@ export default function ProfilesPage() {
                         active={!!profile.audioEncoderConfiguration}
                         token={profile.audioEncoderConfiguration?.token}
                         details={profile.audioEncoderConfiguration?.name}
+                        onAdd={() =>
+                          setPicker({ profileToken: profile.token, family: 'AudioEncoder' })
+                        }
+                        onRemove={() =>
+                          removeMutation.mutate({
+                            profileToken: profile.token,
+                            family: 'AudioEncoder',
+                          })
+                        }
+                        testId={`audio-encoder-config-${profile.token}`}
                       />
 
                       {/* PTZ Config */}
@@ -321,6 +392,7 @@ export default function ProfilesPage() {
                         active={!!profile.ptzConfiguration}
                         token={profile.ptzConfiguration?.token}
                         details={profile.ptzConfiguration?.name}
+                        testId={`ptz-config-${profile.token}`}
                       />
 
                       {/* Metadata/Analytics */}
@@ -330,6 +402,7 @@ export default function ProfilesPage() {
                         active={!!profile.metadataConfiguration} // Assuming metadata implies analytics for now
                         token={profile.metadataConfiguration?.token}
                         details={profile.metadataConfiguration?.name}
+                        testId={`metadata-config-${profile.token}`}
                       />
                     </div>
                   </div>
@@ -439,6 +512,20 @@ export default function ProfilesPage() {
           <VideoEncoderDialog
             encoderToken={editingEncoder.encoderToken}
             onClose={() => setEditingEncoder(null)}
+          />
+        )}
+
+        {/* Configuration picker (attach a device config to this profile) */}
+        {picker && (
+          <ConfigPickerDialog
+            open
+            onOpenChange={(o) => {
+              if (!o) setPicker(null);
+            }}
+            title={FAMILY_TITLES[picker.family]}
+            profileToken={picker.profileToken}
+            configType={picker.family}
+            onAttached={() => queryClient.invalidateQueries({ queryKey: ['profiles'] })}
           />
         )}
       </div>

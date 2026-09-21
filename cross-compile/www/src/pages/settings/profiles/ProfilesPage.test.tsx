@@ -6,13 +6,17 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  type MediaProfile,
   type VideoEncoderConfiguration,
   type VideoEncoderConfigurationOptions,
+  addConfiguration,
   createProfile,
   deleteProfile,
+  getCompatibleConfigurations,
   getProfiles,
   getVideoEncoderConfiguration,
   getVideoEncoderConfigurationOptions,
+  removeConfiguration,
   setVideoEncoderConfiguration,
 } from '@/services/profileService';
 import {
@@ -35,6 +39,9 @@ vi.mock('@/services/profileService', () => ({
   getVideoEncoderConfiguration: vi.fn(),
   getVideoEncoderConfigurationOptions: vi.fn(),
   setVideoEncoderConfiguration: vi.fn(),
+  getCompatibleConfigurations: vi.fn(),
+  addConfiguration: vi.fn(),
+  removeConfiguration: vi.fn(),
 }));
 
 describe('ProfilesPage', () => {
@@ -440,6 +447,65 @@ describe('ProfilesPage', () => {
         });
       },
       { timeout: 10000 },
+    );
+  });
+});
+
+describe('ProfilesPage config tiles (attach/detach)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const expandProfileCard = async (user: ReturnType<typeof userEvent.setup>, token: string) => {
+    renderWithProviders(<ProfilesPage />);
+    await waitForPageLoad('profiles-title');
+    await user.click(await screen.findByTestId(`profile-expand-${token}`));
+  };
+
+  const tiles: Array<{ family: string; prefix: string }> = [
+    { family: 'VideoSource', prefix: 'video-source-config' },
+    { family: 'VideoEncoder', prefix: 'video-encoder-config' },
+    { family: 'AudioSource', prefix: 'audio-source-config' },
+    { family: 'AudioEncoder', prefix: 'audio-encoder-config' },
+  ];
+
+  it.each(tiles)('attaches a configuration from its tile', async ({ family, prefix }) => {
+    vi.mocked(getProfiles).mockResolvedValue([
+      { token: 'ProfileBare', name: 'Bare', fixed: false } as MediaProfile,
+    ]);
+    vi.mocked(getCompatibleConfigurations).mockResolvedValue([`${family}Config_0`]);
+    vi.mocked(addConfiguration).mockResolvedValue(undefined);
+
+    const user = userEvent.setup();
+    await expandProfileCard(user, 'ProfileBare');
+
+    await user.click(await screen.findByTestId(`${prefix}-ProfileBare-add-button`));
+    await user.click(await screen.findByTestId(`config-picker-option-${family}Config_0`));
+    await user.click(await screen.findByTestId('config-picker-attach'));
+
+    await waitFor(() =>
+      expect(addConfiguration).toHaveBeenCalledWith('ProfileBare', family, `${family}Config_0`),
+    );
+  });
+
+  it('detaches a configured audio source from its tile', async () => {
+    vi.mocked(getProfiles).mockResolvedValue([
+      {
+        token: 'ProfileAudio',
+        name: 'Audio',
+        fixed: false,
+        audioSourceConfiguration: { token: 'AudioSourceConfig_0', name: 'Mic' },
+      } as MediaProfile,
+    ]);
+    vi.mocked(removeConfiguration).mockResolvedValue(undefined);
+
+    const user = userEvent.setup();
+    await expandProfileCard(user, 'ProfileAudio');
+
+    await user.click(await screen.findByTestId('audio-source-config-ProfileAudio-remove-button'));
+
+    await waitFor(() =>
+      expect(removeConfiguration).toHaveBeenCalledWith('ProfileAudio', 'AudioSource'),
     );
   });
 });

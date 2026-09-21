@@ -8,7 +8,9 @@ export function ConfigSection({
   active,
   token,
   details,
+  onAdd,
   onEdit,
+  onRemove,
   testId,
 }: {
   readonly title: string;
@@ -16,7 +18,9 @@ export function ConfigSection({
   readonly active: boolean;
   readonly token?: string;
   readonly details?: string;
+  readonly onAdd?: () => void;
   readonly onEdit?: () => void;
+  readonly onRemove?: () => void;
   readonly testId?: string;
 }) {
   return (
@@ -36,15 +40,41 @@ export function ConfigSection({
       ) : (
         <div className="text-[12px] text-[#636366] italic">Not configured</div>
       )}
-      <Button
-        variant="link"
-        className={`mt-[8px] h-auto p-0 text-[11px] ${active ? 'text-[#0a84ff]' : 'text-[#a1a1a6]'}`}
-        onClick={onEdit}
-        disabled={!onEdit}
-        data-testid={testId ? `${testId}-edit-button` : undefined}
-      >
-        {active ? 'Edit' : 'Add (Coming Soon)'}
-      </Button>
+      <div className="mt-[8px] flex gap-[8px]">
+        {active ? (
+          <>
+            {onEdit && (
+              <Button
+                variant="link"
+                className="h-auto p-0 text-[11px] text-[#0a84ff]"
+                onClick={onEdit}
+                data-testid={testId ? `${testId}-edit-button` : undefined}
+              >
+                Edit
+              </Button>
+            )}
+            {onRemove && (
+              <Button
+                variant="link"
+                className="h-auto p-0 text-[11px] text-[#a1a1a6] hover:text-[#ff375f]"
+                onClick={onRemove}
+                data-testid={testId ? `${testId}-remove-button` : undefined}
+              >
+                Remove
+              </Button>
+            )}
+          </>
+        ) : onAdd ? (
+          <Button
+            variant="link"
+            className="h-auto p-0 text-[11px] text-[#0a84ff]"
+            onClick={onAdd}
+            data-testid={testId ? `${testId}-add-button` : undefined}
+          >
+            Add
+          </Button>
+        ) : null}
+      </div>
     </div>
   );
 }
