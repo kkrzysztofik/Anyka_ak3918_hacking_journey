@@ -9,6 +9,7 @@ import { escapeXml, soapRequest } from '@/services/soap/client';
 export type IrCutFilterMode = 'ON' | 'OFF' | 'AUTO';
 export type WideDynamicMode = 'ON' | 'OFF';
 export type BacklightCompensationMode = 'ON' | 'OFF';
+export type ExposureMode = 'AUTO' | 'MANUAL';
 
 export interface ImagingSettings {
   brightness: number;
@@ -16,6 +17,7 @@ export interface ImagingSettings {
   saturation: number;
   sharpness: number;
   irCutFilter?: IrCutFilterMode;
+  exposureMode?: ExposureMode;
   wideDynamicRange?: {
     mode: WideDynamicMode;
     level: number;
@@ -39,6 +41,10 @@ export interface ImagingOptions {
   backlightCompensation?: {
     modes: BacklightCompensationMode[];
     level?: { min: number; max: number };
+  };
+  exposure?: {
+    modes: ExposureMode[];
+    gainRange?: { min: number; max: number };
   };
 }
 
@@ -136,6 +142,14 @@ export async function getImagingSettings(
 
   // Parse optional settings using helper functions
   result.irCutFilter = parseIrCutFilter(settings?.IrCutFilter);
+  const exposure = settings?.Exposure as Record<string, unknown> | undefined;
+  if (
+    exposure &&
+    typeof exposure.Mode === 'string' &&
+    (exposure.Mode === 'AUTO' || exposure.Mode === 'MANUAL')
+  ) {
+    result.exposureMode = exposure.Mode as ExposureMode;
+  }
   result.wideDynamicRange = parseWideDynamicRangeSettings(
     settings?.WideDynamicRange as Record<string, unknown> | undefined,
   );
@@ -169,6 +183,9 @@ export async function setImagingSettings(
   }
   if (settings.irCutFilter !== undefined) {
     settingsXmlParts.push(`<tt:IrCutFilter>${settings.irCutFilter}</tt:IrCutFilter>`);
+  }
+  if (settings.exposureMode !== undefined) {
+    settingsXmlParts.push(`<tt:Exposure><tt:Mode>${settings.exposureMode}</tt:Mode></tt:Exposure>`);
   }
   if (settings.wideDynamicRange !== undefined) {
     settingsXmlParts.push(
@@ -320,6 +337,20 @@ export async function getImagingOptions(
   result.backlightCompensation = parseBacklightCompensation(
     options.BacklightCompensation as Record<string, unknown> | undefined,
   );
+
+  // Parse Exposure options (mode list + advertised gain range, if any)
+  const exposureOptions = options.Exposure as Record<string, unknown> | undefined;
+  if (exposureOptions) {
+    const modes = Array.isArray(exposureOptions.Mode)
+      ? (exposureOptions.Mode as unknown[])
+          .map(String)
+          .filter((m): m is ExposureMode => m === 'AUTO' || m === 'MANUAL')
+      : [];
+    result.exposure = {
+      modes,
+      gainRange: parseRange(exposureOptions.Gain as Record<string, unknown> | undefined),
+    };
+  }
 
   return result;
 }

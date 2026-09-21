@@ -10,7 +10,7 @@ raw units from `struct vpss_isp_ae_run_info`) plus one RTSP frame's mean Y per s
 
 | Quantity | Raw unit | Conversion | Confidence |
 |---|---|---|---|
-| `a_gain` (analog gain) | Q8 fixed point, **256 = 1.0×** | dB = 20·log₁₀(a_gain / 256); max 16384 = 64× ≈ +36.06 dB | **High** — the auto state at rest sits at exactly 256, and the gain-ceiling sweep shows the operating point tracking the ceiling at 512/1024/2048/8192, i.e. the same number-space |
+| `a_gain` (analog gain) | Q8 fixed point, **256 = 1.0×** | dB = 20·log₁₀(a_gain / 256); max 16384 = 64× ≈ +36.12 dB | **High** — the auto state at rest sits at exactly 256, and the gain-ceiling sweep shows the operating point tracking the ceiling at 512/1024/2048/8192, i.e. the same number-space |
 | `exp_time` | sensor lines (vendor unit) | **No µs conversion established** — see below | Unknown |
 | `isp_d_gain` | Q8 (256 = 1×) | same as a_gain | Medium — only one non-256 sample (300) |
 | `avg_lumi` | driver AE target scale (≈0–255, target ≈ 40–55) | not an ONVIF quantity | n/a — used as the convergence signal |
@@ -76,7 +76,7 @@ Pre-sweep baseline (default ceilings `a_gain_max=16384`, `exp_time_max=2250`):
 ## Consequences for the ONVIF surface (Task 11)
 
 - `MinGain`/`MaxGain` **may** be advertised in dB using the Q8 constant above
-  (`AE_GAIN_Q8 = 256`), with the measured max 16384 → +36.06 dB.
+  (`AE_GAIN_Q8 = 256`), with the measured max 16384 → +36.12 dB.
 - `MinExposureTime`/`MaxExposureTime` are **omitted** — the driver keeps them
   in line units and no conversion is established. ONVIF `tt:Exposure20`
   tolerates the fields being absent; the UI degrades to mode + gain.

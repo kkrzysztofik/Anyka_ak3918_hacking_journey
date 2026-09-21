@@ -312,6 +312,16 @@ pub struct WhiteBalanceSettings {
     pub cb_gain: f32,
 }
 
+/// Exposure control state.
+///
+/// Only AUTO exists on this ISP: the AE loop's ceilings are driver-owned and
+/// the manual-AE values are unreachable (see `docs/reference/anyka-ae-units.md`),
+/// so a MANUAL selection would freeze the AE with no way to set it.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ExposureSettings {
+    pub mode: crate::onvif::types::common::ExposureMode,
+}
+
 /// Imaging settings.
 #[derive(Debug, Clone, Default)]
 pub struct ImagingSettings {
@@ -334,6 +344,8 @@ pub struct ImagingSettings {
     pub backlight_compensation: ToggleWithLevel,
     /// White balance.
     pub white_balance: WhiteBalanceSettings,
+    /// Exposure control (AUTO only on this device).
+    pub exposure: ExposureSettings,
 }
 
 /// Imaging options (valid ranges for settings).
@@ -359,6 +371,12 @@ pub struct ImagingOptions {
     pub backlight_compensation_supported: bool,
     /// White balance supported (the ISP SDK offers AUTO and MANUAL).
     pub white_balance_supported: bool,
+    /// Exposure modes the device can actually run. AUTO only: manual AE
+    /// values are unreachable on this ISP, so MANUAL would freeze the AE.
+    pub exposure_modes: Vec<crate::onvif::types::imaging::ExposureMode>,
+    /// Live AE gain ceiling in dB (20·log10 of the Q8 gain over 256), from
+    /// the sensor profile in force; `None` when the read is unavailable.
+    pub ae_max_gain_db: Option<f32>,
 }
 
 impl ImagingOptions {
@@ -375,6 +393,8 @@ impl ImagingOptions {
             wdr_supported: false,
             backlight_compensation_supported: true,
             white_balance_supported: true,
+            exposure_modes: vec![crate::onvif::types::imaging::ExposureMode::AUTO],
+            ae_max_gain_db: None,
         }
     }
 }
@@ -1240,6 +1260,7 @@ mod tests {
                 level: 50.0,
             },
             white_balance: WhiteBalanceSettings::default(),
+            exposure: ExposureSettings::default(),
         };
         assert_eq!(settings.brightness, 50.0);
         assert_eq!(

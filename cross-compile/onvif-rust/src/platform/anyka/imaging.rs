@@ -20,8 +20,8 @@ use async_trait::async_trait;
 use parking_lot::RwLock;
 
 use crate::platform::common::{
-    ImagingControl, ImagingOptions, ImagingSettings, PlatformResult, ToggleWithLevel,
-    WhiteBalanceSettings,
+    ExposureSettings, ImagingControl, ImagingOptions, ImagingSettings, PlatformResult,
+    ToggleWithLevel, WhiteBalanceSettings,
 };
 
 use super::video_encoder::AnykaVideoEncoder;
@@ -122,6 +122,7 @@ impl AnykaImagingControl {
                 wdr: ToggleWithLevel::default(),
                 backlight_compensation: ToggleWithLevel::default(),
                 white_balance: WhiteBalanceSettings::default(),
+                exposure: ExposureSettings::default(),
             }),
             video_encoder: None,
             night,
@@ -243,6 +244,13 @@ impl ImagingControl for AnykaImagingControl {
                 "backlight level",
             )?;
         }
+        // MANUAL exposure would freeze the AE at driver-held values with no
+        // path to set them (mae is unexported) — an unrecoverable picture.
+        if settings.exposure.mode != crate::onvif::types::common::ExposureMode::AUTO {
+            return Err(crate::platform::PlatformError::NotSupported(
+                "manual exposure is not supported on this device".to_string(),
+            ));
+        }
 
         // Day/night first: GPIO transitions must not be blocked by ISP color
         // controls (which can fail independently over IPC).
@@ -346,10 +354,17 @@ impl ImagingControl for AnykaImagingControl {
 
     async fn get_options(&self) -> PlatformResult<ImagingOptions> {
         let caps = self.night.capabilities();
+        // The AE gain ceiling is profile-dependent (day/night), so the option
+        // is read live; a failed read degrades to "not advertised" rather than
+        // a stale number. Q8 scale: 256 = 1.0x (docs/reference/anyka-ae-units.md).
+        let ae_max_gain_db = self.ffi.get_ae_attr().await.and_then(|ae| {
+            (ae.a_gain_max > 0).then(|| 20.0f32 * (ae.a_gain_max as f32 / 256.0f32).log10())
+        });
         Ok(ImagingOptions {
             ir_cut_filter_supported: caps.ircut,
             ir_led_supported: caps.ir_led,
             white_light_supported: caps.white_led,
+            ae_max_gain_db,
             ..ImagingOptions::default_options()
         })
     }
@@ -546,6 +561,73 @@ mod tests {
         assert!(control.set_settings(&settings).await.is_err());
     }
 
+    /// MANUAL exposure would freeze the AE at driver-held values with no path
+    /// to set them (mae is unexported by the shipped libs), so the batch must
+    /// be rejected before any knob is applied.
+    #[tokio::test]
+    async fn test_set_settings_rejects_manual_exposure() {
+        use crate::hal::common::imaging::MockImagingHalTrait;
+        use crate::onvif::types::common::ExposureMode;
+
+        let dir = tempfile::tempdir().unwrap();
+        let paths = crate::platform::anyka::night_mode::NodePaths::rooted(dir.path(), dir.path());
+        let mut mock_ffi = MockImagingHalTrait::new();
+        mock_ffi.expect_set_brightness().times(0);
+
+        let control = AnykaImagingControl::with_ffi_and_paths(
+            Arc::new(mock_ffi),
+            paths,
+            crate::config::types::ImagingConfig::default(),
+            None,
+        );
+
+        let settings = ImagingSettings {
+            brightness: 60.0,
+            exposure: crate::platform::common::ExposureSettings {
+                mode: ExposureMode::MANUAL,
+            },
+            ..ImagingSettings::default()
+        };
+
+        let err = control.set_settings(&settings).await.unwrap_err();
+        assert!(matches!(
+            err,
+            crate::platform::PlatformError::NotSupported(_)
+        ));
+    }
+
+    /// The gain ceiling is profile-dependent (day/night), so GetOptions reads
+    /// it live and converts the measured Q8 scale (256 = 1.0x) to dB:
+    /// 16384 = 64x = 20*log10(64) ~= 36.12 dB.
+    #[tokio::test]
+    async fn test_get_options_converts_ae_gain_ceiling_to_db() {
+        use crate::hal::common::imaging::{AeAttr, MockImagingHalTrait};
+
+        let dir = tempfile::tempdir().unwrap();
+        let paths = crate::platform::anyka::night_mode::NodePaths::rooted(dir.path(), dir.path());
+        let mut mock_ffi = MockImagingHalTrait::new();
+        mock_ffi.expect_get_ae_attr().returning(|| {
+            Some(AeAttr {
+                exp_time_max: 2250,
+                exp_time_min: 0,
+                d_gain_max: 24,
+                a_gain_max: 16384,
+                target_lumiance: 55,
+            })
+        });
+
+        let control = AnykaImagingControl::with_ffi_and_paths(
+            Arc::new(mock_ffi),
+            paths,
+            crate::config::types::ImagingConfig::default(),
+            None,
+        );
+
+        let options = control.get_options().await.unwrap();
+        let db = options.ae_max_gain_db.expect("ceiling advertised");
+        assert!((db - 36.12).abs() < 0.01, "got {db}");
+    }
+
     /// AUTO means wb_type 1 and — crucially — no manual-gain write: an mwb
     /// write under AUTO would pin the gains the AWB is supposed to drive.
     #[tokio::test]
@@ -720,8 +802,10 @@ mod tests {
 
         let dir = tempfile::tempdir().expect("tempdir");
         let paths = crate::platform::anyka::night_mode::NodePaths::rooted(dir.path(), dir.path());
+        let mut ffi = MockImagingHalTrait::new();
+        ffi.expect_get_ae_attr().returning(|| None);
         let control = AnykaImagingControl::with_ffi_and_paths(
-            Arc::new(MockImagingHalTrait::new()),
+            Arc::new(ffi),
             paths,
             crate::config::types::ImagingConfig::default(),
             None,
@@ -745,8 +829,10 @@ mod tests {
             std::fs::write(paths.node(n), "0").unwrap();
         }
 
+        let mut ffi = MockImagingHalTrait::new();
+        ffi.expect_get_ae_attr().returning(|| None);
         let control = AnykaImagingControl::with_ffi_and_paths(
-            Arc::new(MockImagingHalTrait::new()),
+            Arc::new(ffi),
             paths,
             crate::config::types::ImagingConfig::default(),
             None,
