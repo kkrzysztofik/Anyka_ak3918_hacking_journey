@@ -126,16 +126,14 @@ describe('ImagingPage', () => {
     expect(selects.length).toBeGreaterThan(0);
   });
 
-  it('should show WDR level slider when WDR mode is ON', async () => {
+  it('stubs the WDR control — writes fault on this ISP (Task 18 finding)', async () => {
     renderWithProviders(<ImagingPage />);
 
-    await waitFor(() => {
-      expect(screen.getByTestId('imaging-wdr-level-label')).toBeInTheDocument();
-    });
-
-    // WDR level value should be present (may appear multiple times)
-    const wdrLevelValues = screen.getAllByText('60%');
-    expect(wdrLevelValues.length).toBeGreaterThan(0);
+    const select = await screen.findByTestId('imaging-wdr-mode-select');
+    expect(select).toBeDisabled();
+    // The level slider the mode used to reveal is gone with it.
+    expect(screen.queryByTestId('imaging-wdr-level-label')).not.toBeInTheDocument();
+    expect(screen.getByText('Unavailable on this ISP')).toBeInTheDocument();
   });
 
   it('should show backlight level slider when backlight compensation is ON', async () => {
@@ -560,23 +558,16 @@ describe('ImagingPage', () => {
       expect(irCutFilterSelect).toHaveValue('ON');
     });
 
-    it('should change WDR mode and show level slider when ON', async () => {
+    it('stubs the WDR mode select — the level slider it reveals is gone', async () => {
       renderWithProviders(<ImagingPage />);
 
       await waitFor(() => {
         expect(screen.getByTestId('imaging-title')).toBeInTheDocument();
       });
 
-      // Find WDR mode select (it's in the Backlight & WDR card)
-      const selects = screen.getAllByRole('combobox');
-      // WDR mode select should be present
-      expect(selects.length).toBeGreaterThan(0);
-
-      // When WDR mode is ON, the level slider should be visible
-      // From mock data, WDR mode is ON, so level slider should be visible
-      await waitFor(() => {
-        expect(screen.getByTestId('imaging-wdr-level-label')).toBeInTheDocument();
-      });
+      const select = screen.getByTestId('imaging-wdr-mode-select');
+      expect(select).toBeDisabled();
+      expect(screen.queryByTestId('imaging-wdr-level-label')).not.toBeInTheDocument();
     });
 
     it('should change backlight compensation mode and show level slider when ON', async () => {
@@ -854,27 +845,39 @@ describe('ImagingPage', () => {
     });
   });
 
-  it('fires exactly one mutation for a slider drag (commit, not per tick)', async () => {
+  it('writes once per hue commit and never on intermediate steps', async () => {
     renderWithProviders(<ImagingPage />);
 
     await waitFor(() => {
       expect(screen.getByTestId('imaging-hue-slider')).toBeInTheDocument();
     });
 
-    // Radix renders one thumb per value; move it several steps.
+    // Radix renders one thumb per value; it is the element that takes focus.
     const thumb = document
       .querySelector('[data-testid="imaging-hue-slider"]')
-      ?.querySelector('[role="slider"]');
+      ?.querySelector('[role="slider"]') as HTMLElement | null;
     expect(thumb).not.toBeNull();
-    for (const key of ['ArrowRight', 'ArrowRight', 'ArrowRight', 'ArrowLeft']) {
-      fireEvent.keyDown(thumb as Element, { key, code: key, keyCode: 39 });
-    }
-    expect(putAdvancedImaging).not.toHaveBeenCalled();
+    fireEvent.focusIn(thumb!);
 
-    // Commit via the mouseup path is not simulated in jsdom, so assert the
-    // invariant the commit design guarantees: intermediate values never
-    // trigger a write, and the committed value is the last one shown.
-    expect(screen.getByTestId('imaging-hue-slider')?.textContent).toBeDefined();
+    // Intermediate (change-only) events must never write. A keyboard step on
+    // the controlled slider updates the displayed value through
+    // onValueChange without firing onValueCommit — the same change-only path
+    // a drag tick takes.
+    const mock = vi.mocked(putAdvancedImaging);
+    const initial = mock.mock.calls.length;
+    fireEvent.keyDown(thumb!, { key: 'ArrowRight', code: 'ArrowRight', keyCode: 39 });
+    fireEvent.keyDown(thumb!, { key: 'ArrowRight', code: 'ArrowRight', keyCode: 39 });
+    expect(mock.mock.calls.length).toBe(initial);
+
+    // The pointer-up that ends a real drag fires onValueCommit, which
+    // jsdom cannot reproduce (react-aria's slide-end never fires from
+    // synthetic pointer events here, and this Radix build discards the
+    // keyboard commit on a controlled slider). The commit side of the
+    // invariant is therefore covered by its verifiable halves: the
+    // advanced mutation performs exactly one service write when invoked
+    // (the select-based tests below drive the same advancedMutation), and
+    // the regression this design exists to prevent — a write per
+    // intermediate value — is the one asserted above.
   });
 
   it('saves the picture style when the select changes', async () => {

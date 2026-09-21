@@ -151,6 +151,7 @@ export default function ImagingPage() {
           prev.saturation === settings.saturation &&
           prev.sharpness === settings.sharpness &&
           prev.irCutFilter === settings.irCutFilter &&
+          (prev.exposureMode ?? 'AUTO') === (settings.exposureMode ?? 'AUTO') &&
           JSON.stringify(prev.wideDynamicRange) === JSON.stringify(settings.wideDynamicRange) &&
           JSON.stringify(prev.backlightCompensation) ===
             JSON.stringify(settings.backlightCompensation)
@@ -631,66 +632,31 @@ export default function ImagingPage() {
                         Backlight & WDR
                       </SettingsCardTitle>
                       <SettingsCardDescription>
-                        Wide Dynamic Range and backlight compensation
+                        Backlight compensation; WDR is unavailable on this ISP
                       </SettingsCardDescription>
                     </div>
                   </div>
                 </SettingsCardHeader>
                 <SettingsCardContent className="space-y-[24px]">
-                  {/* Wide Dynamic Range */}
-                  <div className="space-y-[12px]">
+                  {/* WDR writes are rejected by the ISP on this kernel (the Task 18
+                    gate returned a receiver fault for WDR ON on firmware bdc08439)
+                    — the card says so instead of offering a switch that faults.
+                    Keep the control visible and disabled until the effect path is
+                    fixed, then remove this comment. */}
+                  <div className="pointer-events-none space-y-[12px] opacity-60">
                     <div className="flex items-center justify-between">
                       <Label className="text-[#e5e5e5]">WDR Mode</Label>
+                      <span className="text-[13px] text-[#a1a1a6]">Unavailable on this ISP</span>
                     </div>
                     <select
-                      value={localSettings.wideDynamicRange?.mode || 'OFF'}
-                      onChange={(e) =>
-                        updateSetting('wideDynamicRange', {
-                          mode: e.target.value as 'ON' | 'OFF',
-                          level: localSettings.wideDynamicRange?.level || 50,
-                        })
-                      }
-                      className="h-10 w-full appearance-none rounded-md border border-[#3a3a3c] bg-[#2c2c2e] px-3 py-2 text-sm text-white focus:border-transparent focus:ring-2 focus:ring-[#0a84ff] focus:outline-none"
+                      value="off"
+                      disabled
+                      className="h-10 w-full appearance-none rounded-md border border-[#3a3a3c] bg-[#2c2c2e] px-3 py-2 text-sm text-white disabled:opacity-50"
                       data-testid="imaging-wdr-mode-select"
                     >
-                      {options?.wideDynamicRange?.modes?.map((mode) => (
-                        <option key={mode} value={mode}>
-                          {mode}
-                        </option>
-                      )) || (
-                        <>
-                          <option value="OFF">Off</option>
-                          <option value="ON">On</option>
-                        </>
-                      )}
+                      <option value="off">Off</option>
                     </select>
-                    {localSettings.wideDynamicRange?.mode === 'ON' && (
-                      <div className="space-y-[12px]">
-                        <div className="flex items-center justify-between">
-                          <Label className="text-[#e5e5e5]" data-testid="imaging-wdr-level-label">
-                            WDR Level
-                          </Label>
-                          <span className="text-sm text-[#a1a1a6] tabular-nums">
-                            {localSettings.wideDynamicRange.level}%
-                          </span>
-                        </div>
-                        <Slider
-                          value={[localSettings.wideDynamicRange.level]}
-                          min={options?.wideDynamicRange?.level?.min ?? 0}
-                          max={options?.wideDynamicRange?.level?.max ?? 100}
-                          step={1}
-                          onValueChange={([val]) =>
-                            updateSetting('wideDynamicRange', {
-                              mode: localSettings.wideDynamicRange?.mode || 'OFF',
-                              level: val,
-                            })
-                          }
-                          className="py-1"
-                        />
-                      </div>
-                    )}
                   </div>
-
                   {/* Backlight Compensation */}
                   <div className="space-y-[12px]">
                     <div className="flex items-center justify-between">
@@ -709,7 +675,7 @@ export default function ImagingPage() {
                     >
                       {options?.backlightCompensation?.modes?.map((mode) => (
                         <option key={mode} value={mode}>
-                          {mode}
+                          {mode === 'ON' ? 'On' : 'Off'}
                         </option>
                       )) || (
                         <>
@@ -791,6 +757,12 @@ export default function ImagingPage() {
                           { hue: val },
                           {
                             onSuccess: () => toast.success('Color tint saved'),
+                            onError: (e) => {
+                              toast.error(
+                                e instanceof Error ? e.message : 'Failed to save color tint',
+                              );
+                              setAdvancedLocal(effectiveAdvanced);
+                            },
                           },
                         )
                       }
@@ -806,11 +778,18 @@ export default function ImagingPage() {
                       value={String(effectiveAdvanced.powerHz)}
                       onChange={(e) => {
                         const powerHz = Number(e.target.value) as 50 | 60;
+                        const prev = effectiveAdvanced;
                         setAdvancedLocal({ ...effectiveAdvanced, powerHz });
                         advancedMutation.mutate(
                           { powerHz },
                           {
                             onSuccess: () => toast.success('Mains frequency saved'),
+                            onError: (e) => {
+                              toast.error(
+                                e instanceof Error ? e.message : 'Failed to save mains frequency',
+                              );
+                              setAdvancedLocal(prev);
+                            },
                           },
                         );
                       }}
