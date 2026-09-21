@@ -1067,6 +1067,7 @@ impl ProfileManager {
                 .values()
                 .map(Self::audio_encoder_config_to_stored)
                 .collect(),
+            metadata_configs: Vec::new(),
         }
     }
 
@@ -1160,6 +1161,10 @@ impl ProfileManager {
                 .as_ref()
                 .map(|c| c.token.clone()),
             ptz_config: profile.ptz_configuration.as_ref().map(|c| c.token.clone()),
+            metadata_config: profile
+                .metadata_configuration
+                .as_ref()
+                .map(|c| c.token.clone()),
         }
     }
 

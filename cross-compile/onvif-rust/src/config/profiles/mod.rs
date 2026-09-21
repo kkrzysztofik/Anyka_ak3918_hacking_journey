@@ -55,6 +55,8 @@ pub struct ProfilesFile {
     pub audio_source_configs: Vec<StoredAudioSourceConfig>,
     #[serde(default)]
     pub audio_encoder_configs: Vec<StoredAudioEncoderConfig>,
+    #[serde(default)]
+    pub metadata_configs: Vec<StoredMetadataConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -68,6 +70,8 @@ pub struct StoredProfile {
     pub audio_source_config: Option<String>,
     pub audio_encoder_config: Option<String>,
     pub ptz_config: Option<String>,
+    #[serde(default)]
+    pub metadata_config: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -139,6 +143,21 @@ pub struct StoredAudioEncoderConfig {
     pub encoding: String,
     pub bitrate: Option<u32>,
     pub sample_rate: Option<u32>,
+    pub session_timeout: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StoredMetadataConfig {
+    pub token: String,
+    pub name: String,
+    #[serde(default)]
+    pub use_count: u32,
+    #[serde(default)]
+    pub ptz_status: bool,
+    #[serde(default)]
+    pub ptz_position: bool,
+    #[serde(default)]
+    pub analytics: bool,
     pub session_timeout: Option<String>,
 }
 
@@ -253,6 +272,7 @@ mod tests {
                 audio_source_config: None,
                 audio_encoder_config: None,
                 ptz_config: Some("PTZ_0".to_string()),
+                metadata_config: None,
             }],
             video_sources: vec![StoredVideoSource {
                 token: "VS_0".to_string(),
@@ -289,6 +309,7 @@ mod tests {
                 audio_source_config: None,
                 audio_encoder_config: None,
                 ptz_config: None,
+                metadata_config: None,
             }],
             video_encoder_configs: vec![StoredVideoEncoderConfig {
                 token: "VEC_0".to_string(),
@@ -345,6 +366,7 @@ mod tests {
                 audio_source_config: Some("ASC_0".to_string()),
                 audio_encoder_config: Some("AEC_0".to_string()),
                 ptz_config: Some("PTZ_0".to_string()),
+                metadata_config: None,
             }],
             video_sources: vec![StoredVideoSource {
                 token: "VS_0".to_string(),
@@ -395,6 +417,7 @@ mod tests {
                 sample_rate: Some(8000),
                 session_timeout: Some("PT60S".to_string()),
             }],
+            metadata_configs: vec![],
         };
 
         let storage = ProfileStorage::new(&path);
@@ -466,5 +489,45 @@ height = 1080
         "#;
         let cfg: StoredVideoSourceConfig = toml::from_str(toml).unwrap();
         assert!(!cfg.rotated);
+    }
+
+    #[test]
+    fn metadata_config_round_trips_through_toml() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("profiles.toml");
+        let storage = ProfileStorage::new(&path);
+
+        storage.replace(ProfilesFile {
+            profiles: vec![StoredProfile {
+                token: "Profile_MainStream".to_string(),
+                name: "MainStream".to_string(),
+                fixed: true,
+                video_source_config: None,
+                video_encoder_config: Some("VideoEncoderConfig_0".to_string()),
+                audio_source_config: None,
+                audio_encoder_config: None,
+                ptz_config: None,
+                metadata_config: Some("MetadataConfig_0".to_string()),
+            }],
+            metadata_configs: vec![StoredMetadataConfig {
+                token: "MetadataConfig_0".to_string(),
+                name: "MetadataConfig".to_string(),
+                use_count: 1,
+                ptz_status: true,
+                ptz_position: true,
+                analytics: false,
+                session_timeout: Some("PT60S".to_string()),
+            }],
+            ..Default::default()
+        });
+        storage.save().unwrap();
+
+        let reloaded = ProfileStorage::new(&path);
+        reloaded.load().unwrap();
+        let data = reloaded.snapshot();
+
+        assert_eq!(data.profiles[0].metadata_config.as_deref(), Some("MetadataConfig_0"));
+        assert_eq!(data.metadata_configs.len(), 1);
+        assert!(data.metadata_configs[0].ptz_position);
     }
 }
