@@ -199,6 +199,23 @@ impl ImagingControl for AnykaImagingControl {
         let start = std::time::Instant::now();
         let current = self.settings.read().clone();
 
+        // Validate the whole batch up front. Applying knob-by-knob and
+        // bailing on the first rejection leaves the ISP inconsistent with the
+        // store, and the store is what the UI reads back.
+        crate::hal::common::imaging::validate_onvif_range(settings.brightness, "brightness")?;
+        crate::hal::common::imaging::validate_onvif_range(settings.contrast, "contrast")?;
+        crate::hal::common::imaging::validate_onvif_range(settings.saturation, "saturation")?;
+        crate::hal::common::imaging::validate_onvif_range(settings.sharpness, "sharpness")?;
+        if settings.wdr.enabled {
+            crate::hal::common::imaging::validate_onvif_range(settings.wdr.level, "wdr level")?;
+        }
+        if settings.backlight_compensation.enabled {
+            crate::hal::common::imaging::validate_onvif_range(
+                settings.backlight_compensation.level,
+                "backlight level",
+            )?;
+        }
+
         // Day/night first: GPIO transitions must not be blocked by ISP color
         // controls (which can fail independently over IPC).
         match settings.ir_cut_filter {
@@ -409,6 +426,40 @@ mod tests {
         // Basic compile check - verify the struct is properly defined
         let _ = AnykaImagingControl::with_ffi;
         let _ = AnykaImagingControl::approximately_equal;
+    }
+
+    /// A value the SDK will reject must be caught before anything is applied,
+    /// so a bad request cannot leave the ISP half-configured.
+    ///
+    /// Brightness is 60.0, not the plan's 50.0: the control starts from the
+    /// 50.0 config default, so 50.0 would be skipped as redundant even by the
+    /// unfixed code and the test would not fail pre-fix.
+    #[tokio::test]
+    async fn test_set_settings_rejects_invalid_batch_without_applying() {
+        use crate::hal::common::imaging::MockImagingHalTrait;
+
+        let dir = tempfile::tempdir().unwrap();
+        let paths = crate::platform::anyka::night_mode::NodePaths::rooted(dir.path(), dir.path());
+
+        let mut mock_ffi = MockImagingHalTrait::new();
+        // No setter may be called at all.
+        mock_ffi.expect_set_brightness().times(0);
+        mock_ffi.expect_set_contrast().times(0);
+
+        let control = AnykaImagingControl::with_ffi_and_paths(
+            Arc::new(mock_ffi),
+            paths,
+            crate::config::types::ImagingConfig::default(),
+            None,
+        );
+
+        let settings = ImagingSettings {
+            brightness: 60.0,
+            contrast: 150.0, // out of ONVIF range
+            ..ImagingSettings::default()
+        };
+
+        assert!(control.set_settings(&settings).await.is_err());
     }
 
     #[tokio::test]
