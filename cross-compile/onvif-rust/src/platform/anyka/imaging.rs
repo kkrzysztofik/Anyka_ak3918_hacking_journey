@@ -250,6 +250,18 @@ impl ImagingControl for AnykaImagingControl {
             }
         }
 
+        if current.backlight_compensation != settings.backlight_compensation {
+            if settings.backlight_compensation.enabled {
+                crate::hal::common::imaging::imaging_set_blc(
+                    settings.backlight_compensation.level,
+                    self.ffi.as_ref(),
+                )
+                .await?;
+            } else {
+                crate::hal::common::imaging::imaging_set_blc_disabled(self.ffi.as_ref()).await?;
+            }
+        }
+
         *self.settings.write() = settings.clone();
         self.mark_imaging_update_and_request_idr("set_settings");
         tracing::info!(

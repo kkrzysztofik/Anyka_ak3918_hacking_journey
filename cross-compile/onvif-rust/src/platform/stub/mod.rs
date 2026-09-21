@@ -1468,7 +1468,10 @@ mod tests {
             sharpness: 50.0,
             ir_cut_filter: crate::onvif::types::common::IrCutFilterMode::AUTO,
             ir_led: false,
-            wdr: ToggleWithLevel { enabled: true, ..ToggleWithLevel::default() },
+            wdr: ToggleWithLevel {
+                enabled: true,
+                ..ToggleWithLevel::default()
+            },
             backlight_compensation: ToggleWithLevel::default(),
         };
 
@@ -1719,8 +1722,14 @@ mod tests {
             sharpness: 50.0,
             ir_cut_filter: crate::onvif::types::common::IrCutFilterMode::OFF,
             ir_led: true,
-            wdr: ToggleWithLevel { enabled: true, ..ToggleWithLevel::default() },
-            backlight_compensation: ToggleWithLevel { enabled: true, ..ToggleWithLevel::default() },
+            wdr: ToggleWithLevel {
+                enabled: true,
+                ..ToggleWithLevel::default()
+            },
+            backlight_compensation: ToggleWithLevel {
+                enabled: true,
+                ..ToggleWithLevel::default()
+            },
         };
 
         imaging.set_settings(&new_settings).await.unwrap();

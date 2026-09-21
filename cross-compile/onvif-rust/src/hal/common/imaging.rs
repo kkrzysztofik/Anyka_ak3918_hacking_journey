@@ -72,6 +72,7 @@ pub(crate) trait ImagingHalTrait: Send + Sync {
     async fn set_sharpness(&self, value: i32) -> i32;
     async fn set_ir_filter(&self, enabled: bool) -> i32;
     async fn set_wdr(&self, level: i32) -> i32;
+    async fn set_blc(&self, level: i32) -> i32;
     /// AE average luma (`current_calc_avg_lumi`), or `None` if unavailable.
     async fn get_ae_luma(&self) -> Option<u8>;
     /// The vendor's day/night luminance ratio, or `None` if unavailable.
@@ -191,6 +192,22 @@ pub(crate) async fn imaging_set_wdr(value: f32, ffi: &dyn ImagingHalTrait) -> Pl
 pub(crate) async fn imaging_set_wdr_disabled(ffi: &dyn ImagingHalTrait) -> PlatformResult<()> {
     let ret = ffi.set_wdr(0).await;
     check_result(ret, "imaging_set_wdr_disabled")
+}
+
+/// Apply a backlight-compensation level, as an ONVIF 0-100 value.
+///
+/// BLC has no `ak_vpss` effect, so the daemon takes the same `[-50, 50]`
+/// offset (0 = profile default) and applies it through the low-level ISP SDK.
+pub(crate) async fn imaging_set_blc(value: f32, ffi: &dyn ImagingHalTrait) -> PlatformResult<()> {
+    validate_onvif_range(value, "backlight level")?;
+    let ret = ffi.set_blc(onvif_to_effect_value(value)).await;
+    check_result(ret, "imaging_set_blc")
+}
+
+/// Return backlight compensation to the ISP profile's own setting.
+pub(crate) async fn imaging_set_blc_disabled(ffi: &dyn ImagingHalTrait) -> PlatformResult<()> {
+    let ret = ffi.set_blc(0).await;
+    check_result(ret, "imaging_set_blc_disabled")
 }
 
 #[cfg(test)]
@@ -382,6 +399,35 @@ mod tests {
             }
             _ => panic!("Expected HardwareFailure error"),
         }
+    }
+
+    #[tokio::test]
+    async fn test_imaging_set_blc_sends_effect_offset() {
+        let mut mock_ffi = MockImagingHalTrait::new();
+        mock_ffi
+            .expect_set_blc()
+            .with(eq(-10))
+            .times(1)
+            .returning(|_| AK_SUCCESS_I32);
+        assert!(imaging_set_blc(40.0, &mock_ffi).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_imaging_set_blc_disabled_sends_profile_default() {
+        let mut mock_ffi = MockImagingHalTrait::new();
+        mock_ffi
+            .expect_set_blc()
+            .with(eq(0))
+            .times(1)
+            .returning(|_| AK_SUCCESS_I32);
+        assert!(imaging_set_blc_disabled(&mock_ffi).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_imaging_set_blc_rejects_out_of_range() {
+        let mock_ffi = MockImagingHalTrait::new();
+        // Must fail validation before any IPC call; the mock expects none.
+        assert!(imaging_set_blc(150.0, &mock_ffi).await.is_err());
     }
 
     #[tokio::test]

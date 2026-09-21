@@ -8,6 +8,7 @@
 #include "globals.h"
 #include "ak_vpss.h"
 #include "ak_vi.h"
+#include "ak_isp_sdk.h"
 
 /* ponytail: sole-VI, pass token only if multi-VI appears. */
 static int isp_first_vi(void **out)
@@ -66,6 +67,99 @@ int handle_isp_set_ir_filter(int fd, const uint8_t *req, uint32_t req_len)
 }
 
 /* Return current_calc_avg_lumi for the sole VI. */
+/* CMD_ISP_SET_BLC. Wire format: [i32 level] = 4 bytes, the ONVIF effect
+ * offset [-50, 50] (0 = "use the ISP profile's own setting").
+ *
+ * BLC has no ak_vpss effect, so it goes through the low-level ISP SDK:
+ * a black-level offset lift applied in manual BLC mode. libakispsdk is
+ * already linked and initialised in-process by libplat_vi; never call
+ * AK_ISP_sdk_init here.
+ */
+#define BLC_MODE_MANUAL 0
+#define BLC_MODE_LINKAGE 1
+/*
+ * The compiled driver (component/ispdrv_lib/ak39_isp2_3a.c) applies m_blc
+ * when blc_mode == MODE_MANUAL, and its enum work_mode has MODE_MANUAL=0 /
+ * MODE_LINKAGE=1 — the comments in ak_isp_drv.h and the isptool headers
+ * state the opposite. The driver code is what is actually compiled into the
+ * shipped libs, so we follow it; the hardware gate confirms the direction.
+ */
+/*
+ * bl_*_offset register range is [-2048, 2047] (ak_isp_drv.h). Scaling the
+ * incoming [-50, 50] offset to a quarter of that keeps the full ONVIF
+ * slider range visible in the image without crushing the black point
+ * entirely. Bump it up if the hardware gate shows the top of the slider
+ * is not visibly different.
+ */
+#define BLC_OFFSET_FULL_SCALE 512
+
+/* Pristine profile BLC attr, cached on first touch so a neutral level
+ * can restore the profile's own settings. */
+static AK_ISP_BLC_ATTR g_blc_profile;
+static int g_blc_manual;
+
+int handle_isp_set_blc(int fd, const uint8_t *req, uint32_t req_len)
+{
+    AK_ISP_BLC_ATTR attr;
+    int32_t level;
+    int offset;
+
+    if (req_len < 4) {
+        log_warn("[isp] set_blc: req too short (%u)", req_len);
+        return send_response(fd, STATUS_ERROR, NULL, 0);
+    }
+    level = req_read_i32(req, 0);
+
+    /* Read-modify-write: a fresh struct would zero the tuning fields we do
+     * not model, which is worse than leaving BLC alone. */
+    if (AK_ISP_get_blc_attr(&attr)) {
+        log_warn("[isp] set_blc: read failed; not writing");
+        return send_response(fd, STATUS_ERROR, NULL, 0);
+    }
+    if (!g_blc_manual) {
+        g_blc_profile = attr;
+    }
+
+    if (level == 0) {
+        if (!g_blc_manual) {
+            /* Profile settings already in force; nothing to write. */
+            return send_response(fd, STATUS_OK, NULL, 0);
+        }
+        attr = g_blc_profile; /* restore the profile's own BLC */
+        g_blc_manual = 0;
+    } else {
+        offset = level * BLC_OFFSET_FULL_SCALE / 50;
+        attr.blc_mode = BLC_MODE_MANUAL;
+        attr.m_blc.black_level_enable = 1;
+        attr.m_blc.bl_r_offset = offset;
+        attr.m_blc.bl_gr_offset = offset;
+        attr.m_blc.bl_gb_offset = offset;
+        attr.m_blc.bl_b_offset = offset;
+        g_blc_manual = 1;
+    }
+
+    log_debug("[isp] set_blc level=%d mode=%u", (int)level, (unsigned)attr.blc_mode);
+    return send_response(fd, AK_ISP_set_blc_attr(&attr), NULL, 0);
+}
+
+/* CMD_ISP_GET_BLC. Returns the raw AK_ISP_BLC_ATTR bytes; the daemon does
+ * not interpret them. */
+int handle_isp_get_blc(int fd, const uint8_t *req, uint32_t req_len)
+{
+    AK_ISP_BLC_ATTR attr;
+
+    (void)req;
+    if (req_len != 0) {
+        log_warn("[isp] get_blc: expected empty request (%u)", req_len);
+        return send_response(fd, STATUS_ERROR, NULL, 0);
+    }
+    if (AK_ISP_get_blc_attr(&attr)) {
+        log_warn("[isp] get_blc: read failed");
+        return send_response(fd, STATUS_ERROR, NULL, 0);
+    }
+    return send_response(fd, STATUS_OK, (const uint8_t *)&attr, sizeof(attr));
+}
+
 int handle_isp_get_ae_luma(int fd, const uint8_t *req, uint32_t req_len)
 {
     void *vi;

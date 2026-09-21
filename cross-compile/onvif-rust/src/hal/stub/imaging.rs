@@ -35,6 +35,10 @@ impl ImagingHalTrait for StubImagingHal {
         AK_SUCCESS_I32
     }
 
+    async fn set_blc(&self, _level: i32) -> i32 {
+        AK_SUCCESS_I32
+    }
+
     async fn get_ae_luma(&self) -> Option<u8> {
         None
     }

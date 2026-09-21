@@ -14,8 +14,8 @@ use crate::hal::common::imaging::{AE_ATTR_WIRE_LEN, AWB_STAT_WIRE_LEN, AeAttr, I
 
 use super::{
     AnykaIpc, CMD_ISP_GET_AE_ATTR, CMD_ISP_GET_AE_LUMA, CMD_ISP_GET_AWB_STAT,
-    CMD_ISP_GET_LUM_FACTOR, CMD_ISP_SET_BRIGHTNESS, CMD_ISP_SET_CONTRAST, CMD_ISP_SET_IR_FILTER,
-    CMD_ISP_SET_SATURATION, CMD_ISP_SET_SHARPNESS, CMD_ISP_SET_WDR,
+    CMD_ISP_GET_LUM_FACTOR, CMD_ISP_SET_BLC, CMD_ISP_SET_BRIGHTNESS, CMD_ISP_SET_CONTRAST,
+    CMD_ISP_SET_IR_FILTER, CMD_ISP_SET_SATURATION, CMD_ISP_SET_SHARPNESS, CMD_ISP_SET_WDR,
 };
 
 #[async_trait]
@@ -82,6 +82,17 @@ impl ImagingHalTrait for AnykaIpc {
             Ok((status, _)) => status,
             Err(e) => {
                 error!(error = %e, "set_wdr IPC failed");
+                AK_FAILED_I32
+            }
+        }
+    }
+
+    async fn set_blc(&self, level: i32) -> i32 {
+        let req_data = level.to_le_bytes().to_vec();
+        match self.request_async(CMD_ISP_SET_BLC, &req_data).await {
+            Ok((status, _)) => status,
+            Err(e) => {
+                error!(error = %e, "set_blc IPC failed");
                 AK_FAILED_I32
             }
         }

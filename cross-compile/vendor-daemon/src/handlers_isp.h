@@ -12,6 +12,8 @@ int handle_isp_effect(int fd, const uint8_t *req, uint32_t req_len,
                       int effect_type, const char *name);
 
 int handle_isp_set_ir_filter(int fd, const uint8_t *req, uint32_t req_len);
+int handle_isp_set_blc(int fd, const uint8_t *req, uint32_t req_len);
+int handle_isp_get_blc(int fd, const uint8_t *req, uint32_t req_len);
 int handle_isp_get_ae_luma(int fd, const uint8_t *req, uint32_t req_len);
 int handle_isp_get_lum_factor(int fd, const uint8_t *req, uint32_t req_len);
 int handle_isp_get_ae_attr(int fd, const uint8_t *req, uint32_t req_len);

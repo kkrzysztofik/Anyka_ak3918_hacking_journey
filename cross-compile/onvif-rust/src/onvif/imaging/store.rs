@@ -13,7 +13,9 @@ use crate::config::{PendingWrite, PersistenceHandle, PersistenceService};
 
 use crate::onvif::types::common::{FloatRange, ImagingSettings20, ImagingStatus20};
 use crate::onvif::types::imaging::ImagingOptions20;
-use crate::platform::{ImagingControl, ImagingOptions, ImagingSettings, PlatformError, ToggleWithLevel};
+use crate::platform::{
+    ImagingControl, ImagingOptions, ImagingSettings, PlatformError, ToggleWithLevel,
+};
 
 // ============================================================================
 // Error Types
@@ -982,11 +984,17 @@ mod tests {
         assert_eq!(platform.ir_cut_filter, IrCutFilterMode::ON);
         assert_eq!(
             platform.wdr,
-            ToggleWithLevel { enabled: true, level: 50.0 }
+            ToggleWithLevel {
+                enabled: true,
+                level: 50.0
+            }
         );
         assert_eq!(
             platform.backlight_compensation,
-            ToggleWithLevel { enabled: true, level: 30.0 }
+            ToggleWithLevel {
+                enabled: true,
+                level: 30.0
+            }
         );
     }
 

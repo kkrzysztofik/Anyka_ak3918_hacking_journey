@@ -291,7 +291,10 @@ pub struct ToggleWithLevel {
 impl Default for ToggleWithLevel {
     fn default() -> Self {
         // 50.0 is the ONVIF midpoint, i.e. the ISP profile's own value.
-        Self { enabled: false, level: 50.0 }
+        Self {
+            enabled: false,
+            level: 50.0,
+        }
     }
 }
 
@@ -1163,8 +1166,14 @@ mod tests {
     #[test]
     fn test_imaging_settings_carries_wdr_and_blc_levels() {
         let settings = ImagingSettings {
-            wdr: ToggleWithLevel { enabled: true, level: 70.0 },
-            backlight_compensation: ToggleWithLevel { enabled: false, level: 30.0 },
+            wdr: ToggleWithLevel {
+                enabled: true,
+                level: 70.0,
+            },
+            backlight_compensation: ToggleWithLevel {
+                enabled: false,
+                level: 30.0,
+            },
             ..ImagingSettings::default()
         };
         assert!(settings.wdr.enabled);
@@ -1182,7 +1191,10 @@ mod tests {
             ir_cut_filter: crate::onvif::types::common::IrCutFilterMode::ON,
             ir_led: true,
             wdr: ToggleWithLevel::default(),
-            backlight_compensation: ToggleWithLevel { enabled: true, level: 50.0 },
+            backlight_compensation: ToggleWithLevel {
+                enabled: true,
+                level: 50.0,
+            },
         };
         assert_eq!(settings.brightness, 50.0);
         assert_eq!(
