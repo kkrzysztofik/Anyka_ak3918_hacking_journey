@@ -19,7 +19,9 @@ use std::sync::{Arc, Weak};
 use async_trait::async_trait;
 use parking_lot::RwLock;
 
-use crate::platform::common::{ImagingControl, ImagingOptions, ImagingSettings, PlatformResult};
+use crate::platform::common::{
+    ImagingControl, ImagingOptions, ImagingSettings, PlatformResult, ToggleWithLevel,
+};
 
 use super::video_encoder::AnykaVideoEncoder;
 
@@ -116,8 +118,8 @@ impl AnykaImagingControl {
                 sharpness: cfg.sharpness as f32,
                 ir_cut_filter: cfg.ir_cut_filter,
                 ir_led: cfg.ir_led,
-                wdr: false,
-                backlight_compensation: false,
+                wdr: ToggleWithLevel::default(),
+                backlight_compensation: ToggleWithLevel::default(),
             }),
             video_encoder: None,
             night,

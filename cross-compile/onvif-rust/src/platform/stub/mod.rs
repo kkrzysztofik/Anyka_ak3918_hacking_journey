@@ -15,7 +15,7 @@ use super::common::{
     AudioEncoder, AudioEncoderConfig, AudioEncoding, AudioInput, AudioSourceConfig, BitrateMode,
     DeviceInfo, DnsInfo, ImagingControl, ImagingOptions, ImagingSettings, NetworkInfo,
     NetworkInterfaceInfo, NtpInfo, PTZControl, Platform, PlatformError, PlatformResult, PtzLimits,
-    PtzPosition, PtzPreset, PtzVelocity, Resolution, VideoControl, VideoEncoder,
+    PtzPosition, PtzPreset, PtzVelocity, Resolution, ToggleWithLevel, VideoControl, VideoEncoder,
     VideoEncoderConfig, VideoEncoderOptions, VideoEncoding, VideoInput, VideoSourceConfig,
 };
 
@@ -365,8 +365,8 @@ impl StubPlatformBuilder {
             sharpness: 50.0,
             ir_cut_filter: crate::onvif::types::common::IrCutFilterMode::AUTO,
             ir_led: false,
-            wdr: false,
-            backlight_compensation: false,
+            wdr: ToggleWithLevel::default(),
+            backlight_compensation: ToggleWithLevel::default(),
         }
     }
 
@@ -1468,8 +1468,8 @@ mod tests {
             sharpness: 50.0,
             ir_cut_filter: crate::onvif::types::common::IrCutFilterMode::AUTO,
             ir_led: false,
-            wdr: true,
-            backlight_compensation: false,
+            wdr: ToggleWithLevel { enabled: true, ..ToggleWithLevel::default() },
+            backlight_compensation: ToggleWithLevel::default(),
         };
 
         let platform = StubPlatformBuilder::new()
@@ -1719,8 +1719,8 @@ mod tests {
             sharpness: 50.0,
             ir_cut_filter: crate::onvif::types::common::IrCutFilterMode::OFF,
             ir_led: true,
-            wdr: true,
-            backlight_compensation: true,
+            wdr: ToggleWithLevel { enabled: true, ..ToggleWithLevel::default() },
+            backlight_compensation: ToggleWithLevel { enabled: true, ..ToggleWithLevel::default() },
         };
 
         imaging.set_settings(&new_settings).await.unwrap();
@@ -1732,7 +1732,7 @@ mod tests {
             crate::onvif::types::common::IrCutFilterMode::OFF
         );
         assert!(settings.ir_led);
-        assert!(settings.wdr);
+        assert!(settings.wdr.enabled);
     }
 
     #[tokio::test]

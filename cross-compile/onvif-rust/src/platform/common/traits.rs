@@ -274,6 +274,27 @@ impl PtzLimits {
     };
 }
 
+/// An imaging feature that is either off, or on at a given strength.
+///
+/// ONVIF models WDR and backlight compensation as a mode plus a 0-100 level;
+/// the SDK takes a single signed offset where 0 is the profile default. Keeping
+/// both here means the level survives a round trip instead of being flattened
+/// to a bool.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ToggleWithLevel {
+    /// Whether the feature is active.
+    pub enabled: bool,
+    /// Strength, 0.0 to 100.0. Ignored when `enabled` is false.
+    pub level: f32,
+}
+
+impl Default for ToggleWithLevel {
+    fn default() -> Self {
+        // 50.0 is the ONVIF midpoint, i.e. the ISP profile's own value.
+        Self { enabled: false, level: 50.0 }
+    }
+}
+
 /// Imaging settings.
 #[derive(Debug, Clone, Default)]
 pub struct ImagingSettings {
@@ -290,10 +311,10 @@ pub struct ImagingSettings {
     pub ir_cut_filter: crate::onvif::types::common::IrCutFilterMode,
     /// IR LED enabled.
     pub ir_led: bool,
-    /// Wide dynamic range enabled.
-    pub wdr: bool,
-    /// Backlight compensation enabled.
-    pub backlight_compensation: bool,
+    /// Wide dynamic range.
+    pub wdr: ToggleWithLevel,
+    /// Backlight compensation.
+    pub backlight_compensation: ToggleWithLevel,
 }
 
 /// Imaging options (valid ranges for settings).
@@ -1134,7 +1155,21 @@ mod tests {
             settings.ir_cut_filter,
             crate::onvif::types::common::IrCutFilterMode::AUTO
         );
-        assert!(!settings.wdr);
+        assert!(!settings.wdr.enabled);
+    }
+
+    /// WDR and BLC carry a level in ONVIF, so the platform model must too —
+    /// a bare bool silently discards whatever the operator set.
+    #[test]
+    fn test_imaging_settings_carries_wdr_and_blc_levels() {
+        let settings = ImagingSettings {
+            wdr: ToggleWithLevel { enabled: true, level: 70.0 },
+            backlight_compensation: ToggleWithLevel { enabled: false, level: 30.0 },
+            ..ImagingSettings::default()
+        };
+        assert!(settings.wdr.enabled);
+        assert_eq!(settings.wdr.level, 70.0);
+        assert_eq!(settings.backlight_compensation.level, 30.0);
     }
 
     #[test]
@@ -1146,8 +1181,8 @@ mod tests {
             sharpness: 80.0,
             ir_cut_filter: crate::onvif::types::common::IrCutFilterMode::ON,
             ir_led: true,
-            wdr: false,
-            backlight_compensation: true,
+            wdr: ToggleWithLevel::default(),
+            backlight_compensation: ToggleWithLevel { enabled: true, level: 50.0 },
         };
         assert_eq!(settings.brightness, 50.0);
         assert_eq!(
@@ -1155,7 +1190,8 @@ mod tests {
             crate::onvif::types::common::IrCutFilterMode::ON
         );
         assert!(settings.ir_led);
-        assert!(!settings.wdr);
+        assert!(!settings.wdr.enabled);
+        assert!(settings.backlight_compensation.enabled);
     }
 
     #[test]

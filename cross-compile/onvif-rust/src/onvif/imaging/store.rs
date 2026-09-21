@@ -13,7 +13,7 @@ use crate::config::{PendingWrite, PersistenceHandle, PersistenceService};
 
 use crate::onvif::types::common::{FloatRange, ImagingSettings20, ImagingStatus20};
 use crate::onvif::types::imaging::ImagingOptions20;
-use crate::platform::{ImagingControl, ImagingOptions, ImagingSettings, PlatformError};
+use crate::platform::{ImagingControl, ImagingOptions, ImagingSettings, PlatformError, ToggleWithLevel};
 
 // ============================================================================
 // Error Types
@@ -579,10 +579,10 @@ impl ImagingSettingsStore {
             color_saturation: Some(settings.saturation),
             sharpness: Some(settings.sharpness),
             ir_cut_filter: Some(settings.ir_cut_filter),
-            wide_dynamic_range: if settings.wdr {
+            wide_dynamic_range: if settings.wdr.enabled {
                 Some(WideDynamicRange20 {
                     mode: WideDynamicMode::ON,
-                    level: Some(50.0),
+                    level: Some(settings.wdr.level),
                 })
             } else {
                 Some(WideDynamicRange20 {
@@ -590,10 +590,10 @@ impl ImagingSettingsStore {
                     level: None,
                 })
             },
-            backlight_compensation: if settings.backlight_compensation {
+            backlight_compensation: if settings.backlight_compensation.enabled {
                 Some(BacklightCompensation20 {
                     mode: BacklightCompensationMode::ON,
-                    level: Some(50.0),
+                    level: Some(settings.backlight_compensation.level),
                 })
             } else {
                 Some(BacklightCompensation20 {
@@ -622,18 +622,22 @@ impl ImagingSettingsStore {
             wdr: settings
                 .wide_dynamic_range
                 .as_ref()
-                .map(|wdr| matches!(wdr.mode, WideDynamicMode::ON))
-                .unwrap_or(false),
+                .map(|w| ToggleWithLevel {
+                    enabled: matches!(w.mode, WideDynamicMode::ON),
+                    level: w.level.unwrap_or(50.0),
+                })
+                .unwrap_or_default(),
             backlight_compensation: settings
                 .backlight_compensation
                 .as_ref()
-                .map(|blc| {
-                    matches!(
-                        blc.mode,
+                .map(|b| ToggleWithLevel {
+                    enabled: matches!(
+                        b.mode,
                         crate::onvif::types::common::BacklightCompensationMode::ON
-                    )
+                    ),
+                    level: b.level.unwrap_or(50.0),
                 })
-                .unwrap_or(false),
+                .unwrap_or_default(),
         }
     }
 
@@ -976,8 +980,14 @@ mod tests {
         assert_eq!(platform.saturation, 80.0);
         assert_eq!(platform.sharpness, 45.0);
         assert_eq!(platform.ir_cut_filter, IrCutFilterMode::ON);
-        assert!(platform.wdr);
-        assert!(platform.backlight_compensation);
+        assert_eq!(
+            platform.wdr,
+            ToggleWithLevel { enabled: true, level: 50.0 }
+        );
+        assert_eq!(
+            platform.backlight_compensation,
+            ToggleWithLevel { enabled: true, level: 30.0 }
+        );
     }
 
     #[test]
@@ -989,8 +999,8 @@ mod tests {
         assert_eq!(platform.brightness, 50.0);
         assert_eq!(platform.contrast, 50.0);
         assert_eq!(platform.ir_cut_filter, IrCutFilterMode::AUTO);
-        assert!(!platform.wdr);
-        assert!(!platform.backlight_compensation);
+        assert!(!platform.wdr.enabled);
+        assert!(!platform.backlight_compensation.enabled);
     }
 
     #[test]
@@ -1015,8 +1025,8 @@ mod tests {
 
         let platform = ImagingSettingsStore::onvif_to_platform_settings(&onvif_settings);
         assert_eq!(platform.ir_cut_filter, IrCutFilterMode::OFF);
-        assert!(!platform.wdr);
-        assert!(!platform.backlight_compensation);
+        assert!(!platform.wdr.enabled);
+        assert!(!platform.backlight_compensation.enabled);
     }
 
     #[test]
