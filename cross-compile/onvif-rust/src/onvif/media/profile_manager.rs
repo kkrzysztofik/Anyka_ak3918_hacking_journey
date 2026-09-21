@@ -2097,6 +2097,61 @@ mod tests {
         }
     }
 
+    /// A profile with an attached PTZ and metadata configuration must keep both
+    /// across a restart: save `profiles.toml`, then load it into a fresh storage
+    /// and manager.
+    #[test]
+    fn test_ptz_and_metadata_persist_across_restart() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("profiles.toml");
+        let config = Arc::new(ConfigRuntime::new(Default::default()));
+        let profile = ReferenceToken::from("Profile_Test");
+        let ptz = ReferenceToken::from("PTZConfig_0");
+        let meta = ReferenceToken::from("MetadataConfig_0");
+
+        // First boot: create a profile, attach the default PTZ + metadata configs
+        // (with a detach/re-attach in between), then flush to disk.
+        {
+            let storage = Arc::new(ProfileStorage::new(path.clone()));
+            let first = ProfileManager::with_storage(
+                Arc::clone(&config),
+                Arc::clone(&storage),
+                Resolution::new(1920, 1080),
+            );
+            first
+                .create_profile("TestCam".into(), Some(profile.clone()))
+                .unwrap();
+            first.add_ptz_configuration(&profile, &ptz).unwrap();
+            first.add_metadata_configuration(&profile, &meta).unwrap();
+            first.remove_ptz_configuration(&profile).unwrap();
+            first.add_ptz_configuration(&profile, &ptz).unwrap();
+            storage.save().unwrap();
+        }
+
+        // Restart: a brand-new storage instance that reloads the same file.
+        let storage = Arc::new(ProfileStorage::new(path));
+        storage.load().unwrap();
+        let restarted =
+            ProfileManager::with_storage(Arc::clone(&config), storage, Resolution::new(1920, 1080));
+        let restored = restarted.get_profile(&profile).unwrap();
+        assert_eq!(
+            restored
+                .ptz_configuration
+                .as_ref()
+                .map(|c| c.token.as_str()),
+            Some("PTZConfig_0"),
+            "PTZ configuration must survive a restart"
+        );
+        assert_eq!(
+            restored
+                .metadata_configuration
+                .as_ref()
+                .map(|c| c.token.as_str()),
+            Some("MetadataConfig_0"),
+            "metadata configuration must survive a restart"
+        );
+    }
+
     /// Build a ProfileManager that loads a pre-seeded `ProfilesFile` from storage.
     /// Config defaults to `ptz.enabled = true`.
     fn manager_with_stored(file: ProfilesFile) -> ProfileManager {

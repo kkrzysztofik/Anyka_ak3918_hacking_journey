@@ -858,7 +858,15 @@ fn test_complete_media_workflow() {
         .unwrap();
     assert!(!sources.video_sources.is_empty());
 
-    // 4. Get stream URI for the new profile
+    // 4. Get stream URI for a profile that carries a video encoder. A freshly
+    //    created profile has no encoder, and such a profile cannot be streamed
+    //    (GetStreamUri faults rather than hand out a dead path), so use a
+    //    default profile which does have one.
+    let streamable = profiles
+        .profiles
+        .iter()
+        .find(|p| p.video_encoder_configuration.is_some())
+        .expect("at least one default profile carries a video encoder");
     let stream_uri = service
         .handle_get_stream_uri(GetStreamUri {
             stream_setup: StreamSetup {
@@ -868,7 +876,7 @@ fn test_complete_media_workflow() {
                     tunnel: None,
                 },
             },
-            profile_token: new_profile.profile.token.clone(),
+            profile_token: streamable.token.clone(),
         })
         .unwrap();
     assert!(!stream_uri.media_uri.uri.is_empty());

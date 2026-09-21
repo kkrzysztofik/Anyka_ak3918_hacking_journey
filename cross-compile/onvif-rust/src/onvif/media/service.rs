@@ -10,7 +10,8 @@ use crate::onvif::error::{OnvifError, OnvifResult};
 use crate::onvif::types::media::{
     AddAudioEncoderConfiguration, AddAudioEncoderConfigurationResponse,
     AddAudioSourceConfiguration, AddAudioSourceConfigurationResponse, AddMetadataConfiguration,
-    AddPTZConfiguration, AddVideoEncoderConfiguration, AddVideoEncoderConfigurationResponse,
+    AddMetadataConfigurationResponse, AddPTZConfiguration, AddPTZConfigurationResponse,
+    AddVideoEncoderConfiguration, AddVideoEncoderConfigurationResponse,
     AddVideoSourceConfiguration, AddVideoSourceConfigurationResponse, CreateProfile,
     CreateProfileResponse, DeleteProfile, DeleteProfileResponse, GetAudioEncoderConfiguration,
     GetAudioEncoderConfigurationOptions, GetAudioEncoderConfigurationOptionsResponse,
@@ -20,7 +21,8 @@ use crate::onvif::types::media::{
     GetAudioSourceConfigurationsResponse, GetAudioSources, GetAudioSourcesResponse,
     GetCompatibleAudioEncoderConfigurations, GetCompatibleAudioEncoderConfigurationsResponse,
     GetCompatibleAudioSourceConfigurations, GetCompatibleAudioSourceConfigurationsResponse,
-    GetCompatibleMetadataConfigurations, GetCompatiblePTZConfigurations,
+    GetCompatibleMetadataConfigurations, GetCompatibleMetadataConfigurationsResponse,
+    GetCompatiblePTZConfigurations, GetCompatiblePTZConfigurationsResponse,
     GetCompatibleVideoEncoderConfigurations, GetCompatibleVideoEncoderConfigurationsResponse,
     GetCompatibleVideoSourceConfigurations, GetCompatibleVideoSourceConfigurationsResponse,
     GetMetadataConfiguration, GetMetadataConfigurations, GetMetadataConfigurationsResponse,
@@ -34,7 +36,8 @@ use crate::onvif::types::media::{
     GetVideoSourceConfigurations, GetVideoSourceConfigurationsResponse, GetVideoSources,
     GetVideoSourcesResponse, RemoveAudioEncoderConfiguration,
     RemoveAudioEncoderConfigurationResponse, RemoveAudioSourceConfiguration,
-    RemoveAudioSourceConfigurationResponse, RemoveMetadataConfiguration, RemovePTZConfiguration,
+    RemoveAudioSourceConfigurationResponse, RemoveMetadataConfiguration,
+    RemoveMetadataConfigurationResponse, RemovePTZConfiguration, RemovePTZConfigurationResponse,
     RemoveVideoEncoderConfiguration, RemoveVideoEncoderConfigurationResponse,
     RemoveVideoSourceConfiguration, RemoveVideoSourceConfigurationResponse,
     SetAudioEncoderConfiguration, SetAudioEncoderConfigurationResponse,
@@ -684,6 +687,91 @@ impl MediaService {
         self.profile_manager
             .set_metadata_configuration(request.configuration)?;
         Ok(SetMetadataConfigurationResponse {})
+    }
+
+    /// Handle AddPTZConfiguration request.
+    pub fn handle_add_ptz_configuration(
+        &self,
+        request: AddPTZConfiguration,
+    ) -> OnvifResult<AddPTZConfigurationResponse> {
+        tracing::debug!(
+            "AddPTZConfiguration: profile={}, config={}",
+            request.profile_token,
+            request.configuration_token
+        );
+        self.profile_manager
+            .add_ptz_configuration(&request.profile_token, &request.configuration_token)?;
+        Ok(AddPTZConfigurationResponse {})
+    }
+
+    /// Handle RemovePTZConfiguration request.
+    pub fn handle_remove_ptz_configuration(
+        &self,
+        request: RemovePTZConfiguration,
+    ) -> OnvifResult<RemovePTZConfigurationResponse> {
+        tracing::debug!("RemovePTZConfiguration: profile={}", request.profile_token);
+        self.profile_manager
+            .remove_ptz_configuration(&request.profile_token)?;
+        Ok(RemovePTZConfigurationResponse {})
+    }
+
+    /// Handle GetCompatiblePTZConfigurations request.
+    pub fn handle_get_compatible_ptz_configurations(
+        &self,
+        request: GetCompatiblePTZConfigurations,
+    ) -> OnvifResult<GetCompatiblePTZConfigurationsResponse> {
+        tracing::debug!(
+            "GetCompatiblePTZConfigurations for profile: {}",
+            request.profile_token
+        );
+        let configurations = self
+            .profile_manager
+            .get_compatible_ptz_configurations(&request.profile_token);
+        Ok(GetCompatiblePTZConfigurationsResponse { configurations })
+    }
+
+    /// Handle AddMetadataConfiguration request.
+    pub fn handle_add_metadata_configuration(
+        &self,
+        request: AddMetadataConfiguration,
+    ) -> OnvifResult<AddMetadataConfigurationResponse> {
+        tracing::debug!(
+            "AddMetadataConfiguration: profile={}, config={}",
+            request.profile_token,
+            request.configuration_token
+        );
+        self.profile_manager
+            .add_metadata_configuration(&request.profile_token, &request.configuration_token)?;
+        Ok(AddMetadataConfigurationResponse {})
+    }
+
+    /// Handle RemoveMetadataConfiguration request.
+    pub fn handle_remove_metadata_configuration(
+        &self,
+        request: RemoveMetadataConfiguration,
+    ) -> OnvifResult<RemoveMetadataConfigurationResponse> {
+        tracing::debug!(
+            "RemoveMetadataConfiguration: profile={}",
+            request.profile_token
+        );
+        self.profile_manager
+            .remove_metadata_configuration(&request.profile_token)?;
+        Ok(RemoveMetadataConfigurationResponse {})
+    }
+
+    /// Handle GetCompatibleMetadataConfigurations request.
+    pub fn handle_get_compatible_metadata_configurations(
+        &self,
+        request: GetCompatibleMetadataConfigurations,
+    ) -> OnvifResult<GetCompatibleMetadataConfigurationsResponse> {
+        tracing::debug!(
+            "GetCompatibleMetadataConfigurations for profile: {}",
+            request.profile_token
+        );
+        let configurations = self
+            .profile_manager
+            .get_compatible_metadata_configurations(&request.profile_token);
+        Ok(GetCompatibleMetadataConfigurationsResponse { configurations })
     }
 
     // ========================================================================
