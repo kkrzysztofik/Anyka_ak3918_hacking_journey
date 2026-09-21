@@ -421,52 +421,14 @@ int handle_isp_get_awb_stat(int fd, const uint8_t *req, uint32_t req_len)
     return send_response(fd, STATUS_OK, resp, sizeof(resp));
 }
 
-/* AE measurement commands (docs/plans/2026-09-21-imaging-tab-completion.md
- * Task 10): numbers 119-121 because 115-118 are reserved for the Phase-3
- * effect commands. The AE world runs in the kernel (aec_* threads); these
- * ioctls write the same instance the 3A loop reads, so unlike the manual WB
- * branch (dead in the shipped kernel) AE overrides are consumed live. */
+/* AE run-info command (docs/plans/2026-09-21-imaging-tab-completion.md
+ * Task 10): appended at 120 after the Phase-3 effect commands (115-117)
+ * and GET_BLC (118) — the wire protocol is append-only, and 109 (originally
+ * proposed for the AE set-attr) was left unused rather than reclaimed.
+ * The AE world runs in the kernel (aec_* threads); the run-info ioctl reads
+ * the same instance the 3A loop updates, so unlike the manual WB branch
+ * (dead in the shipped kernel) AE state is live. */
 
-/**
- * handle_isp_ae_set_attr - Override AE ceilings, preserving everything else.
- *
- * Wire: [i32 a_gain_max][i32 exp_time_max]; each <= 0 means "leave alone".
- * Read-modify-write is mandatory: the struct carries hist_weight[16],
- * envi_gain_range[10][2] and target_lumiance, none of which we model, and a
- * fresh struct would zero them.
- */
-int handle_isp_ae_set_attr(int fd, const uint8_t *req, uint32_t req_len)
-{
-    void *vi;
-    struct vpss_isp_ae_attr attr;
-    int32_t a_gain_max, exp_time_max;
-
-    if (req_len < 8) {
-        log_warn("[isp] ae_set_attr: req too short (%u)", req_len);
-        return send_response(fd, STATUS_ERROR, NULL, 0);
-    }
-    if (isp_first_vi(&vi) != 0) {
-        log_warn("[isp] ae_set_attr: no VI registered");
-        return send_response(fd, STATUS_ERROR, NULL, 0);
-    }
-
-    memset(&attr, 0, sizeof(attr));
-    if (ak_vpss_isp_get_ae_attr(vi, &attr) != 0 || attr.a_gain_max == 0) {
-        log_warn("[isp] ae_set_attr: read failed or unpopulated; not writing");
-        return send_response(fd, STATUS_ERROR, NULL, 0);
-    }
-
-    a_gain_max = req_read_i32(req, 0);
-    exp_time_max = req_read_i32(req, 4);
-    if (a_gain_max > 0)
-        attr.a_gain_max = (unsigned long)a_gain_max;
-    if (exp_time_max > 0)
-        attr.exp_time_max = (unsigned long)exp_time_max;
-
-    log_debug("[isp] ae_set_attr a_gain_max=%lu exp_time_max=%lu",
-              attr.a_gain_max, attr.exp_time_max);
-    return send_response(fd, ak_vpss_isp_set_ae_attr(vi, &attr), NULL, 0);
-}
 
 /**
  * handle_isp_ae_get_run_info - The AE loop's current operating point.
@@ -499,29 +461,5 @@ int handle_isp_ae_get_run_info(int fd, const uint8_t *req, uint32_t req_len)
               info.current_exp_time, info.current_a_gain, info.current_d_gain,
               info.current_isp_d_gain, info.current_darked_flag);
     return send_response(fd, STATUS_OK, &info, sizeof(info));
-}
-
-/**
- * handle_isp_ae_set_mode - exp_type: 1 = auto exposure (AE loop runs),
- * 0 = manual (the loop applies mae_para instead).
- */
-int handle_isp_ae_set_mode(int fd, const uint8_t *req, uint32_t req_len)
-{
-    AK_ISP_EXP_TYPE type;
-    int32_t mode;
-
-    if (req_len < 4) {
-        log_warn("[isp] ae_set_mode: req too short (%u)", req_len);
-        return send_response(fd, STATUS_ERROR, NULL, 0);
-    }
-    mode = req_read_i32(req, 0);
-    if (mode != 0 && mode != 1) {
-        log_warn("[isp] ae_set_mode: bad mode %d", mode);
-        return send_response(fd, STATUS_ERROR, NULL, 0);
-    }
-
-    type.exp_type = (T_U16)mode;
-    log_debug("[isp] ae_set_mode mode=%d", mode);
-    return send_response(fd, AK_ISP_set_exp_type(&type), NULL, 0);
 }
 

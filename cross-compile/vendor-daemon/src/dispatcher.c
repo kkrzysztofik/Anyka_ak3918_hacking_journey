@@ -391,14 +391,8 @@ int process_request(int fd)
     case CMD_ISP_GET_MWB_ATTR:
         ret = handle_isp_get_mwb_attr(fd, req_buf, req_len);
         break;
-    case CMD_ISP_AE_SET_ATTR:
-        ret = handle_isp_ae_set_attr(fd, req_buf, req_len);
-        break;
     case CMD_ISP_AE_GET_RUN_INFO:
         ret = handle_isp_ae_get_run_info(fd, req_buf, req_len);
-        break;
-    case CMD_ISP_AE_SET_MODE:
-        ret = handle_isp_ae_set_mode(fd, req_buf, req_len);
         break;
 
     /* --- Utility --- */
