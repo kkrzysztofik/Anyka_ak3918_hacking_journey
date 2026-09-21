@@ -70,6 +70,14 @@ pub struct StoredProfile {
     pub audio_source_config: Option<String>,
     pub audio_encoder_config: Option<String>,
     pub ptz_config: Option<String>,
+    /// True only when PTZ was enabled at write time AND the profile has no PTZ
+    /// configuration -- i.e. an explicit RemovePTZConfiguration. A `ptz_config`
+    /// absent for any other reason (seeded while ptz.enabled was false, or a
+    /// pre-detachment file) is false, so `stored_to_profile` re-attaches the
+    /// default on re-enable instead of honouring a "detachment" that never
+    /// happened.
+    #[serde(default)]
+    pub ptz_detached: bool,
     #[serde(default)]
     pub metadata_config: Option<String>,
 }
@@ -272,6 +280,7 @@ mod tests {
                 audio_source_config: None,
                 audio_encoder_config: None,
                 ptz_config: Some("PTZ_0".to_string()),
+                ptz_detached: false,
                 metadata_config: None,
             }],
             video_sources: vec![StoredVideoSource {
@@ -309,6 +318,7 @@ mod tests {
                 audio_source_config: None,
                 audio_encoder_config: None,
                 ptz_config: None,
+                ptz_detached: false,
                 metadata_config: None,
             }],
             video_encoder_configs: vec![StoredVideoEncoderConfig {
@@ -366,6 +376,7 @@ mod tests {
                 audio_source_config: Some("ASC_0".to_string()),
                 audio_encoder_config: Some("AEC_0".to_string()),
                 ptz_config: Some("PTZ_0".to_string()),
+                ptz_detached: false,
                 metadata_config: None,
             }],
             video_sources: vec![StoredVideoSource {
@@ -507,6 +518,7 @@ height = 1080
                 audio_source_config: None,
                 audio_encoder_config: None,
                 ptz_config: None,
+                ptz_detached: false,
                 metadata_config: Some("MetadataConfig_0".to_string()),
             }],
             metadata_configs: vec![StoredMetadataConfig {

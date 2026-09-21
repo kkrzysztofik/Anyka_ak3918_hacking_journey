@@ -1126,9 +1126,17 @@ impl ProfileManager {
         let audio_source_configs = self.audio_source_configs.read();
         let audio_encoder_configs = self.audio_encoder_configs.read();
         let metadata_configs = self.metadata_configs.read();
+        let ptz_enabled = self
+            .config
+            .as_ref()
+            .map(|c| c.read().ptz.enabled)
+            .unwrap_or(true);
 
         ProfilesFile {
-            profiles: profiles.values().map(Self::profile_to_stored).collect(),
+            profiles: profiles
+                .values()
+                .map(|p| Self::profile_to_stored(p, ptz_enabled))
+                .collect(),
             video_sources: video_sources
                 .values()
                 .map(Self::video_source_to_stored)
@@ -1225,7 +1233,7 @@ impl ProfileManager {
 
     // --- Individual converters: ONVIF → Stored ---
 
-    fn profile_to_stored(profile: &Profile) -> StoredProfile {
+    fn profile_to_stored(profile: &Profile, ptz_enabled: bool) -> StoredProfile {
         StoredProfile {
             token: profile.token.clone(),
             name: profile.name.clone(),
@@ -1247,6 +1255,7 @@ impl ProfileManager {
                 .as_ref()
                 .map(|c| c.token.clone()),
             ptz_config: profile.ptz_configuration.as_ref().map(|c| c.token.clone()),
+            ptz_detached: ptz_enabled && profile.ptz_configuration.is_none(),
             metadata_config: profile
                 .metadata_configuration
                 .as_ref()
@@ -1575,15 +1584,17 @@ impl ProfileManager {
             .as_ref()
             .map(|c| c.read().ptz.enabled)
             .unwrap_or(true);
-        // Match the config path: when PTZ is enabled, every profile gets the default
-        // PTZ configuration, even if a persisted `profiles.toml` (seeded while the
-        // feature was off, or written by an older build) has no `ptz_config` token.
-        // Requiring the stored token would permanently strand profiles without PTZ
-        // after re-enabling, and the storage path short-circuits the config path.
-        let ptz_configuration = if ptz_enabled {
-            Some(Self::create_default_ptz_configuration())
-        } else {
+        // A recorded `ptz_detached` means the profile explicitly had its PTZ
+        // configuration removed while ptz was enabled, so it must stay detached.
+        // Any other absent token (seeded while ptz.enabled was false, or a file
+        // written before detachment could be recorded) means "unknown", so we
+        // re-attach the default to avoid stranding profiles without PTZ.
+        let ptz_configuration = if !ptz_enabled {
             None
+        } else if stored.ptz_detached {
+            None
+        } else {
+            Some(Self::create_default_ptz_configuration())
         };
 
         let metadata_configuration = stored.metadata_config.as_ref().and_then(|token| {
@@ -2008,6 +2019,66 @@ mod tests {
                  even if the stored file lacks a token"
             );
         }
+    }
+
+    /// Build a ProfileManager that loads a pre-seeded `ProfilesFile` from storage.
+    /// Config defaults to `ptz.enabled = true`.
+    fn manager_with_stored(file: ProfilesFile) -> ProfileManager {
+        let dir = tempfile::tempdir().unwrap();
+        let storage = Arc::new(ProfileStorage::new(dir.path().join("profiles.toml")));
+        storage.replace(file);
+        storage.save().unwrap();
+        let config = Arc::new(ConfigRuntime::new(Default::default()));
+        ProfileManager::with_storage(config, storage, Resolution::new(1920, 1080))
+    }
+
+    /// A stored profile with no PTZ token and no recorded detachment.
+    fn stored_profile_without_ptz() -> StoredProfile {
+        StoredProfile {
+            token: "Profile_MainStream".to_string(),
+            name: "MainStream".to_string(),
+            fixed: true,
+            video_source_config: None,
+            video_encoder_config: None,
+            audio_source_config: None,
+            audio_encoder_config: None,
+            ptz_config: None,
+            ptz_detached: false,
+            metadata_config: None,
+        }
+    }
+
+    #[test]
+    fn explicit_ptz_detachment_survives_a_reload() {
+        // A profile whose PTZ was removed while ptz was enabled records
+        // `ptz_detached`, so a reload must not silently re-attach it.
+        let mut profile = stored_profile_without_ptz();
+        profile.ptz_detached = true;
+        let manager = manager_with_stored(ProfilesFile {
+            profiles: vec![profile],
+            ..Default::default()
+        });
+        let profile = manager.get_profile(&"Profile_MainStream".to_string()).unwrap();
+        assert!(
+            profile.ptz_configuration.is_none(),
+            "an explicit RemovePTZConfiguration must survive a reload"
+        );
+    }
+
+    #[test]
+    fn non_detached_profile_without_token_reattaches_when_enabled() {
+        // A profile with no token but no recorded detachment (seeded while
+        // ptz.enabled was false, or written before detachment could be recorded)
+        // must regain the default PTZ configuration when ptz is enabled.
+        let manager = manager_with_stored(ProfilesFile {
+            profiles: vec![stored_profile_without_ptz()],
+            ..Default::default()
+        });
+        let profile = manager.get_profile(&"Profile_MainStream".to_string()).unwrap();
+        assert!(
+            profile.ptz_configuration.is_some(),
+            "a non-detached profile must regain PTZ when ptz.enabled is true"
+        );
     }
 
     #[test]
