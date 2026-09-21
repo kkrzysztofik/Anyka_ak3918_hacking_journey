@@ -35,9 +35,9 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use super::Extension;
 use super::common::{
-    AudioEncoderConfiguration, AudioSource, AudioSourceConfiguration, IntRange, MediaUri, Name,
-    Profile, ReferenceToken, StreamSetup, VideoEncoderConfiguration, VideoResolution, VideoSource,
-    VideoSourceConfiguration,
+    AudioEncoderConfiguration, AudioSource, AudioSourceConfiguration, IntRange, MediaUri,
+    MetadataConfiguration, Name, Profile, ReferenceToken, StreamSetup, VideoEncoderConfiguration,
+    VideoResolution, VideoSource, VideoSourceConfiguration,
 };
 
 // ============================================================================
@@ -1434,65 +1434,6 @@ pub struct GetMetadataConfigurationsResponse {
     /// Metadata configurations.
     #[serde(rename = "trt:Configurations", alias = "Configurations", default)]
     pub configurations: Vec<MetadataConfiguration>,
-}
-
-/// Metadata configuration.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct MetadataConfiguration {
-    /// Configuration token.
-    #[serde(rename = "@token")]
-    pub token: ReferenceToken,
-
-    /// User readable name.
-    #[serde(rename = "tt:Name", alias = "Name")]
-    pub name: Name,
-
-    /// Number of references using this configuration.
-    #[serde(rename = "tt:UseCount", alias = "UseCount")]
-    pub use_count: i32,
-
-    /// PTZ status filter.
-    #[serde(
-        rename = "tt:PTZStatus",
-        alias = "PTZStatus",
-        default,
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub ptz_status: Option<PtzFilter>,
-
-    /// Analytics.
-    #[serde(
-        rename = "tt:Analytics",
-        alias = "Analytics",
-        default,
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub analytics: Option<bool>,
-
-    /// Multicast configuration.
-    #[serde(
-        rename = "tt:Multicast",
-        alias = "Multicast",
-        default,
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub multicast: Option<super::common::MulticastConfiguration>,
-
-    /// Session timeout.
-    #[serde(rename = "tt:SessionTimeout", alias = "SessionTimeout")]
-    pub session_timeout: String,
-}
-
-/// PTZ filter for metadata.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-pub struct PtzFilter {
-    /// Enable PTZ status.
-    #[serde(rename = "tt:Status", alias = "Status")]
-    pub status: bool,
-
-    /// Enable PTZ position.
-    #[serde(rename = "tt:Position", alias = "Position")]
-    pub position: bool,
 }
 
 /// SetMetadataConfiguration request.
