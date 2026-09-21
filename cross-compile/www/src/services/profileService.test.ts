@@ -13,6 +13,8 @@ import {
   addVideoSourceConfiguration,
   createProfile,
   deleteProfile,
+  getAudioEncoderConfiguration,
+  getAudioEncoderConfigurationOptions,
   getCompatibleAudioEncoderConfigurations,
   getCompatibleAudioSourceConfigurations,
   getCompatibleMetadataConfigurations,
@@ -29,6 +31,7 @@ import {
   removePTZConfiguration,
   removeVideoEncoderConfiguration,
   removeVideoSourceConfiguration,
+  setAudioEncoderConfiguration,
   setVideoEncoderConfiguration,
   setVideoSourceConfiguration,
 } from '@/services/profileService';
@@ -128,6 +131,74 @@ describe('profile configuration attach/detach/compatible', () => {
       });
     });
   }
+});
+
+describe('audio encoder configuration', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('get parses the audio encoder configuration', async () => {
+    vi.mocked(apiClient.post).mockResolvedValueOnce(
+      createMockSOAPResponse(`
+        <GetAudioEncoderConfigurationResponse>
+          <Configuration token="AudioEncoderConfig_0">
+            <Name>Audio</Name>
+            <UseCount>1</UseCount>
+            <Encoding>G711</Encoding>
+            <Bitrate>32</Bitrate>
+            <SampleRate>8</SampleRate>
+            <SessionTimeout>PT60S</SessionTimeout>
+          </Configuration>
+        </GetAudioEncoderConfigurationResponse>
+      `),
+    );
+    const result = await getAudioEncoderConfiguration('AudioEncoderConfig_0');
+    expect(result).not.toBeNull();
+    expect(result?.token).toBe('AudioEncoderConfig_0');
+    expect(result?.encoding).toBe('G711');
+    expect(result?.bitrate).toBe(32);
+    expect(result?.sampleRate).toBe(8);
+  });
+
+  it('set sends every field back (wholesale replace)', async () => {
+    vi.mocked(apiClient.post).mockResolvedValueOnce(
+      createMockSOAPResponse('<SetAudioEncoderConfigurationResponse />'),
+    );
+    await setAudioEncoderConfiguration({
+      token: 'AudioEncoderConfig_0',
+      name: 'Audio',
+      useCount: 1,
+      encoding: 'G726',
+      bitrate: 16,
+      sampleRate: 16,
+      sessionTimeout: 'PT60S',
+    });
+    const body = vi.mocked(apiClient.post).mock.calls[0][1] as string;
+    expect(body).toContain('<tt:Encoding>G726</tt:Encoding>');
+    expect(body).toContain('<tt:Bitrate>16</tt:Bitrate>');
+    expect(body).toContain('<tt:SampleRate>16</tt:SampleRate>');
+    expect(body).toContain('<tt:SessionTimeout>PT60S</tt:SessionTimeout>');
+  });
+
+  it('get options parses per-encoding bitrate and sample-rate lists', async () => {
+    vi.mocked(apiClient.post).mockResolvedValueOnce(
+      createMockSOAPResponse(`
+        <GetAudioEncoderConfigurationOptionsResponse>
+          <Options>
+            <Options>
+              <Encoding>G711</Encoding>
+              <BitrateList><Items>0</Items><Items>32</Items></BitrateList>
+              <SampleRateList><Items>8</Items></SampleRateList>
+            </Options>
+          </Options>
+        </GetAudioEncoderConfigurationOptionsResponse>
+      `),
+    );
+    const result = await getAudioEncoderConfigurationOptions('AudioEncoderConfig_0');
+    expect(result).not.toBeNull();
+    expect(result?.options).toEqual([{ encoding: 'G711', bitrates: [0, 32], sampleRates: [8] }]);
+  });
 });
 
 describe('profileService', () => {

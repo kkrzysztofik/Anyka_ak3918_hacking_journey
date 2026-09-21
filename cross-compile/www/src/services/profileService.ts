@@ -103,6 +103,32 @@ export interface VideoEncoderConfigurationOptions {
   };
 }
 
+/** ONVIF audio encoder configuration (single-encoder AK3918). */
+export interface AudioEncoderConfiguration {
+  token: string;
+  name: string;
+  useCount: number;
+  /** G711, G726, or AAC, as advertised by the device. */
+  encoding: string;
+  /** Bitrate in kbps. */
+  bitrate: number;
+  /** Sample rate in kHz. */
+  sampleRate: number;
+  sessionTimeout: string;
+}
+
+/**
+ * Audio encoder options, honestly reflecting what the device advertises: a
+ * per-encoding list of available bitrates and sample rates.
+ */
+export interface AudioEncoderConfigurationOptions {
+  options: Array<{
+    encoding: string;
+    bitrates: number[];
+    sampleRates: number[];
+  }>;
+}
+
 /**
  * Get all media profiles
  */
@@ -640,4 +666,126 @@ export async function getVideoEncoderConfigurationOptions(
   }
 
   return result;
+}
+
+/**
+ * Get an audio encoder configuration.
+ *
+ * Returns null if the device has no such configuration.
+ */
+export async function getAudioEncoderConfiguration(
+  token: string,
+): Promise<AudioEncoderConfiguration | null> {
+  // NOSONAR - Token comes from device response (trusted source), not user input
+  const body = `<trt:GetAudioEncoderConfiguration>
+    <trt:ConfigurationToken>${token}</trt:ConfigurationToken>
+  </trt:GetAudioEncoderConfiguration>`;
+
+  try {
+    const data = await soapRequest<Record<string, unknown>>(
+      ENDPOINTS.media,
+      body,
+      'GetAudioEncoderConfigurationResponse',
+    );
+    const config = data?.Configuration as Record<string, unknown> | undefined;
+
+    if (!config) {
+      return null;
+    }
+
+    return {
+      token: safeString(config['@_token'], ''),
+      name: safeString(config.Name, ''),
+      useCount: Number(config.UseCount || 0),
+      encoding: safeString(config.Encoding, ''),
+      bitrate: Number(config.Bitrate || 0),
+      sampleRate: Number(config.SampleRate || 0),
+      sessionTimeout: safeString(config.SessionTimeout, ''),
+    };
+  } catch (error) {
+    console.warn('Failed to get audio encoder configuration:', error);
+    return null;
+  }
+}
+
+/**
+ * Set audio encoder configuration.
+ *
+ * The device replaces the stored configuration wholesale, so every field is
+ * sent back — fetch the current config with `getAudioEncoderConfiguration`,
+ * change only what you mean to change, and pass the whole thing here.
+ */
+export async function setAudioEncoderConfiguration(
+  config: AudioEncoderConfiguration,
+  forcePersistence: boolean = true,
+): Promise<void> {
+  // NOSONAR - Token from device, but escaping for defense-in-depth
+  const escapedToken = escapeXml(config.token);
+  const escapedName = escapeXml(config.name);
+  const body = `<trt:SetAudioEncoderConfiguration>
+    <trt:Configuration token="${escapedToken}">
+      <tt:Name>${escapedName}</tt:Name>
+      <tt:UseCount>${config.useCount}</tt:UseCount>
+      <tt:Encoding>${config.encoding}</tt:Encoding>
+      <tt:Bitrate>${config.bitrate}</tt:Bitrate>
+      <tt:SampleRate>${config.sampleRate}</tt:SampleRate>
+      <tt:SessionTimeout>${config.sessionTimeout}</tt:SessionTimeout>
+    </trt:Configuration>
+    <trt:ForcePersistence>${forcePersistence}</trt:ForcePersistence>
+  </trt:SetAudioEncoderConfiguration>`;
+
+  await soapRequest(ENDPOINTS.media, body, 'SetAudioEncoderConfigurationResponse');
+}
+
+/**
+ * Get audio encoder configuration options.
+ *
+ * The device is single-sensor with one audio encoder, so the options are
+ * identical regardless of the requested token.
+ */
+export async function getAudioEncoderConfigurationOptions(
+  token: string,
+): Promise<AudioEncoderConfigurationOptions | null> {
+  // NOSONAR - Token comes from device response (trusted source), not user input
+  const body = `<trt:GetAudioEncoderConfigurationOptions>
+    <trt:ConfigurationToken>${token}</trt:ConfigurationToken>
+  </trt:GetAudioEncoderConfigurationOptions>`;
+
+  try {
+    const data = await soapRequest<Record<string, unknown>>(
+      ENDPOINTS.media,
+      body,
+      'GetAudioEncoderConfigurationOptionsResponse',
+    );
+    const outer = data?.Options as Record<string, unknown> | undefined;
+    const raw = outer?.Options as
+      Array<Record<string, unknown>> | Record<string, unknown> | undefined;
+
+    if (!raw) {
+      return { options: [] };
+    }
+
+    // fast-xml-parser renders repeated <tt:Items> as an array and a single one
+    // as a scalar; normalize both to number[].
+    const intList = (value: unknown): number[] => {
+      if (value == null) return [];
+      const arr = Array.isArray(value) ? value : [value];
+      return arr.map((v) => Number(v));
+    };
+
+    return {
+      options: (Array.isArray(raw) ? raw : [raw]).map((o) => {
+        const bitrateList = o.BitrateList as Record<string, unknown> | undefined;
+        const sampleRateList = o.SampleRateList as Record<string, unknown> | undefined;
+        return {
+          encoding: safeString(o.Encoding, ''),
+          bitrates: intList(bitrateList?.Items),
+          sampleRates: intList(sampleRateList?.Items),
+        };
+      }),
+    };
+  } catch (error) {
+    console.warn('Failed to get audio encoder configuration options:', error);
+    return null;
+  }
 }
