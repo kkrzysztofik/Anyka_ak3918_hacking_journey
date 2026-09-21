@@ -137,8 +137,8 @@ impl DiagnosticsState {
 
     /// The attached hardware platform, if any.
     ///
-    /// Exposed for the temporary `/api/ae-debug` sweep instrumentation in
-    /// [`super::http`]; remove it together with that route.
+    /// Used by the `/api/imaging` and `/api/diagnostics` handlers in
+    /// [`super`] to read and apply imaging state.
     pub fn platform(&self) -> Option<&Arc<dyn Platform>> {
         self.platform.as_ref()
     }

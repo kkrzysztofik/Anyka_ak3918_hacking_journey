@@ -95,14 +95,8 @@ pub(crate) trait ImagingHalTrait: Send + Sync {
     /// if unavailable. A zero bin is a legitimate reading (e.g. AWB going
     /// quiet under IR illumination) and must not be conflated with `None`.
     async fn get_awb_stat(&self) -> Option<[i32; 10]>;
-    /// Override AE ceilings, preserving every other AE attribute (the daemon
-    /// read-modify-writes the struct). `None` leaves a ceiling alone.
-    async fn set_ae_attr(&self, a_gain_max: Option<i32>, exp_time_max: Option<i32>) -> i32;
     /// The AE loop's current operating point, or `None` if unavailable.
     async fn get_ae_run_info(&self) -> Option<AeRunInfo>;
-    /// Select the exposure mode: `true` = auto (the AE loop runs),
-    /// `false` = manual (the driver applies the manual-AE parameters).
-    async fn set_ae_mode(&self, auto: bool) -> i32;
     /// Colour tint (`VPSS_EFFECT_HUE`, raw ISP scale -100..100).
     async fn set_hue(&self, value: i32) -> i32;
     /// Mains frequency for flicker reduction (`VPSS_POWER_HZ`, 50 or 60 only —

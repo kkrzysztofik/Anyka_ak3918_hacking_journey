@@ -123,9 +123,17 @@ impl AnykaImagingControl {
                 backlight_compensation: ToggleWithLevel::default(),
                 white_balance: WhiteBalanceSettings::default(),
                 exposure: ExposureSettings::default(),
-                hue: cfg.hue as f32,
-                power_hz: cfg.power_hz,
-                style_id: cfg.style_id,
+                hue: if cfg.hue.is_finite() && (0.0..=100.0).contains(&cfg.hue) {
+                    cfg.hue as f32
+                } else {
+                    50.0 // neutral — a hand-edited config must not tint the image
+                },
+                power_hz: if cfg.power_hz == 50 || cfg.power_hz == 60 {
+                    cfg.power_hz
+                } else {
+                    50
+                },
+                style_id: cfg.style_id.min(2),
             }),
             video_encoder: None,
             night,
@@ -518,30 +526,6 @@ impl ImagingControl for AnykaImagingControl {
 
     async fn ae_run_info(&self) -> PlatformResult<Option<crate::hal::common::imaging::AeRunInfo>> {
         Ok(self.ffi.get_ae_run_info().await)
-    }
-
-    async fn ae_set_limits(
-        &self,
-        a_gain_max: Option<i32>,
-        exp_time_max: Option<i32>,
-    ) -> PlatformResult<()> {
-        let status = self.ffi.set_ae_attr(a_gain_max, exp_time_max).await;
-        if status != crate::hal::common::AK_SUCCESS_I32 {
-            return Err(crate::platform::PlatformError::HardwareFailure(format!(
-                "ae_set_limits failed (status {status})"
-            )));
-        }
-        Ok(())
-    }
-
-    async fn ae_set_mode(&self, auto: bool) -> PlatformResult<()> {
-        let status = self.ffi.set_ae_mode(auto).await;
-        if status != crate::hal::common::AK_SUCCESS_I32 {
-            return Err(crate::platform::PlatformError::HardwareFailure(format!(
-                "ae_set_mode failed (status {status})"
-            )));
-        }
-        Ok(())
     }
 }
 

@@ -761,21 +761,6 @@ pub trait ImagingControl: Send + Sync {
     async fn ae_run_info(&self) -> PlatformResult<Option<crate::hal::common::imaging::AeRunInfo>> {
         Ok(None)
     }
-
-    /// Override AE ceilings (gain and/or exposure-time maxima). `None` leaves
-    /// a ceiling alone; the platform read-modify-writes the rest.
-    async fn ae_set_limits(
-        &self,
-        _a_gain_max: Option<i32>,
-        _exp_time_max: Option<i32>,
-    ) -> PlatformResult<()> {
-        Err(PlatformError::NotSupported("ae_set_limits".to_string()))
-    }
-
-    /// Select exposure mode: `true` = auto (AE loop), `false` = manual.
-    async fn ae_set_mode(&self, _auto: bool) -> PlatformResult<()> {
-        Err(PlatformError::NotSupported("ae_set_mode".to_string()))
-    }
 }
 
 /// Video geometry control — currently just 180° flip/mirror.

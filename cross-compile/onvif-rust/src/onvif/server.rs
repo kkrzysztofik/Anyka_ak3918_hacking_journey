@@ -657,13 +657,6 @@ impl OnvifServer {
             if state.auth_enabled {
                 // No timeout: see the comment on `timeout` above.
                 api = api.route("/update", put(crate::diagnostics::update::handle_update));
-                // Temporary AE sweep instrumentation (ponytail note in http.rs).
-                api = api.route(
-                    "/ae-debug",
-                    get(crate::diagnostics::http::handle_get_ae_debug)
-                        .put(crate::diagnostics::http::handle_put_ae_debug)
-                        .layer(timeout()),
-                );
                 // A state change, like /update: it must not exist at all when
                 // auth is off, because the middleware passes everything through.
                 api = api.route(

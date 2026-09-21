@@ -335,12 +335,18 @@ impl ImagingSettingsStore {
             let mut platform_settings = ImagingSettingsStore::onvif_to_platform_settings(settings);
             // The ONVIF surface does not model hue / power_hz / style_id, so
             // an ONVIF set must carry the current values across instead of
-            // resetting them to defaults.
-            if let Ok(current) = control.get_settings().await {
-                platform_settings.hue = current.hue;
-                platform_settings.power_hz = current.power_hz;
-                platform_settings.style_id = current.style_id;
-            }
+            // resetting them to defaults. A failed read must fail the whole
+            // set: defaulting here would silently wipe the operator's
+            // advanced knobs (hue 50 / 50 Hz / style 0) on any transient IPC
+            // error during an ordinary brightness set.
+            let current = control.get_settings().await.map_err(|e| {
+                ImagingSettingsError::PlatformError(format!(
+                    "failed to read current settings before applying: {e}"
+                ))
+            })?;
+            platform_settings.hue = current.hue;
+            platform_settings.power_hz = current.power_hz;
+            platform_settings.style_id = current.style_id;
             control.set_settings(&platform_settings).await?;
         }
 

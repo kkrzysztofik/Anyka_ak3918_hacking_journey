@@ -16,12 +16,11 @@ use crate::hal::common::imaging::{
 };
 
 use super::{
-    AnykaIpc, CMD_ISP_AE_GET_RUN_INFO, CMD_ISP_AE_SET_ATTR, CMD_ISP_AE_SET_MODE,
-    CMD_ISP_GET_AE_ATTR, CMD_ISP_GET_AE_LUMA, CMD_ISP_GET_AWB_STAT, CMD_ISP_GET_LUM_FACTOR,
-    CMD_ISP_GET_MWB_ATTR, CMD_ISP_SET_BLC, CMD_ISP_SET_BRIGHTNESS, CMD_ISP_SET_CONTRAST,
-    CMD_ISP_SET_HUE, CMD_ISP_SET_IR_FILTER, CMD_ISP_SET_MWB_ATTR, CMD_ISP_SET_POWER_HZ,
-    CMD_ISP_SET_SATURATION, CMD_ISP_SET_SHARPNESS, CMD_ISP_SET_STYLE_ID, CMD_ISP_SET_WB_TYPE,
-    CMD_ISP_SET_WDR,
+    AnykaIpc, CMD_ISP_AE_GET_RUN_INFO, CMD_ISP_GET_AE_ATTR, CMD_ISP_GET_AE_LUMA,
+    CMD_ISP_GET_AWB_STAT, CMD_ISP_GET_LUM_FACTOR, CMD_ISP_GET_MWB_ATTR, CMD_ISP_SET_BLC,
+    CMD_ISP_SET_BRIGHTNESS, CMD_ISP_SET_CONTRAST, CMD_ISP_SET_HUE, CMD_ISP_SET_IR_FILTER,
+    CMD_ISP_SET_MWB_ATTR, CMD_ISP_SET_POWER_HZ, CMD_ISP_SET_SATURATION, CMD_ISP_SET_SHARPNESS,
+    CMD_ISP_SET_STYLE_ID, CMD_ISP_SET_WB_TYPE, CMD_ISP_SET_WDR,
 };
 
 #[async_trait]
@@ -279,22 +278,6 @@ impl ImagingHalTrait for AnykaIpc {
         }
     }
 
-    async fn set_ae_attr(&self, a_gain_max: Option<i32>, exp_time_max: Option<i32>) -> i32 {
-        // [i32 a_gain_max][i32 exp_time_max]; 0 means "leave alone" daemon-side.
-        let req_data = [
-            a_gain_max.unwrap_or(0).to_le_bytes(),
-            exp_time_max.unwrap_or(0).to_le_bytes(),
-        ]
-        .concat();
-        match self.request_async(CMD_ISP_AE_SET_ATTR, &req_data).await {
-            Ok((status, _)) => status,
-            Err(e) => {
-                error!(error = %e, "set_ae_attr IPC failed");
-                AK_FAILED_I32
-            }
-        }
-    }
-
     async fn get_ae_run_info(&self) -> Option<AeRunInfo> {
         match self.request_async(CMD_ISP_AE_GET_RUN_INFO, &[]).await {
             // The wire contract is exactly the 36-byte struct; a short payload
@@ -364,19 +347,6 @@ impl ImagingHalTrait for AnykaIpc {
             Ok((status, _)) => status,
             Err(e) => {
                 error!(error = %e, "set_style_id IPC failed");
-                AK_FAILED_I32
-            }
-        }
-    }
-
-    async fn set_ae_mode(&self, auto: bool) -> i32 {
-        // Driver exp_type: 1 = auto (AE loop runs), 0 = manual (mae applied).
-        let value: i32 = if auto { 1 } else { 0 };
-        let req_data = value.to_le_bytes().to_vec();
-        match self.request_async(CMD_ISP_AE_SET_MODE, &req_data).await {
-            Ok((status, _)) => status,
-            Err(e) => {
-                error!(error = %e, "set_ae_mode IPC failed");
                 AK_FAILED_I32
             }
         }
@@ -713,44 +683,6 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn test_set_ae_attr_sends_both_ceilings_le() {
-        let daemon = FakeDaemon::start(|cmd_id, req| {
-            assert_eq!(cmd_id, CMD_ISP_AE_SET_ATTR);
-            let want = [24i32.to_le_bytes(), 2250i32.to_le_bytes()].concat();
-            assert_eq!(
-                &req[..],
-                want.as_slice(),
-                "AE attr payload is [i32][i32] LE"
-            );
-            (AK_SUCCESS_I32, vec![])
-        });
-        let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
-        ipc.set_epochs_for_test(1, 1);
-        assert_eq!(
-            <AnykaIpc as ImagingHalTrait>::set_ae_attr(&ipc, Some(24), Some(2250)).await,
-            AK_SUCCESS_I32
-        );
-    }
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn test_set_ae_attr_none_sends_zeros() {
-        // 0 is the daemon-side "leave alone" sentinel, so a None field must
-        // travel as an explicit 0, not be dropped from the payload.
-        let daemon = FakeDaemon::start(|cmd_id, req| {
-            assert_eq!(cmd_id, CMD_ISP_AE_SET_ATTR);
-            assert_eq!(req.len(), 8);
-            assert!(req.iter().all(|&b| b == 0), "both fields left alone");
-            (AK_SUCCESS_I32, vec![])
-        });
-        let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
-        ipc.set_epochs_for_test(1, 1);
-        assert_eq!(
-            <AnykaIpc as ImagingHalTrait>::set_ae_attr(&ipc, None, None).await,
-            AK_SUCCESS_I32
-        );
-    }
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_get_ae_run_info_roundtrip() {
         // Layout: 3 status bytes + pad, then i32 a_gain / d_gain / isp_d_gain /
         // exp_time, then four ignored u32 step fields. Distinct values catch
@@ -793,20 +725,5 @@ mod tests {
             <AnykaIpc as ImagingHalTrait>::get_ae_run_info(&ipc).await,
             None
         );
-    }
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn test_set_ae_mode_encodes_exp_type() {
-        let daemon = FakeDaemon::start(|cmd_id, _req| {
-            assert_eq!(cmd_id, CMD_ISP_AE_SET_MODE);
-            (AK_SUCCESS_I32, vec![])
-        });
-        let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
-        ipc.set_epochs_for_test(1, 1);
-        // AUTO first: the driver's exp_type is 1 = auto, 0 = manual.
-        let status = <AnykaIpc as ImagingHalTrait>::set_ae_mode(&ipc, true).await;
-        assert_eq!(status, AK_SUCCESS_I32);
-        let status = <AnykaIpc as ImagingHalTrait>::set_ae_mode(&ipc, false).await;
-        assert_eq!(status, AK_SUCCESS_I32);
     }
 }
