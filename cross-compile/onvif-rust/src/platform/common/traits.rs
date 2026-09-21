@@ -298,6 +298,20 @@ impl Default for ToggleWithLevel {
     }
 }
 
+/// White balance state.
+///
+/// Gains are unitless ONVIF-style multipliers (`CrGain`/`CbGain`) and are
+/// meaningful only in `MANUAL` mode.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct WhiteBalanceSettings {
+    /// AUTO or MANUAL.
+    pub mode: crate::onvif::types::common::WhiteBalanceMode,
+    /// Red gain (unitless multiplier).
+    pub cr_gain: f32,
+    /// Blue gain (unitless multiplier).
+    pub cb_gain: f32,
+}
+
 /// Imaging settings.
 #[derive(Debug, Clone, Default)]
 pub struct ImagingSettings {
@@ -318,6 +332,8 @@ pub struct ImagingSettings {
     pub wdr: ToggleWithLevel,
     /// Backlight compensation.
     pub backlight_compensation: ToggleWithLevel,
+    /// White balance.
+    pub white_balance: WhiteBalanceSettings,
 }
 
 /// Imaging options (valid ranges for settings).
@@ -341,6 +357,8 @@ pub struct ImagingOptions {
     pub wdr_supported: bool,
     /// Backlight compensation supported.
     pub backlight_compensation_supported: bool,
+    /// White balance supported (the ISP SDK offers AUTO and MANUAL).
+    pub white_balance_supported: bool,
 }
 
 impl ImagingOptions {
@@ -356,6 +374,7 @@ impl ImagingOptions {
             white_light_supported: false,
             wdr_supported: false,
             backlight_compensation_supported: true,
+            white_balance_supported: true,
         }
     }
 }
@@ -1195,6 +1214,7 @@ mod tests {
                 enabled: true,
                 level: 50.0,
             },
+            white_balance: WhiteBalanceSettings::default(),
         };
         assert_eq!(settings.brightness, 50.0);
         assert_eq!(

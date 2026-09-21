@@ -21,6 +21,7 @@ use parking_lot::RwLock;
 
 use crate::platform::common::{
     ImagingControl, ImagingOptions, ImagingSettings, PlatformResult, ToggleWithLevel,
+    WhiteBalanceSettings,
 };
 
 use super::video_encoder::AnykaVideoEncoder;
@@ -120,6 +121,7 @@ impl AnykaImagingControl {
                 ir_led: cfg.ir_led,
                 wdr: ToggleWithLevel::default(),
                 backlight_compensation: ToggleWithLevel::default(),
+                white_balance: WhiteBalanceSettings::default(),
             }),
             video_encoder: None,
             night,
@@ -189,7 +191,33 @@ impl AnykaImagingControl {
 #[async_trait]
 impl ImagingControl for AnykaImagingControl {
     async fn get_settings(&self) -> PlatformResult<ImagingSettings> {
-        Ok(self.settings.read().clone())
+        use crate::onvif::types::common::WhiteBalanceMode;
+
+        // The manual white balance gains are what the ISP holds live (in
+        // MANUAL that is what we set; in AUTO the AWB drives them), so in
+        // MANUAL mode we read them back instead of trusting the cache. The
+        // read is skipped in AUTO: the ONVIF response omits the gains there,
+        // so an IPC round trip would buy nothing. A failed read keeps the
+        // cached values. The guard is taken after the await: a parking_lot
+        // guard must not cross an await point.
+        let manual = self
+            .settings
+            .read()
+            .white_balance
+            .mode
+            .eq(&WhiteBalanceMode::MANUAL);
+        let mwb = if manual {
+            self.ffi.get_mwb_attr().await
+        } else {
+            None
+        };
+
+        let mut settings = self.settings.write();
+        if let Some((r_gain, b_gain)) = mwb {
+            settings.white_balance.cr_gain = r_gain as f32;
+            settings.white_balance.cb_gain = b_gain as f32;
+        }
+        Ok(settings.clone())
     }
 
     async fn set_settings(&self, settings: &ImagingSettings) -> PlatformResult<()> {
@@ -276,6 +304,34 @@ impl ImagingControl for AnykaImagingControl {
                 .await?;
             } else {
                 crate::hal::common::imaging::imaging_set_blc_disabled(self.ffi.as_ref()).await?;
+            }
+        }
+
+        if current.white_balance != settings.white_balance {
+            use crate::hal::common::imaging::{WB_TYPE_AUTO, WB_TYPE_MANUAL};
+            use crate::onvif::types::common::WhiteBalanceMode;
+
+            match settings.white_balance.mode {
+                WhiteBalanceMode::AUTO => {
+                    crate::hal::common::imaging::imaging_set_wb_type(
+                        WB_TYPE_AUTO,
+                        self.ffi.as_ref(),
+                    )
+                    .await?;
+                }
+                WhiteBalanceMode::MANUAL => {
+                    crate::hal::common::imaging::imaging_set_wb_type(
+                        WB_TYPE_MANUAL,
+                        self.ffi.as_ref(),
+                    )
+                    .await?;
+                    crate::hal::common::imaging::imaging_set_mwb_attr(
+                        settings.white_balance.cr_gain,
+                        settings.white_balance.cb_gain,
+                        self.ffi.as_ref(),
+                    )
+                    .await?;
+                }
             }
         }
 
@@ -460,6 +516,174 @@ mod tests {
         };
 
         assert!(control.set_settings(&settings).await.is_err());
+    }
+
+    /// AUTO means wb_type 1 and — crucially — no manual-gain write: an mwb
+    /// write under AUTO would pin the gains the AWB is supposed to drive.
+    #[tokio::test]
+    async fn test_set_settings_wdr_auto_sends_wb_type_and_no_mwb_write() {
+        use crate::hal::common::AK_SUCCESS_I32;
+        use crate::hal::common::imaging::MockImagingHalTrait;
+        use crate::hal::common::imaging::{WB_TYPE_AUTO, WB_TYPE_MANUAL};
+        use crate::onvif::types::common::WhiteBalanceMode;
+        use mockall::predicate::eq;
+
+        let dir = tempfile::tempdir().unwrap();
+        let paths = crate::platform::anyka::night_mode::NodePaths::rooted(dir.path(), dir.path());
+
+        let mut mock_ffi = MockImagingHalTrait::new();
+        // Both transitions up front: the mock moves into the control, and
+        // mockall verifies each expectation exactly once on drop.
+        mock_ffi
+            .expect_set_wb_type()
+            .with(eq(WB_TYPE_MANUAL))
+            .times(1)
+            .returning(|_| AK_SUCCESS_I32);
+        mock_ffi
+            .expect_set_mwb_attr()
+            .with(eq(2u16), eq(3u16))
+            .times(1)
+            .returning(|_, _| AK_SUCCESS_I32);
+        // The return to AUTO must write the type but no manual gains.
+        mock_ffi
+            .expect_set_wb_type()
+            .with(eq(WB_TYPE_AUTO))
+            .times(1)
+            .returning(|_| AK_SUCCESS_I32);
+
+        let control = AnykaImagingControl::with_ffi_and_paths(
+            Arc::new(mock_ffi),
+            paths,
+            crate::config::types::ImagingConfig::default(),
+            None,
+        );
+        let manual = ImagingSettings {
+            brightness: 50.0,
+            contrast: 50.0,
+            saturation: 50.0,
+            sharpness: 50.0,
+            white_balance: WhiteBalanceSettings {
+                mode: WhiteBalanceMode::MANUAL,
+                cr_gain: 2.0,
+                cb_gain: 3.0,
+            },
+            ..ImagingSettings::default()
+        };
+        assert!(control.set_settings(&manual).await.is_ok());
+
+        // Back to AUTO: one more wb_type write, no mwb write.
+        let auto = ImagingSettings {
+            brightness: 50.0,
+            contrast: 50.0,
+            saturation: 50.0,
+            sharpness: 50.0,
+            ..ImagingSettings::default()
+        };
+        assert!(control.set_settings(&auto).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_set_settings_wdr_manual_sends_wb_type_and_gains() {
+        use crate::hal::common::AK_SUCCESS_I32;
+        use crate::hal::common::imaging::MockImagingHalTrait;
+        use crate::hal::common::imaging::WB_TYPE_MANUAL;
+        use crate::onvif::types::common::WhiteBalanceMode;
+        use mockall::predicate::eq;
+
+        let dir = tempfile::tempdir().unwrap();
+        let paths = crate::platform::anyka::night_mode::NodePaths::rooted(dir.path(), dir.path());
+
+        let mut mock_ffi = MockImagingHalTrait::new();
+        mock_ffi
+            .expect_set_wb_type()
+            .with(eq(WB_TYPE_MANUAL))
+            .times(1)
+            .returning(|_| AK_SUCCESS_I32);
+        mock_ffi
+            .expect_set_mwb_attr()
+            .with(eq(2u16), eq(3u16))
+            .times(1)
+            .returning(|_, _| AK_SUCCESS_I32);
+
+        let control = AnykaImagingControl::with_ffi_and_paths(
+            Arc::new(mock_ffi),
+            paths,
+            crate::config::types::ImagingConfig::default(),
+            None,
+        );
+        let settings = ImagingSettings {
+            brightness: 50.0,
+            contrast: 50.0,
+            saturation: 50.0,
+            sharpness: 50.0,
+            white_balance: WhiteBalanceSettings {
+                mode: WhiteBalanceMode::MANUAL,
+                cr_gain: 2.0,
+                cb_gain: 3.0,
+            },
+            ..ImagingSettings::default()
+        };
+
+        assert!(control.set_settings(&settings).await.is_ok());
+    }
+
+    /// In MANUAL mode the gains the ISP actually holds are the truth: the
+    /// platform refreshes its cache from the daemon read-back rather than
+    /// reporting what it asked for.
+    #[tokio::test]
+    async fn test_get_settings_wdr_returns_gains_read_from_the_device() {
+        use crate::hal::common::AK_SUCCESS_I32;
+        use crate::hal::common::imaging::MockImagingHalTrait;
+        use crate::hal::common::imaging::WB_TYPE_MANUAL;
+        use crate::onvif::types::common::WhiteBalanceMode;
+        use mockall::predicate::eq;
+
+        let dir = tempfile::tempdir().unwrap();
+        let paths = crate::platform::anyka::night_mode::NodePaths::rooted(dir.path(), dir.path());
+
+        let mut mock_ffi = MockImagingHalTrait::new();
+        mock_ffi
+            .expect_set_wb_type()
+            .with(eq(WB_TYPE_MANUAL))
+            .times(1)
+            .returning(|_| AK_SUCCESS_I32);
+        mock_ffi
+            .expect_set_mwb_attr()
+            .with(eq(2u16), eq(3u16))
+            .times(1)
+            .returning(|_, _| AK_SUCCESS_I32);
+        mock_ffi
+            .expect_get_mwb_attr()
+            .times(1)
+            .returning(|| Some((7, 9)));
+
+        let control = AnykaImagingControl::with_ffi_and_paths(
+            Arc::new(mock_ffi),
+            paths,
+            crate::config::types::ImagingConfig::default(),
+            None,
+        );
+        control
+            .set_settings(&ImagingSettings {
+                brightness: 50.0,
+                contrast: 50.0,
+                saturation: 50.0,
+                sharpness: 50.0,
+                white_balance: WhiteBalanceSettings {
+                    mode: WhiteBalanceMode::MANUAL,
+                    cr_gain: 2.0,
+                    cb_gain: 3.0,
+                },
+                ..ImagingSettings::default()
+            })
+            .await
+            .unwrap();
+
+        let settings = control.get_settings().await.unwrap();
+        assert_eq!(settings.white_balance.mode, WhiteBalanceMode::MANUAL);
+        // The read-back (7, 9), not what we asked for (2, 3).
+        assert_eq!(settings.white_balance.cr_gain, 7.0);
+        assert_eq!(settings.white_balance.cb_gain, 9.0);
     }
 
     #[tokio::test]

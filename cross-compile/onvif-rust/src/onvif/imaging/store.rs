@@ -15,6 +15,7 @@ use crate::onvif::types::common::{FloatRange, ImagingSettings20, ImagingStatus20
 use crate::onvif::types::imaging::ImagingOptions20;
 use crate::platform::{
     ImagingControl, ImagingOptions, ImagingSettings, PlatformError, ToggleWithLevel,
+    WhiteBalanceSettings,
 };
 
 // ============================================================================
@@ -571,9 +572,15 @@ impl ImagingSettingsStore {
 
     /// Convert platform settings to ONVIF format.
     fn platform_to_onvif_settings(settings: &ImagingSettings) -> ImagingSettings20 {
+        use crate::onvif::types::common::WhiteBalanceMode;
         use crate::onvif::types::common::{
-            BacklightCompensation20, BacklightCompensationMode, WideDynamicMode, WideDynamicRange20,
+            BacklightCompensation20, BacklightCompensationMode, WhiteBalance20, WideDynamicMode,
+            WideDynamicRange20,
         };
+
+        // The gains are only meaningful in MANUAL; reporting them under AUTO
+        // would assert values the AWB is free to change every frame.
+        let wb_gains = matches!(settings.white_balance.mode, WhiteBalanceMode::MANUAL);
 
         ImagingSettings20 {
             brightness: Some(settings.brightness),
@@ -605,7 +612,12 @@ impl ImagingSettingsStore {
             },
             exposure: None,
             focus: None,
-            white_balance: None,
+            white_balance: Some(WhiteBalance20 {
+                mode: settings.white_balance.mode.clone(),
+                cr_gain: wb_gains.then_some(settings.white_balance.cr_gain),
+                cb_gain: wb_gains.then_some(settings.white_balance.cb_gain),
+                extension: None,
+            }),
             extension: None,
         }
     }
@@ -640,6 +652,15 @@ impl ImagingSettingsStore {
                     level: b.level.unwrap_or(50.0),
                 })
                 .unwrap_or_default(),
+            white_balance: settings
+                .white_balance
+                .as_ref()
+                .map(|w| WhiteBalanceSettings {
+                    mode: w.mode.clone(),
+                    cr_gain: w.cr_gain.unwrap_or(0.0),
+                    cb_gain: w.cb_gain.unwrap_or(0.0),
+                })
+                .unwrap_or_default(),
         }
     }
 
@@ -647,7 +668,7 @@ impl ImagingSettingsStore {
     fn platform_to_onvif_options(options: &ImagingOptions) -> ImagingOptions20 {
         use crate::onvif::types::imaging::{
             BacklightCompensationMode, BacklightCompensationOptions20, IrCutFilterMode,
-            WideDynamicMode, WideDynamicRangeOptions20,
+            WhiteBalanceMode, WhiteBalanceOptions20, WideDynamicMode, WideDynamicRangeOptions20,
         };
 
         ImagingOptions20 {
@@ -703,14 +724,23 @@ impl ImagingSettingsStore {
             },
             exposure: None,
             focus: None,
-            white_balance: None,
+            // Both modes; the gain range is deliberately absent until the
+            // driver's multiplier scale is measured on hardware.
+            white_balance: options
+                .white_balance_supported
+                .then_some(WhiteBalanceOptions20 {
+                    mode: vec![WhiteBalanceMode::AUTO, WhiteBalanceMode::MANUAL],
+                    yr_gain: None,
+                    yb_gain: None,
+                    extension: None,
+                }),
             extension: None,
         }
     }
 
     /// Get default imaging settings.
     fn default_settings() -> ImagingSettings20 {
-        use crate::onvif::types::common::IrCutFilterMode;
+        use crate::onvif::types::common::{IrCutFilterMode, WhiteBalance20, WhiteBalanceMode};
 
         ImagingSettings20 {
             brightness: Some(50.0),
@@ -722,7 +752,12 @@ impl ImagingSettingsStore {
             backlight_compensation: None,
             exposure: None,
             focus: None,
-            white_balance: None,
+            white_balance: Some(WhiteBalance20 {
+                mode: WhiteBalanceMode::AUTO,
+                cr_gain: None,
+                cb_gain: None,
+                extension: None,
+            }),
             extension: None,
         }
     }
@@ -731,7 +766,7 @@ impl ImagingSettingsStore {
     fn default_options() -> ImagingOptions20 {
         use crate::onvif::types::imaging::{
             BacklightCompensationMode, BacklightCompensationOptions20, IrCutFilterMode,
-            WideDynamicMode, WideDynamicRangeOptions20,
+            WhiteBalanceMode, WhiteBalanceOptions20, WideDynamicMode, WideDynamicRangeOptions20,
         };
 
         ImagingOptions20 {
@@ -775,7 +810,12 @@ impl ImagingSettingsStore {
             }),
             exposure: None,
             focus: None,
-            white_balance: None,
+            white_balance: Some(WhiteBalanceOptions20 {
+                mode: vec![WhiteBalanceMode::AUTO, WhiteBalanceMode::MANUAL],
+                yr_gain: None,
+                yb_gain: None,
+                extension: None,
+            }),
             extension: None,
         }
     }
@@ -1065,6 +1105,65 @@ mod tests {
         });
 
         assert_ne!(on.ir_cut_filter, auto.ir_cut_filter);
+    }
+
+    /// White balance must survive the ONVIF -> platform boundary, gains and
+    /// all: previously the conversion hardcoded `white_balance: None`.
+    #[test]
+    fn test_white_balance_survives_conversion_to_platform() {
+        use crate::onvif::types::common::{ImagingSettings20, WhiteBalance20, WhiteBalanceMode};
+
+        let onvif = ImagingSettings20 {
+            white_balance: Some(WhiteBalance20 {
+                mode: WhiteBalanceMode::MANUAL,
+                cr_gain: Some(2.0),
+                cb_gain: Some(3.0),
+                extension: None,
+            }),
+            ..Default::default()
+        };
+
+        let platform = ImagingSettingsStore::onvif_to_platform_settings(&onvif);
+        assert_eq!(platform.white_balance.mode, WhiteBalanceMode::MANUAL);
+        assert_eq!(platform.white_balance.cr_gain, 2.0);
+        assert_eq!(platform.white_balance.cb_gain, 3.0);
+
+        // And back again: MANUAL reports the gains.
+        let roundtrip = ImagingSettingsStore::platform_to_onvif_settings(&platform).white_balance;
+        let rt = roundtrip.expect("white balance must not be dropped");
+        assert_eq!(rt.mode, WhiteBalanceMode::MANUAL);
+        assert_eq!(rt.cr_gain, Some(2.0));
+        assert_eq!(rt.cb_gain, Some(3.0));
+
+        // AUTO omits the gains: they are the AWB's to drive, not ours to assert.
+        let auto_platform = ImagingSettings {
+            white_balance: crate::platform::WhiteBalanceSettings::default(),
+            ..Default::default()
+        };
+        let auto = ImagingSettingsStore::platform_to_onvif_settings(&auto_platform).white_balance;
+        let rt_auto = auto.expect("white balance must not be dropped");
+        assert_eq!(rt_auto.mode, WhiteBalanceMode::AUTO);
+        assert_eq!(rt_auto.cr_gain, None);
+        assert_eq!(rt_auto.cb_gain, None);
+    }
+
+    /// GetOptions must advertise both white balance modes when the platform
+    /// supports them.
+    #[test]
+    fn test_get_options_advertises_both_white_balance_modes() {
+        use crate::onvif::types::imaging::WhiteBalanceMode as WhiteBalanceModeImaging;
+
+        let options = ImagingOptions {
+            white_balance_supported: true,
+            ..ImagingOptions::default_options()
+        };
+
+        let onvif = ImagingSettingsStore::platform_to_onvif_options(&options);
+        let wb = onvif
+            .white_balance
+            .expect("white balance options must be advertised");
+        assert!(wb.mode.contains(&WhiteBalanceModeImaging::AUTO));
+        assert!(wb.mode.contains(&WhiteBalanceModeImaging::MANUAL));
     }
 
     #[test]

@@ -10,12 +10,15 @@ use tracing::error;
 
 use crate::hal::common::AK_FAILED_I32;
 use crate::hal::common::AK_SUCCESS_I32;
-use crate::hal::common::imaging::{AE_ATTR_WIRE_LEN, AWB_STAT_WIRE_LEN, AeAttr, ImagingHalTrait};
+use crate::hal::common::imaging::{
+    AE_ATTR_WIRE_LEN, AWB_STAT_WIRE_LEN, AeAttr, ImagingHalTrait, MWB_ATTR_WIRE_LEN,
+};
 
 use super::{
     AnykaIpc, CMD_ISP_GET_AE_ATTR, CMD_ISP_GET_AE_LUMA, CMD_ISP_GET_AWB_STAT,
-    CMD_ISP_GET_LUM_FACTOR, CMD_ISP_SET_BLC, CMD_ISP_SET_BRIGHTNESS, CMD_ISP_SET_CONTRAST,
-    CMD_ISP_SET_IR_FILTER, CMD_ISP_SET_SATURATION, CMD_ISP_SET_SHARPNESS, CMD_ISP_SET_WDR,
+    CMD_ISP_GET_LUM_FACTOR, CMD_ISP_GET_MWB_ATTR, CMD_ISP_SET_BLC, CMD_ISP_SET_BRIGHTNESS,
+    CMD_ISP_SET_CONTRAST, CMD_ISP_SET_IR_FILTER, CMD_ISP_SET_MWB_ATTR, CMD_ISP_SET_SATURATION,
+    CMD_ISP_SET_SHARPNESS, CMD_ISP_SET_WB_TYPE, CMD_ISP_SET_WDR,
 };
 
 #[async_trait]
@@ -94,6 +97,55 @@ impl ImagingHalTrait for AnykaIpc {
             Err(e) => {
                 error!(error = %e, "set_blc IPC failed");
                 AK_FAILED_I32
+            }
+        }
+    }
+
+    async fn set_wb_type(&self, wb_type: u16) -> i32 {
+        let value: i32 = wb_type as i32;
+        let req_data = value.to_le_bytes().to_vec();
+        match self.request_async(CMD_ISP_SET_WB_TYPE, &req_data).await {
+            Ok((status, _)) => status,
+            Err(e) => {
+                error!(error = %e, "set_wb_type IPC failed");
+                AK_FAILED_I32
+            }
+        }
+    }
+
+    async fn set_mwb_attr(&self, r_gain: u16, b_gain: u16) -> i32 {
+        let mut req_data = Vec::with_capacity(4);
+        req_data.extend_from_slice(&r_gain.to_le_bytes());
+        req_data.extend_from_slice(&b_gain.to_le_bytes());
+        match self.request_async(CMD_ISP_SET_MWB_ATTR, &req_data).await {
+            Ok((status, _)) => status,
+            Err(e) => {
+                error!(error = %e, "set_mwb_attr IPC failed");
+                AK_FAILED_I32
+            }
+        }
+    }
+
+    async fn get_mwb_attr(&self) -> Option<(u16, u16)> {
+        match self.request_async(CMD_ISP_GET_MWB_ATTR, &[]).await {
+            // The wire contract is exactly the 12-byte AK_ISP_MWB_ATTR
+            // (u16 r_gain, u16 g_gain, u16 b_gain, then three s16 offsets).
+            // A different length means a daemon/struct mismatch; decoding it
+            // would silently return offset-shifted gains.
+            Ok((status, data)) if status == AK_SUCCESS_I32 && data.len() == MWB_ATTR_WIRE_LEN => {
+                let r_gain = u16::from_le_bytes([data[0], data[1]]);
+                let b_gain = u16::from_le_bytes([data[4], data[5]]);
+                Some((r_gain, b_gain))
+            }
+            // A silent `None` would read as "gains unavailable, keep the cache"
+            // and mask a real daemon fault, so say so.
+            Ok((status, data)) => {
+                error!(status, len = data.len(), "get_mwb_attr bad daemon response");
+                None
+            }
+            Err(e) => {
+                error!(error = %e, "get_mwb_attr IPC failed");
+                None
             }
         }
     }
@@ -411,6 +463,78 @@ mod tests {
         ipc.set_epochs_for_test(1, 1);
         assert_eq!(
             <AnykaIpc as ImagingHalTrait>::get_awb_stat(&ipc).await,
+            None
+        );
+    }
+
+    /// set_wb_type sends the type as a little-endian i32, as the daemon
+    /// expects for `[i32]` commands.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_set_wb_type_sends_i32_wire_format() {
+        let daemon = FakeDaemon::start(|cmd_id, req| {
+            assert_eq!(cmd_id, CMD_ISP_SET_WB_TYPE);
+            assert_eq!(req, &1i32.to_le_bytes()[..]); // WB_TYPE_AUTO
+            (AK_SUCCESS_I32, vec![])
+        });
+        let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+        ipc.set_epochs_for_test(1, 1);
+        assert_eq!(
+            <AnykaIpc as ImagingHalTrait>::set_wb_type(&ipc, 1).await,
+            AK_SUCCESS_I32
+        );
+    }
+
+    /// set_mwb_attr packs `[u16 r_gain][u16 b_gain]` little-endian; the byte
+    /// order is load-bearing, so a swapped pair must fail this assertion.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_set_mwb_attr_sends_u16_pair_wire_format() {
+        let daemon = FakeDaemon::start(|cmd_id, req| {
+            assert_eq!(cmd_id, CMD_ISP_SET_MWB_ATTR);
+            let expected = {
+                let mut v = Vec::new();
+                v.extend_from_slice(&2u16.to_le_bytes());
+                v.extend_from_slice(&7u16.to_le_bytes());
+                v
+            };
+            assert_eq!(req, &expected[..]);
+            (AK_SUCCESS_I32, vec![])
+        });
+        let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+        ipc.set_epochs_for_test(1, 1);
+        assert_eq!(
+            <AnykaIpc as ImagingHalTrait>::set_mwb_attr(&ipc, 2, 7).await,
+            AK_SUCCESS_I32
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_get_mwb_attr_decodes_gains_from_raw_struct() {
+        // r_gain and b_gain sit at the head of the 12-byte AK_ISP_MWB_ATTR;
+        // g_gain and the offsets must be ignored, not mis-decoded.
+        let mut payload = vec![0u8; 12];
+        payload[0..2].copy_from_slice(&11u16.to_le_bytes()); // r_gain
+        payload[2..4].copy_from_slice(&12u16.to_le_bytes()); // g_gain
+        payload[4..6].copy_from_slice(&13u16.to_le_bytes()); // b_gain
+        let daemon = FakeDaemon::start(move |cmd_id, req| {
+            assert_eq!(cmd_id, CMD_ISP_GET_MWB_ATTR);
+            assert!(req.is_empty());
+            (AK_SUCCESS_I32, payload.clone())
+        });
+        let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+        ipc.set_epochs_for_test(1, 1);
+        assert_eq!(
+            <AnykaIpc as ImagingHalTrait>::get_mwb_attr(&ipc).await,
+            Some((11, 13))
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_get_mwb_attr_wrong_length_is_none() {
+        let daemon = FakeDaemon::start(|_c, _r| (AK_SUCCESS_I32, vec![0u8; 8]));
+        let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+        ipc.set_epochs_for_test(1, 1);
+        assert_eq!(
+            <AnykaIpc as ImagingHalTrait>::get_mwb_attr(&ipc).await,
             None
         );
     }

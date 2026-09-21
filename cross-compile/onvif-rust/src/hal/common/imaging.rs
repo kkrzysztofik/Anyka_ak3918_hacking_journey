@@ -73,6 +73,13 @@ pub(crate) trait ImagingHalTrait: Send + Sync {
     async fn set_ir_filter(&self, enabled: bool) -> i32;
     async fn set_wdr(&self, level: i32) -> i32;
     async fn set_blc(&self, level: i32) -> i32;
+    /// Set the white balance operation type (`WB_OPS_TYPE_MANU`/`WB_OPS_TYPE_AUTO`).
+    async fn set_wb_type(&self, wb_type: u16) -> i32;
+    /// Manual white balance gains (unitless multipliers).
+    async fn set_mwb_attr(&self, r_gain: u16, b_gain: u16) -> i32;
+    /// The ISP's current manual white balance gains `(r_gain, b_gain)`, or
+    /// `None` if unavailable.
+    async fn get_mwb_attr(&self) -> Option<(u16, u16)>;
     /// AE average luma (`current_calc_avg_lumi`), or `None` if unavailable.
     async fn get_ae_luma(&self) -> Option<u8>;
     /// The vendor's day/night luminance ratio, or `None` if unavailable.
@@ -89,6 +96,16 @@ pub(crate) trait ImagingHalTrait: Send + Sync {
     /// quiet under IR illumination) and must not be conflated with `None`.
     async fn get_awb_stat(&self) -> Option<[i32; 10]>;
 }
+
+/// Wire size of the daemon's `AK_ISP_MWB_ATTR` response
+/// (`u16 r_gain, u16 g_gain, u16 b_gain, s16 r_offset, s16 g_offset, s16 b_offset`).
+pub(crate) const MWB_ATTR_WIRE_LEN: usize = 12;
+
+/// The driver's `WB_OPS_TYPE_MANU`: manual white balance.
+pub const WB_TYPE_MANUAL: u16 = 0;
+
+/// The driver's `WB_OPS_TYPE_AUTO`: auto white balance.
+pub const WB_TYPE_AUTO: u16 = 1;
 
 /// Validate ONVIF imaging parameter range (0.0-100.0).
 ///
@@ -208,6 +225,32 @@ pub(crate) async fn imaging_set_blc(value: f32, ffi: &dyn ImagingHalTrait) -> Pl
 pub(crate) async fn imaging_set_blc_disabled(ffi: &dyn ImagingHalTrait) -> PlatformResult<()> {
     let ret = ffi.set_blc(0).await;
     check_result(ret, "imaging_set_blc_disabled")
+}
+
+/// Set the white balance operation type.
+pub(crate) async fn imaging_set_wb_type(
+    wb_type: u16,
+    ffi: &dyn ImagingHalTrait,
+) -> PlatformResult<()> {
+    let ret = ffi.set_wb_type(wb_type).await;
+    check_result(ret, "imaging_set_wb_type")
+}
+
+/// Apply manual white balance gains.
+///
+/// ONVIF `CrGain`/`CbGain` are unitless multipliers, and the driver's
+/// `r_gain`/`b_gain` are on the same scale, so the values pass through with
+/// no conversion constant — only the f32→u16 truncation the wire format
+/// forces. (The hardware gate confirms the scale on the camera.)
+pub(crate) async fn imaging_set_mwb_attr(
+    cr_gain: f32,
+    cb_gain: f32,
+    ffi: &dyn ImagingHalTrait,
+) -> PlatformResult<()> {
+    let ret = ffi
+        .set_mwb_attr(cr_gain.round() as u16, cb_gain.round() as u16)
+        .await;
+    check_result(ret, "imaging_set_mwb_attr")
 }
 
 #[cfg(test)]
@@ -472,6 +515,53 @@ mod tests {
         match result {
             Err(PlatformError::HardwareFailure(msg)) => {
                 assert!(msg.contains("imaging_set_wdr"));
+            }
+            _ => panic!("Expected HardwareFailure error"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_imaging_set_wb_type_calls_ffi() {
+        let mut mock_ffi = MockImagingHalTrait::new();
+        mock_ffi
+            .expect_set_wb_type()
+            .with(eq(WB_TYPE_AUTO))
+            .times(1)
+            .returning(|_| AK_SUCCESS_I32);
+        assert!(imaging_set_wb_type(WB_TYPE_AUTO, &mock_ffi).await.is_ok());
+        mock_ffi
+            .expect_set_wb_type()
+            .with(eq(WB_TYPE_MANUAL))
+            .times(1)
+            .returning(|_| AK_SUCCESS_I32);
+        assert!(imaging_set_wb_type(WB_TYPE_MANUAL, &mock_ffi).await.is_ok());
+    }
+
+    /// The gains are unitless multipliers on both sides of the wire, so they
+    /// must pass through without a scaling constant — assert it, don't assume.
+    #[tokio::test]
+    async fn test_imaging_set_mwb_attr_passes_gains_through_unscaled() {
+        let mut mock_ffi = MockImagingHalTrait::new();
+        mock_ffi
+            .expect_set_mwb_attr()
+            .with(eq(2u16), eq(3u16))
+            .times(1)
+            .returning(|_, _| AK_SUCCESS_I32);
+        assert!(imaging_set_mwb_attr(2.0, 3.0, &mock_ffi).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_imaging_set_mwb_attr_propagates_error() {
+        let mut mock_ffi = MockImagingHalTrait::new();
+        mock_ffi
+            .expect_set_mwb_attr()
+            .times(1)
+            .returning(|_, _| AK_FAILED_I32);
+        let result = imaging_set_mwb_attr(1.0, 1.0, &mock_ffi).await;
+        assert!(result.is_err());
+        match result {
+            Err(PlatformError::HardwareFailure(msg)) => {
+                assert!(msg.contains("imaging_set_mwb_attr"));
             }
             _ => panic!("Expected HardwareFailure error"),
         }

@@ -194,7 +194,7 @@ async fn apply_platform_settings(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::onvif::types::common::ImagingSettings20;
+    use crate::onvif::types::common::{ImagingSettings20, WhiteBalance20, WhiteBalanceMode};
 
     #[tokio::test]
     async fn test_get_imaging_settings() {
@@ -231,7 +231,12 @@ mod tests {
             backlight_compensation: None,
             exposure: None,
             focus: None,
-            white_balance: None,
+            white_balance: Some(WhiteBalance20 {
+                mode: WhiteBalanceMode::MANUAL,
+                cr_gain: Some(2.0),
+                cb_gain: Some(3.0),
+                extension: None,
+            }),
             extension: None,
         };
         let request = SetImagingSettings {
@@ -256,7 +261,12 @@ mod tests {
             backlight_compensation: None,
             exposure: None,
             focus: None,
-            white_balance: None,
+            white_balance: Some(WhiteBalance20 {
+                mode: WhiteBalanceMode::AUTO,
+                cr_gain: None,
+                cb_gain: None,
+                extension: None,
+            }),
             extension: None,
         };
         let request = SetImagingSettings {

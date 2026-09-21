@@ -291,6 +291,9 @@ const CMD_ISP_GET_AE_ATTR: i32 = 108;
 // 109 was CMD_ISP_SET_AE_ATTR, since cancelled.
 const CMD_ISP_GET_AWB_STAT: i32 = 110;
 const CMD_ISP_SET_BLC: i32 = 111;
+const CMD_ISP_SET_WB_TYPE: i32 = 112;
+const CMD_ISP_SET_MWB_ATTR: i32 = 113;
+const CMD_ISP_GET_MWB_ATTR: i32 = 114;
 const CMD_GET_ERROR_NO: i32 = 200;
 const CMD_GET_ERROR_STR: i32 = 201;
 
@@ -577,6 +580,9 @@ impl AnykaIpc {
             CMD_ISP_GET_AE_ATTR => "ISP_GET_AE_ATTR",
             CMD_ISP_GET_AWB_STAT => "ISP_GET_AWB_STAT",
             CMD_ISP_SET_BLC => "ISP_SET_BLC",
+            CMD_ISP_SET_WB_TYPE => "ISP_SET_WB_TYPE",
+            CMD_ISP_SET_MWB_ATTR => "ISP_SET_MWB_ATTR",
+            CMD_ISP_GET_MWB_ATTR => "ISP_GET_MWB_ATTR",
             CMD_GET_ERROR_NO => "GET_ERROR_NO",
             CMD_GET_ERROR_STR => "GET_ERROR_STR",
             CMD_HELLO => "HELLO",

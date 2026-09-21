@@ -39,6 +39,18 @@ impl ImagingHalTrait for StubImagingHal {
         AK_SUCCESS_I32
     }
 
+    async fn set_wb_type(&self, _wb_type: u16) -> i32 {
+        AK_SUCCESS_I32
+    }
+
+    async fn set_mwb_attr(&self, _r_gain: u16, _b_gain: u16) -> i32 {
+        AK_SUCCESS_I32
+    }
+
+    async fn get_mwb_attr(&self) -> Option<(u16, u16)> {
+        None
+    }
+
     async fn get_ae_luma(&self) -> Option<u8> {
         None
     }
@@ -82,6 +94,12 @@ mod stub_getter_tests {
     async fn test_stub_get_awb_stat_returns_none() {
         let stub = StubImagingHal;
         assert!(stub.get_awb_stat().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_stub_get_mwb_attr_returns_none() {
+        let stub = StubImagingHal;
+        assert!(stub.get_mwb_attr().await.is_none());
     }
 }
 

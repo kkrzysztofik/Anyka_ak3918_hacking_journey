@@ -367,6 +367,7 @@ impl StubPlatformBuilder {
             ir_led: false,
             wdr: ToggleWithLevel::default(),
             backlight_compensation: ToggleWithLevel::default(),
+            white_balance: crate::platform::common::WhiteBalanceSettings::default(),
         }
     }
 
@@ -1473,6 +1474,7 @@ mod tests {
                 ..ToggleWithLevel::default()
             },
             backlight_compensation: ToggleWithLevel::default(),
+            white_balance: crate::platform::common::WhiteBalanceSettings::default(),
         };
 
         let platform = StubPlatformBuilder::new()
@@ -1730,6 +1732,7 @@ mod tests {
                 enabled: true,
                 ..ToggleWithLevel::default()
             },
+            white_balance: crate::platform::common::WhiteBalanceSettings::default(),
         };
 
         imaging.set_settings(&new_settings).await.unwrap();
