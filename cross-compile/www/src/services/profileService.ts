@@ -438,7 +438,7 @@ export async function setVideoSourceConfiguration(
 
 export type ConfigurationReference = { '@_ref': string };
 
-async function addConfiguration(
+export async function addConfiguration(
   profileToken: string,
   configType: string,
   configToken: string,
@@ -450,14 +450,14 @@ async function addConfiguration(
   await soapRequest(ENDPOINTS.media, body, `Add${configType}ConfigurationResponse`);
 }
 
-async function removeConfiguration(profileToken: string, configType: string): Promise<void> {
+export async function removeConfiguration(profileToken: string, configType: string): Promise<void> {
   const body = `<trt:Remove${configType}Configuration>
     <trt:ProfileToken>${escapeXml(profileToken)}</trt:ProfileToken>
   </trt:Remove${configType}Configuration>`;
   await soapRequest(ENDPOINTS.media, body, `Remove${configType}ConfigurationResponse`);
 }
 
-async function getCompatibleConfigurations(
+export async function getCompatibleConfigurations(
   profileToken: string,
   configType: string,
 ): Promise<string[]> {
