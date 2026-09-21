@@ -166,13 +166,16 @@ input current `16 × 0.1 / (0.85 × 5.3) = 355 mA`, `ΔI` at 30 % = 107 mA, so
 **Two-layer FR4, emitters on the front, converter cluster on the back.**
 Superseded the spec's single-layer aluminium MCPCB on 2026-09-22.
 
-The reason aluminium was specified — LED die temperature as the binding
-constraint — does not survive contact with the actual mechanics. The ring bolts
-to a plastic housing and sits in still air inside a dome, with no conduction
-path to any heatsink. The dominant thermal resistance is therefore
-**board-to-air**, roughly 40 K/W on a ~40 mm disc regardless of substrate. What
-an aluminium core actually buys is *spreading* — no hot spot under each die —
-not a lower total rise.
+**The stock board is not aluminium.** Two scratched points on its bare back
+read open circuit, and photo `photos/20260922_000142.jpg` shows a back with no
+copper, silkscreen or components — single-layer FR4. So this is an upgrade over
+what ships today, not a tradeoff against a metal core that was never there.
+
+The aluminium case was weak anyway. The ring bolts to a plastic housing and
+sits in still air inside a dome, with no conduction path to any heatsink. The
+dominant thermal resistance is therefore **board-to-air**, roughly 40 K/W on a
+~40 mm disc regardless of substrate. What an aluminium core actually buys is
+*spreading* — no hot spot under each die — not a lower total rise.
 
 Budget: 8 emitters × ~130 mW of heat (at ~30 % wall-plug efficiency on 180 mW
 electrical) + ~250 mW converter loss ≈ **1.25 W**, giving ~50 °C above internal
@@ -206,12 +209,9 @@ over whatever package is chosen.
 
 ## Known risks
 
-1. **Back-side clearance.** ~~Height above the front~~ — superseded
-   2026-09-22. The lens array covers the front, so the converter goes on the
-   back and the clearance that matters is between the board's back face and
-   whatever it mounts against. A 33 µH inductor is 2–3 mm tall even in a small
-   shielded package. Under ~3.5 mm and the design falls back to a linear
-   current sink or plain resistor ballast. **Still the first thing to measure.**
+1. ~~**Back-side clearance.**~~ **RESOLVED 2026-09-22: adequate everywhere on
+   the back.** Converter placement is unconstrained, so the 33 µH inductor
+   fits. The fallback to a linear current sink is off the table.
 2. ~~**Rail voltage.**~~ **RESOLVED 2026-09-22: 5.3 V measured at the header.**
    The boost topology is confirmed. A 12 V result would have inverted it back
    to a buck; it did not.
@@ -231,6 +231,13 @@ over whatever package is chosen.
    protocol where a plain DC high means full brightness; a toggling GPIO could
    in principle enter that protocol. Verify against the datasheet, or prefer a
    part with a plain EN pin.
+7. **Emitter junction temperature is now the binding constraint.** With the
+   ballast resistors deleted by the topology, the dies are what run hot:
+   ~50 °C board-wide rise from 1.25 W plus ~15 °C locally, over ~40 °C internal
+   ambient ≈ **Tj ~105 °C** against a typical 850 nm rating of 110–125 °C.
+   Workable, not generous. **R1 is the knob** — if the evaluation rig shows
+   adequate output at 80 mA, going there buys roughly 20 °C for a ~20 % output
+   cost. Decide on measured radiant output, not on paper.
 
 ## Measurements required before layout
 

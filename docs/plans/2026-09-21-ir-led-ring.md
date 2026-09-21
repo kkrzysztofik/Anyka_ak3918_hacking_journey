@@ -71,17 +71,20 @@ result would have sent it back to a buck. L1 recomputed against 5.3 V:
 
 Nothing further to do in this step.
 
-**Step 3: Measure BACK-side clearance (gate)**
+**Step 3: Measure BACK-side clearance (gate) — DONE 2026-09-22, PASSED**
 
-Revised 2026-09-22. The front is covered by the stock lens array, so the
-converter lives on the back of a two-layer FR4 board. Measure from the board's
-**back** face to whatever it mounts against, and note where the most generous
-region is and where the mounting bosses and cable land.
+Clearance is adequate across the whole back face, so converter placement is
+unconstrained and the 33 µH inductor fits. The fallback to a linear current
+sink is off the table.
 
-- **≥ 3.5 mm somewhere usable** → proceeds.
-- **< 3.5 mm everywhere** → **STOP.** There is nowhere to put a 33 µH
-  inductor. The design falls back to option 3 (linear current sink) or option 4
-  (resistor ballast) from the design doc. Report and halt.
+Also settled in the same session: **the stock board is FR4, not aluminium** —
+two scratched points on the bare back read open circuit. The redesign is
+therefore an upgrade on the stock substrate rather than a tradeoff against a
+metal core, and `SPEC.md`'s resistor-thermal suspicion gains a mechanism
+(~0.12 W in an 0805 on single-layer FR4 with no pour). The new topology has no
+ballast resistors at all.
+
+Nothing further to do in this step.
 
 **Step 4: Measure the GPIO logic levels**
 
