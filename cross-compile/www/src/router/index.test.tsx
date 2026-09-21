@@ -48,7 +48,7 @@ vi.mock('@/pages/settings/MaintenancePage', () => ({
   default: () => <div data-testid="page-maintenance">Maintenance Page</div>,
 }));
 
-vi.mock('@/pages/settings/ProfilesPage', () => ({
+vi.mock('@/pages/settings/profiles/ProfilesPage', () => ({
   default: () => <div data-testid="page-profiles">Profiles Page</div>,
 }));
 
