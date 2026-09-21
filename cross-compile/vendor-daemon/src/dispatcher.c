@@ -370,6 +370,15 @@ int process_request(int fd)
     case CMD_ISP_GET_BLC:
         ret = handle_isp_get_blc(fd, req_buf, req_len);
         break;
+    case CMD_ISP_SET_WB_TYPE:
+        ret = handle_isp_set_wb_type(fd, req_buf, req_len);
+        break;
+    case CMD_ISP_SET_MWB_ATTR:
+        ret = handle_isp_set_mwb_attr(fd, req_buf, req_len);
+        break;
+    case CMD_ISP_GET_MWB_ATTR:
+        ret = handle_isp_get_mwb_attr(fd, req_buf, req_len);
+        break;
 
     /* --- Utility --- */
     case CMD_GET_ERROR_NO:

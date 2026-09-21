@@ -160,6 +160,73 @@ int handle_isp_get_blc(int fd, const uint8_t *req, uint32_t req_len)
     return send_response(fd, STATUS_OK, (const uint8_t *)&attr, sizeof(attr));
 }
 
+/* CMD_ISP_SET_WB_TYPE. Wire format: [i32 wb_type] = 4 bytes, passed through
+ * to the SDK uninterpreted (WB_OPS_TYPE_MANU=0, WB_OPS_TYPE_AUTO=1). The
+ * SDK layer needs no VI handle: libplat_vi owns the SDK handle in-process,
+ * the same path the effect and BLC handlers use. */
+int handle_isp_set_wb_type(int fd, const uint8_t *req, uint32_t req_len)
+{
+    AK_ISP_WB_TYPE_ATTR attr;
+    int32_t wb_type;
+
+    if (req_len < 4) {
+        log_warn("[isp] set_wb_type: req too short (%u)", req_len);
+        return send_response(fd, STATUS_ERROR, NULL, 0);
+    }
+    wb_type = req_read_i32(req, 0);
+    attr.wb_type = (T_U16)wb_type;
+    log_debug("[isp] set_wb_type type=%d", (int)wb_type);
+    return send_response(fd, AK_ISP_set_wb_type(&attr), NULL, 0);
+}
+
+/* CMD_ISP_SET_MWB_ATTR. Wire format: [u16 r_gain][u16 b_gain] = 4 bytes.
+ * Read-modify-write: a fresh struct would zero g_gain and the three offsets,
+ * so only the two gains we model are replaced. */
+int handle_isp_set_mwb_attr(int fd, const uint8_t *req, uint32_t req_len)
+{
+    AK_ISP_MWB_ATTR attr;
+    uint32_t gains;
+    uint16_t r_gain;
+    uint16_t b_gain;
+
+    if (req_len < 4) {
+        log_warn("[isp] set_mwb_attr: req too short (%u)", req_len);
+        return send_response(fd, STATUS_ERROR, NULL, 0);
+    }
+    gains = req_read_u32(req, 0);
+    r_gain = (uint16_t)(gains & 0xffff);
+    b_gain = (uint16_t)(gains >> 16);
+
+    if (AK_ISP_get_mwb_attr(&attr)) {
+        log_warn("[isp] set_mwb_attr: read failed; not writing");
+        return send_response(fd, STATUS_ERROR, NULL, 0);
+    }
+    attr.r_gain = r_gain;
+    attr.b_gain = b_gain;
+
+    log_debug("[isp] set_mwb_attr r=%u b=%u (g=%u preserved)",
+              (unsigned)r_gain, (unsigned)b_gain, (unsigned)attr.g_gain);
+    return send_response(fd, AK_ISP_set_mwb_attr(&attr), NULL, 0);
+}
+
+/* CMD_ISP_GET_MWB_ATTR. Returns the raw AK_ISP_MWB_ATTR bytes; the daemon
+ * does not interpret them. */
+int handle_isp_get_mwb_attr(int fd, const uint8_t *req, uint32_t req_len)
+{
+    AK_ISP_MWB_ATTR attr;
+
+    (void)req;
+    if (req_len != 0) {
+        log_warn("[isp] get_mwb_attr: expected empty request (%u)", req_len);
+        return send_response(fd, STATUS_ERROR, NULL, 0);
+    }
+    if (AK_ISP_get_mwb_attr(&attr)) {
+        log_warn("[isp] get_mwb_attr: read failed");
+        return send_response(fd, STATUS_ERROR, NULL, 0);
+    }
+    return send_response(fd, STATUS_OK, (const uint8_t *)&attr, sizeof(attr));
+}
+
 int handle_isp_get_ae_luma(int fd, const uint8_t *req, uint32_t req_len)
 {
     void *vi;

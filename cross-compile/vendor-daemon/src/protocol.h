@@ -101,7 +101,9 @@ enum cmd_id {
     /* 109 reserved: was CMD_ISP_SET_AE_ATTR, since cancelled */
     CMD_ISP_GET_AWB_STAT           = 110,
     CMD_ISP_SET_BLC                = 111,
-    /* 112-114: white balance (set_wb_type, set_mwb_attr, get_mwb_attr) */
+    CMD_ISP_SET_WB_TYPE            = 112,
+    CMD_ISP_SET_MWB_ATTR           = 113,
+    CMD_ISP_GET_MWB_ATTR           = 114,
     /* 115-117: hue, power_hz, style_id effects */
     CMD_ISP_GET_BLC                = 118,
     /* Utility */
