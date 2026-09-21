@@ -60,7 +60,7 @@ ONVIF is on **port 80**, not 8080. Credentials `admin:admin`.
 
 # Phase 1 — Make the existing six controls work
 
-## Task 1: Fix the ONVIF→SDK effect mapping
+## Task 1: Fix the ONVIF→SDK effect mapping  `[COMPLETED]`
 
 The SDK takes a **signed offset from the ISP tuning profile** in `[-50, 50]`, where 0 means "use the config file value". It hard-rejects anything outside that range. We currently send `(v/100)*255`, so every value ≥20 fails. The vendor's own ONVIF layer subtracts 50 (`ja_onvif.c:299`, `IMG_EFFECT_DEF_VAL = 50`).
 
@@ -177,7 +177,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 
 ---
 
-## Task 2: Widen the platform imaging model to carry WDR and BLC levels
+## Task 2: Widen the platform imaging model to carry WDR and BLC levels  `[COMPLETED]`
 
 WDR and backlight compensation are `bool` in the platform model (`traits.rs:294-296`), but ONVIF and the WebUI both carry mode **plus** a 0-100 level. The level currently has nowhere to go. WDR is also never applied at all: nothing calls `imaging_set_wdr`.
 
@@ -280,7 +280,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 
 ---
 
-## Task 3: Wire WDR through the effect path
+## Task 3: Wire WDR through the effect path  `[COMPLETED]`
 
 `handle_isp_set_wdr` is a `log_debug("no-op")` that returns OK (`handlers_isp.c:47-54`). But `VPSS_EFFECT_WDR` is a normal effect: `ak_vpss_effect_set` routes `type <= VPSS_EFFECT_WDR` straight to `isp_set_effect` in the already-linked `libplat_vi`. No new library, no new command — just stop lying.
 
@@ -416,7 +416,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 
 ---
 
-## Task 4: Add backlight compensation over the ISP SDK
+## Task 4: Add backlight compensation over the ISP SDK  `[COMPLETED]`
 
 BLC has no `ak_vpss` equivalent — it needs `AK_ISP_get_blc_attr` / `AK_ISP_set_blc_attr` from `libakispsdk`. That is safe: `libplat_vi` holds 188 undefined `AK_ISP_*` references and the daemon already links `-lakispsdk` (`Makefile:96`), so the SDK is loaded and initialised in-process. **Do not call `AK_ISP_sdk_init`.**
 
@@ -436,7 +436,7 @@ In `protocol.h`, after `CMD_ISP_GET_AWB_STAT = 110`:
     CMD_ISP_SET_BLC                = 111,
 ```
 
-Leave the `/* 109 reserved: was CMD_ISP_SET_AE_ATTR, since cancelled */` comment alone — Task 9 reclaims that slot.
+> **Superseded:** the wire protocol is append-only — slot 109 was never reclaimed; the AE commands were appended at 119-121 (120 GET_RUN_INFO is the permanent one; 119/121 were temporary and removed after the measurement, see docs/reference/anyka-ae-units.md).
 
 **Step 2: Write the daemon handler**
 
@@ -525,7 +525,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 
 ---
 
-## Task 5: Make `set_settings` validate before it applies
+## Task 5: Make `set_settings` validate before it applies  `[COMPLETED]`
 
 `set_settings` (`platform/anyka/imaging.rs:216-242`) uses `?` between each knob. A rejected value aborts mid-batch, leaving the camera partially applied with *nothing* persisted — so the ISP and the store disagree and the UI shows neither. Now that more knobs are involved, validate everything first.
 
@@ -605,7 +605,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 
 ---
 
-## Task 6: Phase 1 hardware gate
+## Task 6: Phase 1 hardware gate  `[COMPLETED]`
 
 **Do not proceed to Phase 2 until this passes.** Everything so far is host-tested, and a green host suite is exactly what we had while the tab was broken.
 
@@ -663,7 +663,7 @@ Append the measured numbers to the design doc's Phase 1 gate section and commit.
 
 # Phase 2a — White Balance
 
-## Task 7: Daemon commands for white balance
+## Task 7: Daemon commands for white balance  `[COMPLETED]`
 
 `ak_vpss_isp_set_wb_type` (`WB_OPS_TYPE_MANU = 0`, `WB_OPS_TYPE_AUTO = 1`) and `ak_vpss_isp_set_mwb_attr` are both exported by the already-linked `libplat_vpss.so`.
 
@@ -673,7 +673,7 @@ Append the measured numbers to the design doc's Phase 1 gate section and commit.
 
 **Steps:** follow Task 4's shape exactly — `[i32]` wire format for wb_type; for mwb use read-modify-write via `ak_vpss_isp_get_mwb_attr`, setting only `r_gain` and `b_gain` and preserving `g_gain` and all three offsets. Wire format for the setter is `[u16 r_gain][u16 b_gain]`; the getter returns the raw `struct vpss_isp_mwb_attr` bytes and the daemon must not interpret them. Build with `make && make test` and commit.
 
-## Task 8: ONVIF white balance plumbing
+## Task 8: ONVIF white balance plumbing  `[COMPLETED]`
 
 **Files:**
 - Modify: `cross-compile/onvif-rust/src/hal/common/imaging.rs` (trait + helpers), `hal/anyka/ipc/imaging.rs`, `hal/stub/imaging.rs`
@@ -693,7 +693,7 @@ Test first, one test per behaviour:
 
 Then `$CARGO test`, `clippy`, `fmt`, commit.
 
-## Task 9: White balance hardware gate + UI
+## Task 9: White balance hardware gate + UI  `[COMPLETED]`
 
 **GATE RESULT (2026-09-21, firmware `0152b67c`, camera `.198`): FAILED — no visible effect; investigation done, control marked unavailable.**
 
@@ -724,13 +724,15 @@ Commit.
 
 # Phase 2b — Exposure, with calibration
 
-## Task 10: Measure the AE units
+## Task 10: Measure the AE units  `[COMPLETED]`
 
 ONVIF mandates µs for exposure time and dB for gain. The device reports raw fixed-point and line units — `.198` currently reports `ae_a_gain_max: 16384`, `ae_exp_time_max: 2250`, `ae_target_luminance: 55`. Publishing those under ONVIF field names would lie to every third-party client.
 
 **This task produces a measurement document, not production code.**
 
-**Step 1:** Reclaim slot 109 as `CMD_ISP_SET_AE_ATTR`, read-modify-write via `ak_vpss_isp_get_ae_attr`, overriding only named fields. The cancelled implementation sketch in `docs/plans/2026-08-14-day-night-gaps.md:554-596` is a working starting point — reuse it rather than rewriting from scratch. **Never construct a fresh `vpss_isp_ae_attr`**: it would zero `hist_weight`, `envi_gain_range` and `target_lumiance`.
+> **Superseded:** implemented as an appended `CMD_ISP_AE_SET_ATTR = 119` (append-only wire protocol); the set-attr command was temporary and has been removed.
+
+**Step 1 (as done):** the AE attr was read via `CMD_ISP_GET_AE_ATTR = 108` for the options surface, read-modify-write via `ak_vpss_isp_get_ae_attr`, overriding only named fields. The cancelled implementation sketch in `docs/plans/2026-08-14-day-night-gaps.md:554-596` is a working starting point — reuse it rather than rewriting from scratch. **Never construct a fresh `vpss_isp_ae_attr`**: it would zero `hist_weight`, `envi_gain_range` and `target_lumiance`.
 
 **Step 2:** Add `CMD_ISP_GET_AE_RUN_INFO` over `ak_vpss_isp_get_ae_run_info`, which returns `current_exp_time`, `current_a_gain`, `current_d_gain` and `current_darked_flag`. Surface it in `/api/diagnostics` next to the existing vision block.
 
@@ -742,7 +744,7 @@ ONVIF mandates µs for exposure time and dB for gain. The device reports raw fix
 
 **Gate:** if the sweep does not yield a consistent conversion, **stop**. Ship Task 11's AUTO/MANUAL only and leave the numeric limits out of ONVIF. Wrong units are worse than absent ones.
 
-## Task 11: Exposure implementation
+## Task 11: Exposure implementation  `[COMPLETED]`
 
 `Exposure20` and `ExposureOptions20` already exist (`types/imaging.rs:138,301`).
 
@@ -758,7 +760,7 @@ ONVIF mandates µs for exposure time and dB for gain. The device reports raw fix
 
 # Phase 3 — Hue, anti-flicker, style
 
-## Task 12: Daemon dispatch for the remaining effect types
+## Task 12: Daemon dispatch for the remaining effect types  `[COMPLETED]`
 
 `handle_isp_effect` is already generic over `enum vpss_effect_type`; the dispatcher just hardwires 4 of the 8 values.
 
@@ -794,7 +796,7 @@ Test first: valid PUT applies; `power_hz = 55` is rejected with 400 and no IPC c
 
 Commit.
 
-## Task 14: UI for the three knobs
+## Task 14: UI for the three knobs  `[COMPLETED]`
 
 Add an "Advanced" card to `ImagingPage.tsx`: hue slider, anti-flicker select (50 Hz / 60 Hz), style select. New `cross-compile/www/src/services/imagingAdvancedService.ts` using the REST client, not the SOAP one.
 
@@ -804,8 +806,7 @@ Label anti-flicker for humans — "Mains frequency (reduces flicker under artifi
 
 # Phase 4 — Live preview and honest cards
 
-## Task 15: Apply on commit, not on drag
-
+## Task 15: Apply on commit, not on drag  `[COMPLETED]`
 Every apply calls `mark_imaging_update_and_request_idr`. Per the `main-keyframes-exceed-shm-slot` finding, a 184KB main IDR does not fit the 131008-byte ring slot, so an IDR per drag tick would hammer the main stream.
 
 **Files:** `cross-compile/www/src/pages/settings/ImagingPage.tsx`
@@ -822,16 +823,14 @@ Expected: FAIL (one per tick, or zero).
 
 **Step 2:** Implement. **Step 3:** Re-run. **Step 4:** Commit.
 
-## Task 16: Live preview
-
+## Task 16: Live preview  `[COMPLETED]`
 Reuse `cross-compile/www/src/components/common/LiveVideoPlayer.tsx` — it already handles auth, CORS and late joiners, so no Rust is needed. Place it in a sticky column beside the cards on `lg:` and above; stack it on mobile.
 
 Measure the layout headless before hand-tuning CSS (jsdom sees no layout): cached chromium + playwright-core against the dev server, per the `webui-layout-can-be-measured-headless` finding. Assert `scrollHeight` rather than guessing.
 
 Vitest, `pnpm verify`, commit.
 
-## Task 17: Honest cards
-
+## Task 17: Honest cards  `[COMPLETED]`
 - Fold Sharpness into "Color & Brightness"; delete the "Focus & Sharpness" card. The device has no motorised focus — `GetMoveOptions` returns empty defaults — so the title promises hardware that does not exist.
 - Give the illumination switches real state: `/api/diagnostics` already returns `ir_led` and `white_led`. Replace `useState(false)` (`:86-87`) with the fetched values so they survive a reload.
 - Mention in the Illumination card's description that white light is the effective night illuminator on this hardware: 110 vs 3 YAVG against the IR lamp indoors.
@@ -840,7 +839,16 @@ Vitest for the switch read-back, `pnpm verify`, commit.
 
 ---
 
-## Definition of done
+## Definition of done  `[IN PROGRESS]`
+
+> **Open finding (bdc08439 firmware, 2026-09-21):** the definition-of-done gate
+> (`scripts/debugging/imaging_dod_gate.sh`) passed the 20-call sweep (all HTTP 200) and
+> the brightness luma delta (0 -> 33.9, 100 -> 212.2, delta 178), but **WDR ON returned a
+> receiver fault (500)** while WDR OFF succeeded; the vendor-daemon log had no
+> `value range` lines (count 0). The camera was then taken offline on purpose.
+> Re-run the gate when it is back. **Resolved per the plan's fallback on 2026-09-21:** the code review blocked the merge on this item; with the camera offline the effect path could not be fixed, so the UI now stubs the WDR control (disabled, labelled 'Unavailable on this ISP', ponytail comment marks the re-enable step). The daemon/ONVIF plumbing stays in place for when the effect path is fixed.
+> Also still open from the DoD list: the `value range` no-increase check, WDR/BLC
+> frame visibility, and the anti-flicker 50/60 banding measurement (all need the camera).
 
 - [ ] `SetImagingSettings` succeeds for brightness/contrast/saturation/sharpness at 0, 20, 50, 80 and 100 on `.198`
 - [ ] `grep -c "value range" /mnt/logs/vendor_daemon.log` does not increase across a full slider sweep

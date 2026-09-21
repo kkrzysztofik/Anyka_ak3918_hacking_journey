@@ -24,7 +24,7 @@ def call(body, action):
     env = (
         '<?xml version="1.0" encoding="UTF-8"?>'
         '<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope" '
-        'xmlns:timg="http://www.onvif.org/onvif/ver10/imaging">'
+        'xmlns:timg="http://www.onvif.org/ver20/imaging/wsdl">'
         '<s:Body>' + body + '</s:Body></s:Envelope>'
     )
     req = urllib.request.Request(
