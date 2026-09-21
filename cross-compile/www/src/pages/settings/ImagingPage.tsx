@@ -15,7 +15,6 @@ import {
   Palette,
   RotateCcw,
   Save,
-  ScanEye,
   Sun,
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -32,6 +31,7 @@ import {
 } from '@/components/ui/settings-card';
 import { Slider } from '@/components/ui/slider';
 import { Switch } from '@/components/ui/switch';
+import { getDiagnostics } from '@/services/diagnosticsService';
 import {
   type AdvancedImaging,
   getAdvancedImaging,
@@ -111,8 +111,16 @@ export default function ImagingPage() {
   const irCutSupported =
     options?.irCutFilterModes === undefined || options.irCutFilterModes.length > 0;
 
-  const [irLampOn, setIrLampOn] = useState(false);
-  const [whiteLightOn, setWhiteLightOn] = useState(false);
+  // The lamp states come from /api/diagnostics so they survive a reload;
+  // a local override applies after a toggle until the next refetch agrees.
+  const { data: diagnostics } = useQuery({
+    queryKey: ['diagnostics'],
+    queryFn: ({ signal }) => getDiagnostics(signal),
+  });
+  const [irLampLocal, setIrLampLocal] = useState<boolean | null>(null);
+  const [whiteLightLocal, setWhiteLightLocal] = useState<boolean | null>(null);
+  const irLampOn = irLampLocal ?? diagnostics?.vision?.ir_led ?? false;
+  const whiteLightOn = whiteLightLocal ?? diagnostics?.vision?.white_led ?? false;
 
   // Local state for all form values
   const [localSettings, setLocalSettings] = useState<ImagingSettings>({
@@ -374,27 +382,7 @@ export default function ImagingPage() {
                       className="py-1"
                     />
                   </div>
-                </SettingsCardContent>
-              </SettingsCard>
 
-              {/* Focus & Sharpness */}
-              <SettingsCard>
-                <SettingsCardHeader>
-                  <div className="flex items-center gap-[12px]">
-                    <div className="flex size-[40px] items-center justify-center rounded-[10px] bg-[rgba(10,132,255,0.1)]">
-                      <ScanEye className="size-5 text-[#0a84ff]" />
-                    </div>
-                    <div>
-                      <SettingsCardTitle data-testid="imaging-focus-sharpness-title">
-                        Focus & Sharpness
-                      </SettingsCardTitle>
-                      <SettingsCardDescription>
-                        Lens focus and edge enhancement
-                      </SettingsCardDescription>
-                    </div>
-                  </div>
-                </SettingsCardHeader>
-                <SettingsCardContent className="space-y-[24px]">
                   <div className="space-y-[12px]">
                     <div className="flex items-center justify-between">
                       <Label className="text-[#e5e5e5]">Sharpness</Label>
@@ -462,7 +450,8 @@ export default function ImagingPage() {
                     <div>
                       <SettingsCardTitle>White Balance</SettingsCardTitle>
                       <SettingsCardDescription>
-                        Color temperature adjustment (Unavailable)
+                        Auto white balance; manual gains are written to the driver but have no
+                        visible effect on this sensor
                       </SettingsCardDescription>
                     </div>
                   </div>
@@ -589,7 +578,8 @@ export default function ImagingPage() {
                         Illumination
                       </SettingsCardTitle>
                       <SettingsCardDescription>
-                        IR lamp and white floodlight
+                        IR lamp and white floodlight — on this hardware the white light is the
+                        effective night illuminator
                       </SettingsCardDescription>
                     </div>
                   </div>
@@ -602,7 +592,7 @@ export default function ImagingPage() {
                     <Switch
                       checked={irLampOn}
                       onCheckedChange={(checked) =>
-                        toggleLamp(checked, setIrLampOn, 'tt:IRLamp|On', 'tt:IRLamp|Off')
+                        toggleLamp(checked, setIrLampLocal, 'tt:IRLamp|On', 'tt:IRLamp|Off')
                       }
                       disabled={!profileToken || lampMutation.isPending}
                       data-testid="imaging-ir-lamp-switch"
@@ -617,7 +607,7 @@ export default function ImagingPage() {
                       onCheckedChange={(checked) =>
                         toggleLamp(
                           checked,
-                          setWhiteLightOn,
+                          setWhiteLightLocal,
                           'tt:WhiteLight|On',
                           'tt:WhiteLight|Off',
                         )

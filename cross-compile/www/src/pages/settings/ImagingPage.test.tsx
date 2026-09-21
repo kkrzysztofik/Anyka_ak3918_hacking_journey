@@ -5,6 +5,7 @@ import { fireEvent, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { getDiagnostics } from '@/services/diagnosticsService';
 import { getAdvancedImaging, putAdvancedImaging } from '@/services/imagingAdvancedService';
 import {
   getImagingOptions,
@@ -46,6 +47,9 @@ vi.mock('@/services/imagingAdvancedService', () => ({
   getAdvancedImaging: vi.fn(),
   putAdvancedImaging: vi.fn(),
 }));
+vi.mock('@/services/diagnosticsService', () => ({
+  getDiagnostics: vi.fn(),
+}));
 
 const MOCK_VIDEO_SOURCE_CONFIG = {
   token: 'VideoSourceConfig_0',
@@ -64,6 +68,9 @@ describe('ImagingPage', () => {
     vi.mocked(setImagingSettings).mockResolvedValue(undefined);
     vi.mocked(getAdvancedImaging).mockResolvedValue({ hue: 50, powerHz: 50, styleId: 0 });
     vi.mocked(putAdvancedImaging).mockResolvedValue(undefined);
+    vi.mocked(getDiagnostics).mockResolvedValue({
+      vision: { ir_led: false, white_led: false },
+    } as never);
     vi.mocked(getProfiles).mockResolvedValue(MOCK_DATA.profiles);
     vi.mocked(sendAuxiliaryCommand).mockResolvedValue(undefined);
     vi.mocked(getVideoSourceConfiguration).mockResolvedValue(MOCK_VIDEO_SOURCE_CONFIG);
@@ -198,10 +205,14 @@ describe('ImagingPage', () => {
 
     await waitFor(() => {
       expect(screen.getByTestId('imaging-color-brightness-title')).toBeInTheDocument();
-      expect(screen.getByTestId('imaging-focus-sharpness-title')).toBeInTheDocument();
       expect(screen.getByTestId('imaging-infrared-settings-title')).toBeInTheDocument();
       expect(screen.getByTestId('imaging-backlight-wdr-title')).toBeInTheDocument();
+      expect(screen.getByTestId('imaging-advanced-title')).toBeInTheDocument();
     });
+
+    // Sharpness lives in Color & Brightness: the device has no motorised
+    // focus, so there is no longer a Focus card.
+    expect(screen.queryByTestId('imaging-focus-sharpness-title')).not.toBeInTheDocument();
   });
 
   it('should update slider values when changed', async () => {
@@ -821,6 +832,18 @@ describe('ImagingPage', () => {
     await waitFor(() => {
       expect(putAdvancedImaging).toHaveBeenCalledWith({ powerHz: 60 });
     });
+  });
+
+  it('seeds the lamp switches from the diagnostics snapshot', async () => {
+    vi.mocked(getDiagnostics).mockResolvedValue({
+      vision: { ir_led: true, white_led: true },
+    } as never);
+    renderWithProviders(<ImagingPage />);
+
+    const ir = await screen.findByTestId('imaging-ir-lamp-switch');
+    const white = screen.getByTestId('imaging-white-light-switch');
+    expect(ir).toBeChecked();
+    expect(white).toBeChecked();
   });
 
   it('mounts the live preview beside the cards', async () => {
