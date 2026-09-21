@@ -58,7 +58,7 @@ Instrument:
 | 2 | Back-side clearance | | mm — GATE, must be ≥3.5 |
 | 2 | Location of most generous back region | | |
 | 3 | `IR` line asserted | | V |
-| 3 | `HB` line asserted | | V |
+| 3 | `HB` line asserted | | V — **CRITICAL**: drives Q1 gate directly; 1.8 V will not switch it |
 | 4 | Board current, IR channel on | | mA |
 | 5 | Vf D1..D8 (diode mode) | | V each |
 | 6 | Striped component, room light | | Ω |
@@ -409,7 +409,7 @@ current, it does not shorten the string:
 
 - **R1a** (≈ 4.0 Ω 1 %) from the sense node to ground — permanent, sets 50 mA
 - **R1b** (same value) from the sense node to Q1's drain; Q1's source to ground
-- **R3** (10 kΩ) from J1 `HB` to Q1's gate; **R4** (100 kΩ) gate to ground
+- **R3** (1 kΩ — not 10 kΩ; a MOSFET gate is a DC open, so R3/R4 divide) from J1 `HB` to Q1's gate; **R4** (100 kΩ) gate to ground
 
 Resulting logic:
 - `HB` low → Q1 off → 4.0 Ω → 50 mA → **half power**

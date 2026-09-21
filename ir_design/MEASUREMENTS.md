@@ -13,8 +13,8 @@ Photos in `photos/`.
 | 1 | Silkscreen pin order | `- + IR HB` | 2026-09-22 | read from photo `000211`; confirm against the cable before layout |
 | 2 | Back-side clearance | **adequate everywhere** | 2026-09-22 | **GATE PASSED.** No local restriction — converter placement is unconstrained on the back face |
 | 2a | Substrate is aluminium? | **No — FR4** | 2026-09-22 | two-point resistance on the bare back reads open. See "Substrate" below |
-| 3 | `IR` line asserted | | | expect 3.3 V; sets Q2 base resistor and U1 enable tolerance |
-| 3 | `HB` line asserted | | | |
+| 3 | `IR` line asserted | | | expect 3.3 V; sets U1 CTRL tolerance |
+| 3 | `HB` line asserted | | **CRITICAL PATH** — drives Q1's gate directly. 3.3 V or 5 V fine; 1.8 V will not switch it |
 | 4 | Board current, IR channel on | | | headroom check against the new board's 271 mA |
 | 5 | Vf D1..D8 (diode mode) | | | resolves `SPEC.md` open item 2 — are the stock emitters degraded? |
 | 6 | Striped component, room light | | | resolves `SPEC.md` open item 3 |

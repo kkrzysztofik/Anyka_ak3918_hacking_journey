@@ -135,8 +135,24 @@ warned to be potentially unstable.
 Failure modes stay benign: Q1 shorted leaves the board stuck at full power,
 Q1 open leaves it stuck at half power. Neither damages anything.
 
-Q1's `Rds(on)` sits in series with R1b and skews the parallel value — at 4 Ω a
-100 mΩ part is ~1 % on total current. Trim R1b if the chosen part is worse.
+Q1 is an **AO3400A**: `Rds(on)` ≤ 48 mΩ at Vgs 2.5 V, Vgs(th) 1.45 V max. It
+sits in series with R1b and skews the parallel value by **−1.09 % at 25 °C,
+−1.43 % hot** — inside the ~2 % threshold, so R1b is not trimmed. It is not
+the dominant error anyway: Vfb ±2 % and the resistors ±1 % already give ±3 %.
+
+**R3 is 1 kΩ, not 10 kΩ.** A MOSFET gate is a DC open, so R3 and R4 form a
+plain divider — unlike the superseded BJT arrangement, where the base junction
+clamped at 0.7 V and R4 sank only ~7 µA, making the divider irrelevant. At
+10 kΩ the gate would see `HB × 100/110` = **3.0 V from a 3.3 V line, a 9 %
+loss**. That still works, but 1 kΩ gives `× 100/101` = 3.27 V for the same
+money.
+
+**Q1's gate drive now depends on measurement 3, which has therefore moved onto
+the critical path.** The old inverter referenced the gate to the 5.3 V rail, so
+`HB`'s own level barely mattered. Driving the gate directly, 3.3 V and 5 V are
+both fine — but **1.8 V is not**: a 1.64 V gate against a 1.45 V maximum
+threshold does not reliably turn Q1 on, and the board would be stuck at half
+power. Measure `HB` before ordering.
 
 ## Firmware consequence
 
@@ -161,8 +177,12 @@ follow-up.
 
 ## Bill of materials
 
-**20 designators.** `ir_design/PARTS.md` is authoritative for LCSC numbers and
+**21 designators.** `ir_design/PARTS.md` is authoritative for LCSC numbers and
 datasheet evidence; this table is the summary.
+
+(Arithmetic, since this count has been wrong twice: 13 singles + D2–D9 + J1 =
+22 before the rework, not the 21 originally claimed here. Then +C4, −Q2, −R2,
+−R5, +R1b = **21**.)
 
 | Ref | Part | Note |
 |---|---|---|
@@ -176,7 +196,7 @@ datasheet evidence; this table is the summary.
 | R1a | Sense, `Vfb / 0.05 A` ≈ 4.0 Ω 1 % | permanent — sets the half-power default |
 | R1b | Same value, through Q1 | parallels R1a to ~2.0 Ω for full power |
 | Q1 | Logic-level N-MOSFET, 30 V, SOT-23 | source at ground; `Rds(on)` skews R1b, trim if > ~2 % |
-| R3 | 10 kΩ | Q1 gate, from `HB` |
+| R3 | **1 kΩ** | Q1 gate, from `HB`. **Not 10 kΩ** — see below |
 | R4 | 100 kΩ | Q1 gate pulldown |
 | D2–D9 | 850 nm IR, 2835 or 3535 | **measurement 14 changes only the footprint** — the shortlisted parts are one die family with identical electricals |
 | J1 | 4-pin header | stock footprint, `- + IR HB`. Pitch pending measurement 11 — do not guess it |
@@ -254,13 +274,18 @@ over whatever package is chosen.
    assumed 1.7–2.0 V. Still worth checking against measurement 4, since the
    stock board lit one 4-emitter channel at a time. Browning out that rail
    reboots the SoC.
-4. ~~**Switching noise near the image sensor.**~~ **Largely retired by the FR4
+4. **Switching noise near the image sensor.** **Largely retired by the FR4
    decision** — a two-layer board gives the SW node a return plane, which was
-   the missing mitigation. Residual: keep the C1–U1–D1–C2 loop as one tight
-   cluster on the back, and remember that a single converter is not
-   automatically quieter than two, since the higher output voltage raises dV/dt
-   even as the converter count drops. The converter now also sits on the
-   opposite face from the emitters, with the plane between it and the sensor.
+   the missing mitigation. The converter also now sits on the opposite face
+   from the emitters, with the plane between it and the sensor. Two residuals:
+   keep the C1–U1–D1–C2 loop as one tight cluster on the back, and note that
+   **inductor ripple is worst in the mode the board boots into.** `ΔI` is
+   load-independent, so halving the LED current does not halve it: ripple runs
+   **84 % of input current at half power versus 42 % at full** (ΔI 111 mA on
+   131 mA, trough 76 mA — still continuous conduction). The superseded bypass
+   had the opposite property, since 4 emitters meant D = 0.145 and ~21 %
+   ripple. This is the one thing the current-switching trade gives up, and it
+   is a second argument against dropping L1 below 22 µH.
 5. **Single string, single point of failure.** One open emitter kills all
    eight. U1's OVP must shut down cleanly rather than running the output away.
 6. ~~**Driver enable semantics.**~~ **CLOSED 2026-09-22.** TI §9.2.1.2.1:
