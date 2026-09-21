@@ -6,7 +6,7 @@
 
 use std::sync::Arc;
 
-use crate::onvif::error::OnvifResult;
+use crate::onvif::error::{OnvifError, OnvifResult};
 #[allow(unused_imports)]
 use crate::onvif::types::common::{MediaUri, StreamSetup, StreamType, TransportProtocol};
 use crate::onvif::types::media::{
@@ -17,7 +17,9 @@ use crate::onvif::types::media::{
 
 use super::ProfileManagerRef;
 use crate::config::ConfigRuntime;
-use crate::onvif::media::types::{DEFAULT_RTSP_PORT, DEFAULT_SNAPSHOT_PATH};
+use crate::onvif::media::types::{
+    DEFAULT_RTSP_PORT, DEFAULT_SNAPSHOT_PATH, VIDEO_ENCODER_CONFIG_PREFIX,
+};
 use crate::platform::external_ip;
 
 /// Handle GetStreamUri request.
@@ -36,11 +38,27 @@ pub fn get_stream_uri(
         request.profile_token
     );
 
-    // Validate profile exists
-    let _ = pm.get_profile(&request.profile_token)?;
+    // Route by the profile's attached video encoder, not by its token. The
+    // previous implementation substring-matched the token and handed out the
+    // dead "/stream" path for anything not literally named MainStream/SubStream.
+    let profile = pm.get_profile(&request.profile_token)?;
 
-    // Build RTSP URI based on profile
-    let stream_path = get_stream_path(&request.profile_token, &request.stream_setup);
+    let encoder_token = profile
+        .video_encoder_configuration
+        .as_ref()
+        .map(|c| c.token.as_str())
+        .ok_or_else(|| {
+            OnvifError::invalid_arg_val(
+                "ter:InvalidArgVal",
+                format!(
+                    "Profile '{}' has no video encoder configuration and cannot be streamed",
+                    request.profile_token
+                ),
+            )
+        })?;
+
+    // Build RTSP URI from the encoder-derived channel
+    let stream_path = get_stream_path(encoder_token, &request.stream_setup)?;
     let uri = format!("{}{}", rtsp_url(config), stream_path);
 
     Ok(GetStreamUriResponse {
@@ -53,22 +71,33 @@ pub fn get_stream_uri(
     })
 }
 
-/// Get stream path for a profile.
+/// Map a video encoder configuration token to its RTSP path.
 ///
-/// Channel routing is currently derived from substring matching on the profile
-/// token ("MainStream" / "SubStream"). This works because the fixed profiles
-/// use a predictable naming convention, but user-created profiles will fall
-/// through to the generic "stream" path.
-// TODO: derive channel from the profile's video encoder configuration (or a
-// profile-to-channel map) instead of relying on token naming conventions.
-pub fn get_stream_path(profile_token: &str, stream_setup: &StreamSetup) -> String {
-    // Determine stream name based on profile token substring
-    let stream_name = if profile_token.contains("MainStream") {
-        "main"
-    } else if profile_token.contains("SubStream") {
-        "sub"
-    } else {
-        "stream"
+/// Encoder tokens are `VideoEncoderConfig_{n}`, where `n` is the enabled-order
+/// index over `stream_profile_1..4`. The hardware exposes exactly two channels
+/// ("main" / "sub"), so index 0 is main, 1 is sub, and anything else is a
+/// profile we cannot serve.
+///
+/// Returning an error rather than a fallback is deliberate: the previous
+/// implementation matched on the *profile* token and silently handed out
+/// "/stream" for anything unrecognised, a path no RTSP server serves.
+pub fn get_stream_path(encoder_token: &str, stream_setup: &StreamSetup) -> OnvifResult<String> {
+    let index = encoder_token
+        .strip_prefix(VIDEO_ENCODER_CONFIG_PREFIX)
+        .and_then(|n| n.parse::<u32>().ok());
+
+    let stream_name = match index {
+        Some(0) => "main",
+        Some(1) => "sub",
+        _ => {
+            return Err(OnvifError::invalid_arg_val(
+                "ter:InvalidArgVal",
+                format!(
+                    "Video encoder configuration '{}' does not map to an RTSP channel",
+                    encoder_token
+                ),
+            ));
+        }
     };
 
     // Determine stream type suffix
@@ -77,7 +106,7 @@ pub fn get_stream_path(profile_token: &str, stream_setup: &StreamSetup) -> Strin
         StreamType::RtpMulticast => "_multicast",
     };
 
-    format!("/{}{}", stream_name, type_suffix)
+    Ok(format!("/{}{}", stream_name, type_suffix))
 }
 
 /// Handle GetSnapshotUri request.
@@ -195,6 +224,16 @@ mod tests {
         Arc::new(ConfigRuntime::new(Default::default()))
     }
 
+    fn default_stream_setup() -> StreamSetup {
+        StreamSetup {
+            stream: StreamType::RtpUnicast,
+            transport: crate::onvif::types::common::Transport {
+                protocol: TransportProtocol::RTSP,
+                tunnel: None,
+            },
+        }
+    }
+
     #[test]
     fn test_streaming_get_uri_main_stream_returns_rtsp() {
         let pm = create_test_pm();
@@ -216,7 +255,7 @@ mod tests {
         assert!(result.is_ok());
         let response = result.unwrap();
         assert!(response.media_uri.uri.contains("rtsp://"));
-        assert!(response.media_uri.uri.contains("/main"));
+        assert!(response.media_uri.uri.ends_with("/main"), "got {}", response.media_uri.uri);
     }
 
     #[test]
@@ -239,7 +278,7 @@ mod tests {
         );
         assert!(result.is_ok());
         let response = result.unwrap();
-        assert!(response.media_uri.uri.contains("/sub"));
+        assert!(response.media_uri.uri.ends_with("/sub"), "got {}", response.media_uri.uri);
     }
 
     #[test]
@@ -284,6 +323,58 @@ mod tests {
             },
         );
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_streaming_get_uri_faults_when_no_encoder_attached() {
+        let pm = create_test_pm();
+        let config = create_test_config();
+        pm.create_profile("Bare".to_string(), Some("Profile_Bare".to_string()))
+            .unwrap();
+
+        let result = get_stream_uri(
+            &pm,
+            &config,
+            GetStreamUri {
+                stream_setup: default_stream_setup(),
+                profile_token: "Profile_Bare".to_string(),
+            },
+        );
+        assert!(
+            result.is_err(),
+            "a profile with no video encoder must fault, not hand out a dead /stream URI"
+        );
+    }
+
+    #[test]
+    fn test_stream_uri_is_not_fooled_by_a_renamed_profile() {
+        // Regression guard: routing must read the profile's encoder, not its
+        // token. A profile named to contain neither MainStream nor SubStream
+        // still routes by whichever encoder is attached.
+        let pm = create_test_pm();
+        let config = create_test_config();
+        pm.create_profile("Lobby".to_string(), Some("Profile_Lobby".to_string()))
+            .unwrap();
+        pm.add_video_encoder_configuration(
+            &"Profile_Lobby".to_string(),
+            &"VideoEncoderConfig_1".to_string(),
+        )
+        .unwrap();
+
+        let response = get_stream_uri(
+            &pm,
+            &config,
+            GetStreamUri {
+                stream_setup: default_stream_setup(),
+                profile_token: "Profile_Lobby".to_string(),
+            },
+        )
+        .expect("a custom profile with an encoder must resolve");
+        assert!(
+            response.media_uri.uri.ends_with("/sub"),
+            "got {}",
+            response.media_uri.uri
+        );
     }
 
     #[test]
