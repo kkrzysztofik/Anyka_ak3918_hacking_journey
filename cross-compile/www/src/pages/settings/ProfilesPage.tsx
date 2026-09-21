@@ -53,15 +53,22 @@ import {
 } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
 import {
   type MediaProfile,
   type VideoEncoderConfiguration,
   type VideoEncoderConfigurationOptions,
+  addMetadataConfiguration,
+  addPTZConfiguration,
   createProfile,
   deleteProfile,
+  getCompatibleMetadata,
+  getCompatiblePTZ,
   getProfiles,
   getVideoEncoderConfiguration,
   getVideoEncoderConfigurationOptions,
+  removeMetadataConfiguration,
+  removePTZConfiguration,
   setVideoEncoderConfiguration,
 } from '@/services/profileService';
 
@@ -324,15 +331,33 @@ export default function ProfilesPage() {
                         active={!!profile.ptzConfiguration}
                         token={profile.ptzConfiguration?.token}
                         details={profile.ptzConfiguration?.name}
+                        testId={`ptz-config-${profile.token}`}
+                        toggle={
+                          <FeatureToggle
+                            profileToken={profile.token}
+                            feature="ptz"
+                            checked={!!profile.ptzConfiguration}
+                            testId="profile-ptz-toggle"
+                          />
+                        }
                       />
 
                       {/* Metadata/Analytics */}
                       <ConfigSection
                         title="Metadata & Analytics"
                         icon={<FileText className="size-4 text-[#64d2ff]" />}
-                        active={!!profile.metadataConfiguration} // Assuming metadata implies analytics for now
+                        active={!!profile.metadataConfiguration}
                         token={profile.metadataConfiguration?.token}
                         details={profile.metadataConfiguration?.name}
+                        testId={`metadata-config-${profile.token}`}
+                        toggle={
+                          <FeatureToggle
+                            profileToken={profile.token}
+                            feature="metadata"
+                            checked={!!profile.metadataConfiguration}
+                            testId="profile-metadata-toggle"
+                          />
+                        }
                       />
                     </div>
                   </div>
@@ -457,6 +482,7 @@ function ConfigSection({
   details,
   onEdit,
   testId,
+  toggle,
 }: {
   readonly title: string;
   readonly icon: React.ReactNode;
@@ -465,6 +491,7 @@ function ConfigSection({
   readonly details?: string;
   readonly onEdit?: () => void;
   readonly testId?: string;
+  readonly toggle?: React.ReactNode;
 }) {
   return (
     <div
@@ -483,15 +510,79 @@ function ConfigSection({
       ) : (
         <div className="text-[12px] text-[#636366] italic">Not configured</div>
       )}
-      <Button
-        variant="link"
-        className={`mt-[8px] h-auto p-0 text-[11px] ${active ? 'text-[#0a84ff]' : 'text-[#a1a1a6]'}`}
-        onClick={onEdit}
-        disabled={!onEdit}
-        data-testid={testId ? `${testId}-edit-button` : undefined}
-      >
-        {active ? 'Edit' : 'Add (Coming Soon)'}
-      </Button>
+      {toggle ? (
+        toggle
+      ) : (
+        <Button
+          variant="link"
+          className={`mt-[8px] h-auto p-0 text-[11px] ${active ? 'text-[#0a84ff]' : 'text-[#a1a1a6]'}`}
+          onClick={onEdit}
+          disabled={!onEdit}
+          data-testid={testId ? `${testId}-edit-button` : undefined}
+        >
+          {active ? 'Edit' : 'Add (Coming Soon)'}
+        </Button>
+      )}
+    </div>
+  );
+}
+
+function FeatureToggle({
+  profileToken,
+  feature,
+  checked,
+  testId,
+}: {
+  readonly profileToken: string;
+  readonly feature: 'ptz' | 'metadata';
+  readonly checked: boolean;
+  readonly testId: string;
+}) {
+  const queryClient = useQueryClient();
+  const [busy, setBusy] = useState(false);
+  const label = feature === 'ptz' ? 'PTZ' : 'Metadata';
+
+  const mutation = useMutation({
+    mutationFn: async (next: boolean) => {
+      if (feature === 'ptz') {
+        if (next) {
+          const options = await getCompatiblePTZ(profileToken);
+          if (options.length === 0) throw new Error('No compatible PTZ configurations');
+          await addPTZConfiguration(profileToken, options[0].token);
+        } else {
+          await removePTZConfiguration(profileToken);
+        }
+      } else if (next) {
+        const options = await getCompatibleMetadata(profileToken);
+        if (options.length === 0) throw new Error('No compatible metadata configurations');
+        await addMetadataConfiguration(profileToken, options[0].token);
+      } else {
+        await removeMetadataConfiguration(profileToken);
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['profiles'] });
+      toast.success(`${label} configuration updated`);
+    },
+    onError: (error) => {
+      toast.error(`Failed to update ${label} configuration`, {
+        description: error instanceof Error ? error.message : 'An error occurred',
+      });
+    },
+    onSettled: () => setBusy(false),
+  });
+
+  return (
+    <div className="mt-[8px] flex items-center gap-[8px]" data-testid={`${testId}-wrapper`}>
+      <Switch
+        checked={checked}
+        disabled={busy}
+        onCheckedChange={(next) => {
+          setBusy(true);
+          mutation.mutate(next);
+        }}
+        data-testid={testId}
+      />
     </div>
   );
 }

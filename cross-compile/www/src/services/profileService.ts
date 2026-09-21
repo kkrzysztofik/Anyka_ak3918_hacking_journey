@@ -533,3 +533,123 @@ export async function getVideoEncoderConfigurationOptions(
 
   return result;
 }
+
+/**
+ * A configuration offered by a `GetCompatible*` operation: its token (to pass
+ * to the matching Add operation) and its human-readable name (for a hint).
+ */
+export interface CompatibleConfiguration {
+  token: string;
+  name: string;
+}
+
+/**
+ * Parse a `Configurations` list (array or single element) from a SOAP response
+ * into `{token, name}` pairs, dropping entries with no token.
+ */
+function parseConfigurations(raw: Record<string, unknown> | undefined): CompatibleConfiguration[] {
+  if (!raw) {
+    return [];
+  }
+  const list = Array.isArray(raw) ? raw : [raw];
+  return list
+    .map((cfg: Record<string, unknown>) => ({
+      token: safeString(cfg['@_token'], ''),
+      name: safeString(cfg.Name, ''),
+    }))
+    .filter((c) => c.token !== '');
+}
+
+/**
+ * Get the PTZ configurations compatible with a profile.
+ */
+export async function getCompatiblePTZ(profileToken: string): Promise<CompatibleConfiguration[]> {
+  // NOSONAR - Token comes from a device response (trusted source)
+  const body = `<trt:GetCompatiblePTZConfigurations>
+    <trt:ProfileToken>${profileToken}</trt:ProfileToken>
+  </trt:GetCompatiblePTZConfigurations>`;
+
+  const data = await soapRequest<Record<string, unknown>>(
+    ENDPOINTS.media,
+    body,
+    'GetCompatiblePTZConfigurationsResponse',
+  );
+
+  return parseConfigurations(data?.Configurations as Record<string, unknown> | undefined);
+}
+
+/**
+ * Get the metadata configurations compatible with a profile.
+ */
+export async function getCompatibleMetadata(
+  profileToken: string,
+): Promise<CompatibleConfiguration[]> {
+  // NOSONAR - Token comes from a device response (trusted source)
+  const body = `<trt:GetCompatibleMetadataConfigurations>
+    <trt:ProfileToken>${profileToken}</trt:ProfileToken>
+  </trt:GetCompatibleMetadataConfigurations>`;
+
+  const data = await soapRequest<Record<string, unknown>>(
+    ENDPOINTS.media,
+    body,
+    'GetCompatibleMetadataConfigurationsResponse',
+  );
+
+  return parseConfigurations(data?.Configurations as Record<string, unknown> | undefined);
+}
+
+/**
+ * Attach a PTZ configuration to a profile.
+ */
+export async function addPTZConfiguration(
+  profileToken: string,
+  ptzConfigurationToken: string,
+): Promise<void> {
+  // NOSONAR - Both tokens come from device responses (trusted sources)
+  const body = `<trt:AddPTZConfiguration>
+    <trt:ProfileToken>${profileToken}</trt:ProfileToken>
+    <trt:ConfigurationToken>${ptzConfigurationToken}</trt:ConfigurationToken>
+  </trt:AddPTZConfiguration>`;
+
+  await soapRequest(ENDPOINTS.media, body, 'AddPTZConfigurationResponse');
+}
+
+/**
+ * Remove the PTZ configuration from a profile.
+ */
+export async function removePTZConfiguration(profileToken: string): Promise<void> {
+  // NOSONAR - Token comes from a device response (trusted source)
+  const body = `<trt:RemovePTZConfiguration>
+    <trt:ProfileToken>${profileToken}</trt:ProfileToken>
+  </trt:RemovePTZConfiguration>`;
+
+  await soapRequest(ENDPOINTS.media, body, 'RemovePTZConfigurationResponse');
+}
+
+/**
+ * Attach a metadata configuration to a profile.
+ */
+export async function addMetadataConfiguration(
+  profileToken: string,
+  metadataConfigurationToken: string,
+): Promise<void> {
+  // NOSONAR - Both tokens come from device responses (trusted sources)
+  const body = `<trt:AddMetadataConfiguration>
+    <trt:ProfileToken>${profileToken}</trt:ProfileToken>
+    <trt:ConfigurationToken>${metadataConfigurationToken}</trt:ConfigurationToken>
+  </trt:AddMetadataConfiguration>`;
+
+  await soapRequest(ENDPOINTS.media, body, 'AddMetadataConfigurationResponse');
+}
+
+/**
+ * Remove the metadata configuration from a profile.
+ */
+export async function removeMetadataConfiguration(profileToken: string): Promise<void> {
+  // NOSONAR - Token comes from a device response (trusted source)
+  const body = `<trt:RemoveMetadataConfiguration>
+    <trt:ProfileToken>${profileToken}</trt:ProfileToken>
+  </trt:RemoveMetadataConfiguration>`;
+
+  await soapRequest(ENDPOINTS.media, body, 'RemoveMetadataConfigurationResponse');
+}

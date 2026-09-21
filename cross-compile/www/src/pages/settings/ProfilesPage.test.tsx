@@ -8,11 +8,16 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   type VideoEncoderConfiguration,
   type VideoEncoderConfigurationOptions,
+  addMetadataConfiguration,
+  addPTZConfiguration,
   createProfile,
   deleteProfile,
+  getCompatibleMetadata,
+  getCompatiblePTZ,
   getProfiles,
   getVideoEncoderConfiguration,
   getVideoEncoderConfigurationOptions,
+  removeMetadataConfiguration,
   setVideoEncoderConfiguration,
 } from '@/services/profileService';
 import {
@@ -35,6 +40,12 @@ vi.mock('@/services/profileService', () => ({
   getVideoEncoderConfiguration: vi.fn(),
   getVideoEncoderConfigurationOptions: vi.fn(),
   setVideoEncoderConfiguration: vi.fn(),
+  addPTZConfiguration: vi.fn(),
+  removePTZConfiguration: vi.fn(),
+  getCompatiblePTZ: vi.fn(),
+  addMetadataConfiguration: vi.fn(),
+  removeMetadataConfiguration: vi.fn(),
+  getCompatibleMetadata: vi.fn(),
 }));
 
 describe('ProfilesPage', () => {
@@ -441,5 +452,73 @@ describe('ProfilesPage', () => {
       },
       { timeout: 10000 },
     );
+  });
+
+  describe('feature toggles', () => {
+    const baseProfile = {
+      token: 'ProfileToken1',
+      name: 'MainStream',
+      fixed: false,
+      videoSourceConfiguration: { token: 'VS1', name: 'Source 1' },
+    };
+
+    it('attaches the compatible metadata configuration when toggled on', async () => {
+      vi.mocked(getProfiles).mockResolvedValue([baseProfile]);
+      vi.mocked(getCompatibleMetadata).mockResolvedValue([
+        { token: 'MetadataConfig_0', name: 'Digital Analytics' },
+      ]);
+      vi.mocked(addMetadataConfiguration).mockResolvedValue(undefined);
+
+      const user = userEvent.setup();
+      await renderProfilesPage();
+      await expandProfile(user, 'ProfileToken1');
+
+      const toggle = screen.getByTestId('profile-metadata-toggle');
+      expect(toggle).not.toBeChecked();
+      await user.click(toggle);
+
+      await waitFor(() => {
+        expect(addMetadataConfiguration).toHaveBeenCalledWith('ProfileToken1', 'MetadataConfig_0');
+      });
+    });
+
+    it('removes metadata when toggled off', async () => {
+      vi.mocked(getProfiles).mockResolvedValue([
+        {
+          ...baseProfile,
+          metadataConfiguration: { token: 'MetadataConfig_0', name: 'Digital Analytics' },
+        },
+      ]);
+      vi.mocked(removeMetadataConfiguration).mockResolvedValue(undefined);
+
+      const user = userEvent.setup();
+      await renderProfilesPage();
+      await expandProfile(user, 'ProfileToken1');
+
+      const toggle = screen.getByTestId('profile-metadata-toggle');
+      expect(toggle).toBeChecked();
+      await user.click(toggle);
+
+      await waitFor(() => {
+        expect(removeMetadataConfiguration).toHaveBeenCalledWith('ProfileToken1');
+      });
+    });
+
+    it('attaches the compatible PTZ configuration when toggled on', async () => {
+      vi.mocked(getProfiles).mockResolvedValue([baseProfile]);
+      vi.mocked(getCompatiblePTZ).mockResolvedValue([{ token: 'PTZConfig_0', name: 'PTZ 0' }]);
+      vi.mocked(addPTZConfiguration).mockResolvedValue(undefined);
+
+      const user = userEvent.setup();
+      await renderProfilesPage();
+      await expandProfile(user, 'ProfileToken1');
+
+      const toggle = screen.getByTestId('profile-ptz-toggle');
+      await user.click(toggle);
+
+      await waitFor(() => {
+        expect(addPTZConfiguration).toHaveBeenCalledWith('ProfileToken1', 'PTZConfig_0');
+      });
+    });
   });
 });
