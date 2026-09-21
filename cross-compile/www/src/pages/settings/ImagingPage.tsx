@@ -32,6 +32,11 @@ import {
 import { Slider } from '@/components/ui/slider';
 import { Switch } from '@/components/ui/switch';
 import {
+  type AdvancedImaging,
+  getAdvancedImaging,
+  putAdvancedImaging,
+} from '@/services/imagingAdvancedService';
+import {
   type ImagingOptions,
   type ImagingSettings,
   getImagingOptions,
@@ -68,6 +73,28 @@ export default function ImagingPage() {
   const { data: options } = useQuery<ImagingOptions>({
     queryKey: ['imagingOptions'],
     queryFn: () => getImagingOptions(),
+  });
+
+  // Advanced knobs (hue / mains / style) travel over /api/imaging because
+  // ONVIF's ImagingSettings20 has no fields for them.
+  const { data: advanced } = useQuery<AdvancedImaging>({
+    queryKey: ['advancedImaging'],
+    queryFn: () => getAdvancedImaging(),
+  });
+  const [advancedLocal, setAdvancedLocal] = useState<AdvancedImaging | null>(null);
+  // The local copy only exists to track a drag between release and the
+  // refetch that follows the PUT; otherwise the query value wins.
+  const effectiveAdvanced = advancedLocal ?? advanced ?? { hue: 50, powerHz: 50, styleId: 0 };
+  const advancedMutation = useMutation({
+    mutationFn: (patch: Partial<AdvancedImaging>) => putAdvancedImaging(patch),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['advancedImaging'] });
+    },
+    onError: (error) => {
+      toast.error('Failed to save advanced imaging', {
+        description: error instanceof Error ? error.message : 'An error occurred',
+      });
+    },
   });
 
   // Profile token needed for PTZ SendAuxiliaryCommand (lamp control)
@@ -708,6 +735,102 @@ export default function ImagingPage() {
                     />
                   </div>
                 )}
+              </div>
+            </SettingsCardContent>
+          </SettingsCard>
+
+          {/* Advanced — tint / mains / style. ONVIF has no fields for these,
+              so they apply on commit (no per-drag IPC) over /api/imaging. */}
+          <SettingsCard>
+            <SettingsCardHeader>
+              <div className="flex items-center gap-[12px]">
+                <div className="flex size-[40px] items-center justify-center rounded-[10px] bg-[rgba(191,90,242,0.1)]">
+                  <Palette className="size-5 text-[#bf5af2]" />
+                </div>
+                <div>
+                  <SettingsCardTitle data-testid="imaging-advanced-title">
+                    Advanced
+                  </SettingsCardTitle>
+                  <SettingsCardDescription>
+                    Tint, mains frequency, picture style
+                  </SettingsCardDescription>
+                </div>
+              </div>
+            </SettingsCardHeader>
+            <SettingsCardContent className="space-y-[24px]">
+              <div className="space-y-[12px]">
+                <div className="flex items-center justify-between">
+                  <Label className="text-[#e5e5e5]" data-testid="imaging-hue-label">
+                    Color Tint
+                  </Label>
+                  <span className="text-sm text-[#a1a1a6] tabular-nums">
+                    {effectiveAdvanced.hue}
+                  </span>
+                </div>
+                <Slider
+                  value={[effectiveAdvanced.hue]}
+                  min={0}
+                  max={100}
+                  step={1}
+                  onValueChange={([val]) => setAdvancedLocal({ ...effectiveAdvanced, hue: val })}
+                  onValueCommit={([val]) =>
+                    advancedMutation.mutate(
+                      { hue: val },
+                      {
+                        onSuccess: () => toast.success('Color tint saved'),
+                      },
+                    )
+                  }
+                  className="py-1"
+                  data-testid="imaging-hue-slider"
+                />
+              </div>
+              <div className="space-y-[12px]">
+                <Label className="text-[#e5e5e5]" data-testid="imaging-power-hz-label">
+                  Mains frequency (reduces flicker under artificial light)
+                </Label>
+                <select
+                  value={String(effectiveAdvanced.powerHz)}
+                  onChange={(e) => {
+                    const powerHz = Number(e.target.value) as 50 | 60;
+                    setAdvancedLocal({ ...effectiveAdvanced, powerHz });
+                    advancedMutation.mutate(
+                      { powerHz },
+                      {
+                        onSuccess: () => toast.success('Mains frequency saved'),
+                      },
+                    );
+                  }}
+                  className="h-10 w-full appearance-none rounded-md border border-[#3a3a3c] bg-[#2c2c2e] px-3 py-2 text-sm text-white focus:border-transparent focus:ring-2 focus:ring-[#0a84ff] focus:outline-none"
+                  data-testid="imaging-power-hz-select"
+                >
+                  <option value="50">50 Hz</option>
+                  <option value="60">60 Hz</option>
+                </select>
+              </div>
+              <div className="space-y-[12px]">
+                <Label className="text-[#e5e5e5]" data-testid="imaging-style-label">
+                  Picture style
+                </Label>
+                <select
+                  value={String(effectiveAdvanced.styleId)}
+                  onChange={(e) => {
+                    const styleId = Number(e.target.value) as 0 | 1 | 2;
+                    setAdvancedLocal({ ...effectiveAdvanced, styleId });
+                    advancedMutation.mutate(
+                      { styleId },
+                      {
+                        onSuccess: () => toast.success('Picture style saved'),
+                      },
+                    );
+                  }}
+                  className="h-10 w-full appearance-none rounded-md border border-[#3a3a3c] bg-[#2c2c2e] px-3 py-2 text-sm text-white focus:border-transparent focus:ring-2 focus:ring-[#0a84ff] focus:outline-none"
+                  data-testid="imaging-style-select"
+                >
+                  <option value="0">Default (0)</option>
+                  <option value="1">Style 1</option>
+                  <option value="2">Style 2</option>
+                </select>
               </div>
             </SettingsCardContent>
           </SettingsCard>

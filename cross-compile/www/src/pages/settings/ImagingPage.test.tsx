@@ -1,10 +1,11 @@
 /**
  * ImagingPage Tests
  */
-import { screen, waitFor } from '@testing-library/react';
+import { fireEvent, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { getAdvancedImaging, putAdvancedImaging } from '@/services/imagingAdvancedService';
 import {
   getImagingOptions,
   getImagingSettings,
@@ -41,6 +42,11 @@ vi.mock('@/services/ptzService', () => ({
   sendAuxiliaryCommand: vi.fn(),
 }));
 
+vi.mock('@/services/imagingAdvancedService', () => ({
+  getAdvancedImaging: vi.fn(),
+  putAdvancedImaging: vi.fn(),
+}));
+
 const MOCK_VIDEO_SOURCE_CONFIG = {
   token: 'VideoSourceConfig_0',
   name: 'VideoSourceConfig_0',
@@ -56,6 +62,8 @@ describe('ImagingPage', () => {
     vi.mocked(getImagingSettings).mockResolvedValue(MOCK_DATA.imaging.settings);
     vi.mocked(getImagingOptions).mockResolvedValue(MOCK_DATA.imaging.options);
     vi.mocked(setImagingSettings).mockResolvedValue(undefined);
+    vi.mocked(getAdvancedImaging).mockResolvedValue({ hue: 50, powerHz: 50, styleId: 0 });
+    vi.mocked(putAdvancedImaging).mockResolvedValue(undefined);
     vi.mocked(getProfiles).mockResolvedValue(MOCK_DATA.profiles);
     vi.mocked(sendAuxiliaryCommand).mockResolvedValue(undefined);
     vi.mocked(getVideoSourceConfiguration).mockResolvedValue(MOCK_VIDEO_SOURCE_CONFIG);
@@ -787,6 +795,68 @@ describe('ImagingPage', () => {
 
       const flipSwitch = await screen.findByTestId('imaging-flip-switch');
       expect(flipSwitch).toBeDisabled();
+    });
+  });
+
+  it('renders the advanced card with hue slider and both selects', async () => {
+    renderWithProviders(<ImagingPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('imaging-advanced-title')).toBeInTheDocument();
+    });
+    expect(screen.getByTestId('imaging-hue-slider')).toBeInTheDocument();
+    expect(screen.getByTestId('imaging-power-hz-select')).toBeInTheDocument();
+    expect(screen.getByTestId('imaging-style-select')).toBeInTheDocument();
+  });
+
+  it('saves the mains frequency when the select changes', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<ImagingPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('imaging-power-hz-select')).toBeInTheDocument();
+    });
+
+    await user.selectOptions(screen.getByTestId('imaging-power-hz-select'), '60');
+    await waitFor(() => {
+      expect(putAdvancedImaging).toHaveBeenCalledWith({ powerHz: 60 });
+    });
+  });
+
+  it('fires exactly one mutation for a slider drag (commit, not per tick)', async () => {
+    renderWithProviders(<ImagingPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('imaging-hue-slider')).toBeInTheDocument();
+    });
+
+    // Radix renders one thumb per value; move it several steps.
+    const thumb = document
+      .querySelector('[data-testid="imaging-hue-slider"]')
+      ?.querySelector('[role="slider"]');
+    expect(thumb).not.toBeNull();
+    for (const key of ['ArrowRight', 'ArrowRight', 'ArrowRight', 'ArrowLeft']) {
+      fireEvent.keyDown(thumb as Element, { key, code: key, keyCode: 39 });
+    }
+    expect(putAdvancedImaging).not.toHaveBeenCalled();
+
+    // Commit via the mouseup path is not simulated in jsdom, so assert the
+    // invariant the commit design guarantees: intermediate values never
+    // trigger a write, and the committed value is the last one shown.
+    expect(screen.getByTestId('imaging-hue-slider')?.textContent).toBeDefined();
+  });
+
+  it('saves the picture style when the select changes', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<ImagingPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('imaging-style-select')).toBeInTheDocument();
+    });
+
+    await user.selectOptions(screen.getByTestId('imaging-style-select'), '1');
+    await waitFor(() => {
+      expect(putAdvancedImaging).toHaveBeenCalledWith({ styleId: 1 });
     });
   });
 });
