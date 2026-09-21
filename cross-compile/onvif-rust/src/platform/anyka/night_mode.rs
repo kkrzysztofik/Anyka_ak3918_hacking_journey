@@ -2394,6 +2394,86 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn test_apply_night_leaves_white_led_alone_by_default() {
+        use crate::hal::common::imaging::MockImagingHalTrait;
+
+        // The node exists, so caps.white_led is true and only the config term
+        // holds the gate shut. A stock ring board lands here: WHITE_LED is a
+        // visible floodlight and must stay dark through a night transition.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let paths = NodePaths::rooted(dir.path(), dir.path());
+        for n in [Node::IrCutA, Node::IrCutB, Node::IrLed] {
+            std::fs::write(paths.node(n), "9").unwrap();
+        }
+        std::fs::write(paths.node(Node::WhiteLed), "0").unwrap();
+
+        let mut ffi = MockImagingHalTrait::new();
+        ffi.expect_set_ir_filter().returning(|_| 0);
+
+        let cfg = test_config();
+        assert!(!cfg.white_led_is_ir, "the default must be off");
+        let ctl = NightModeController::new(
+            paths.clone(),
+            cfg,
+            std::sync::Arc::new(ffi),
+            crate::onvif::types::common::IrCutFilterMode::AUTO,
+            None,
+        );
+        ctl.apply(DayNight::Night).await.unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(paths.node(Node::IrLed)).unwrap(),
+            "1",
+            "the IR lamp still turns on"
+        );
+        assert_eq!(
+            std::fs::read_to_string(paths.node(Node::WhiteLed)).unwrap(),
+            "0",
+            "a stock board's visible floodlight must not be driven by a \
+             night transition"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_apply_night_drives_white_led_when_configured_as_ir() {
+        use crate::hal::common::imaging::MockImagingHalTrait;
+
+        // The replacement all-IR ring: HB drives the half/full-power bypass,
+        // so the mirrored write must reach the GPIO node, not just the plan.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let paths = NodePaths::rooted(dir.path(), dir.path());
+        for n in [Node::IrCutA, Node::IrCutB, Node::IrLed] {
+            std::fs::write(paths.node(n), "9").unwrap();
+        }
+        std::fs::write(paths.node(Node::WhiteLed), "0").unwrap();
+
+        let mut ffi = MockImagingHalTrait::new();
+        ffi.expect_set_ir_filter().returning(|_| 0);
+
+        let ctl = NightModeController::new(
+            paths.clone(),
+            crate::config::types::NightConfig {
+                white_led_is_ir: true,
+                ..Default::default()
+            },
+            std::sync::Arc::new(ffi),
+            crate::onvif::types::common::IrCutFilterMode::AUTO,
+            None,
+        );
+        ctl.apply(DayNight::Night).await.unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(paths.node(Node::IrLed)).unwrap(),
+            "1"
+        );
+        assert_eq!(
+            std::fs::read_to_string(paths.node(Node::WhiteLed)).unwrap(),
+            "1",
+            "both emitters are infrared on this board"
+        );
+    }
+
     #[test]
     fn test_mirror_lamp_leaves_a_plan_without_lamp_writes_alone() {
         let mut steps = vec![Step::IspMode, Step::Sleep(SETTLE)];
