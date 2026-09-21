@@ -1,11 +1,17 @@
 # Parts selection — replacement IR LED ring board
 
 Date: 2026-09-22
-Status: U1, R1 and L1 locked. Emitter package still blocked on measurement 14.
+Status: U1, R1a/R1b and L1 locked. Emitter package still blocked on
+measurement 14; `Q1` gate drive now also blocked on measurement 3.
 
 Implements Task 4 of `docs/plans/2026-09-21-ir-led-ring-design.md`. That design
 doc is authoritative for topology; this file is authoritative for part numbers
 and for the five numbers that picked them.
+
+**Revision 2026-09-22b.** Half power is now produced by **switching the sense
+resistor**, not by bypassing four emitters. All 8 emitters stay in series in
+every mode. This deletes `Q2`, `R2` and `R5`, adds `R1b`, and moves `C2` to
+4.7 µF. See "Half power" below for why the bypass scheme was abandoned.
 
 Everything below that is marked **verified** was read out of a datasheet PDF
 downloaded during this session and converted with `pdftotext`. Anything not so
@@ -112,26 +118,82 @@ Verified against §7.3 (pin table, p.3), §7.5 (EasyScale timing, p.5) and
 
 ---
 
-## R1 — both values, ready to go
+## Half power — switched sense resistor, not a bypass
 
-`R1 = Vfb / I_LED` with `Vfb = 200 mV` (verified, §7.6).
+All 8 emitters are permanently in series. Half power halves the **regulated
+current** instead of shortening the string, so the string voltage never
+approaches the 5.3 V rail in any mode.
 
-| Target | `R1` | LCSC | Actual current | Dissipation |
-|---|---|---|---|---|
-| **100 mA** | **2.00 Ω** 1 % 0805 | `C17606` (UNI-ROYAL 0805W8F200KT5E, 16 011 stock) | 100.0 mA | 20 mW in a 125 mW package |
-| **80 mA** | **2.49 Ω** 1 % 0805 (nearest E96 to 2.50) | `C17525` (UNI-ROYAL 0805W8F249KT5E, 3 098 stock) | 80.3 mA | 16 mW |
+```
+R1a          FB → GND, permanent          sized for the HALF current
+R1b + Q1     FB → Q1 → GND                parallels in for FULL current
+Q1 gate      HB → R3 → gate, R4 to GND    source at ground, no level shift
+```
 
-Both are Extended parts; no Basic 0805 exists at either value.
+Polarity: **`HB` high → Q1 on → ~2 Ω → full power. `HB` low → Q1 off → 4 Ω →
+half power.** Unmodified firmware therefore boots into half power, which is
+expected and is handled by the `plan()` change shipped in Task 10.
 
-Accuracy stack: `Vfb` ±2 % plus `R1` ±1 % gives **±3 % on LED current**, which
-is well inside what the evaluation rig can distinguish. Fit 2.00 Ω for the
-first build, keep 2.49 Ω on the bench, and decide on measured radiant output
-per design-doc risk 7.
+### Why the 4-of-8 bypass was abandoned
+
+Recorded here because it is the reason this board looks the way it does.
+
+The bypass scheme put **4** emitters in circuit at half power. A boost
+converter cannot regulate unless the string voltage exceeds its input:
+
+| Condition | 4-emitter string + `R1` | vs 5.3 V rail |
+|---|---|---|
+| typical Vf, 25 °C | 4 × 1.5 + 0.2 = **6.2 V** | +0.9 V |
+| typical Vf, `Tj` ≈ 105 °C (−2 mV/°C/junction) | 4 × 1.34 + 0.2 = **5.56 V** | **+0.26 V** |
+| low bin, hot | 4 × 1.14 + 0.2 = **4.76 V** | **−0.54 V — below the rail** |
+
+That is the same marginal-headroom failure the design doc rejected the 2S2P
+buck topology for, reappearing in half-power mode — and since half power is
+the boot default, it was the shipping state, not a corner case. The switched
+sense resistor **designs the failure out** rather than mitigating it: at half
+power the string is still 8 emitters, ≈11.8 V against a 5.3 V rail.
+
+### R1a / R1b values
+
+`I_LED = Vfb / R_total` with `Vfb = 200 mV` (verified, §7.6). Q1's `Rds(on)`
+sits in series with `R1b`, so the full-power leg is `R1b + Rds(on)`.
+
+| Option | `R1a` = `R1b` | LCSC | Stock | Half (Q1 off) | Full (Q1 on) |
+|---|---|---|---|---|---|
+| **100 / 50 mA** | **4.02 Ω** 1 % 0805 | `C367870` (Walsin WR08W4R02FTL) | 925 | **49.75 mA** (−0.50 %) | **98.92 mA** (−1.09 %) |
+| **80 / 40 mA** | **4.99 Ω** 1 % 0805 | `C25273` (UNI-ROYAL 0805W8F499KT5E) | 36 227 | **40.08 mA** (+0.20 %) | **79.78 mA** (−0.28 %) |
+
+`R1a` and `R1b` are the **same value** in both options — one line item, one
+reel, one Extended loading fee. Worked example for the 100 mA option:
+
+```
+half:  I = 0.200 / 4.02                      = 49.75 mA
+full:  leg      = 4.02 + 0.048 (Rds(on))     = 4.068 Ω
+       parallel = 4.02 × 4.068 / 8.088       = 2.0219 Ω
+       I        = 0.200 / 2.0219             = 98.92 mA
+```
+
+**No trim on `R1b` is required.** The brief set ~2 % as the threshold; the
+worst case is **−1.43 %**, at the 100 mA option with `Rds(on)` hot (see Q1
+below). The 80 mA option is better still at −0.56 %. Both are inside the ±3 %
+that `Vfb` (±2 %) and the resistors (±1 %) already contribute, so `Rds(on)` is
+not the dominant error term and trimming it out would be chasing noise.
+
+Dissipation is trivial: at full power the 100 mA splits ~50/50, so each leg
+runs `0.05² × 4.02` = **10 mW** in a 125 mW 0805.
+
+**Volume fallback:** 4.02 Ω has only 925 units (462 boards at 2 each). 3.9 Ω
+(`C17615`, UNI-ROYAL, **46 416 stock**) is the high-volume substitute, but it
+errs the *wrong* way — 51.28 mA / 101.94 mA, i.e. **+1.9 % at full power**,
+which with the ±3 % tolerance stack reaches 104.9 mA. Against a `Tj` budget
+already at ~105 °C of a **115 °C** rating that is margin this board cannot
+spare, so 4.02 Ω is primary despite the thinner stock. Use 3.9 Ω only with the
+80 mA option or after the evaluation rig says there is headroom.
 
 Junction-temperature context, now with a real number: the chosen emitters spec
 **`Tj` max = 115 °C** (verified, JNJ p.4), which sits at the bottom of the
 110–125 °C band the design doc assumed. The 20 °C that 80 mA buys is therefore
-worth more than the doc implied, not less.
+worth more than the doc implied, not less. `R1a`/`R1b` remain the thermal knob.
 
 ---
 
@@ -254,40 +316,42 @@ Once, this is good news:
 
 Once, it is a problem. See below.
 
-### ⚠ The 4-of-8 bypass does not have enough headroom
+This is also what killed the 4-of-8 bypass — see "Half power" above, where the
+numbers are worked. With the switched sense resistor the string is 8 emitters
+in every mode and the rail is never approached.
 
-Half power puts **4** emitters in circuit. Required: string voltage must stay
-above the 5.3 V rail, or a boost converter cannot regulate at all.
+### One consequence of halving the current instead of the string
 
-| Condition | 4-emitter string + `R1` | vs 5.3 V rail |
-|---|---|---|
-| typical Vf, 25 °C | 4 × 1.5 + 0.2 = **6.2 V** | +0.9 V |
-| typical Vf, Tj ≈ 105 °C (−2 mV/°C/junction) | 4 × 1.34 + 0.2 = **5.56 V** | **+0.26 V** |
-| low bin, hot | 4 × 1.14 + 0.2 = **4.76 V** | **−0.54 V — below the rail** |
+Inductor ripple `ΔI = Vin·D / (f·L)` does **not** depend on load, so halving
+the LED current does not halve it — it doubles the *relative* ripple:
 
-This is the same marginal-headroom failure the design doc rejected the 2S2P
-buck topology for, reappearing in half-power mode. It matters more than it
-looks, because per the doc's own "Firmware consequence" section **half power is
-the state unmodified firmware boots into** — it is the shipping default until
-the `plan()` change lands, not a corner case.
+| Mode | string | `D` | `ΔI` | `Iin` | ripple |
+|---|---|---|---|---|---|
+| full, 100 mA | 12.2 V | 0.566 | 114 mA | 271 mA | 42 % |
+| **half, 50 mA** | 11.8 V (Vf ≈1.45 V at 50 mA) | 0.551 | 111 mA | **131 mA** | **84 %** |
 
-The `Q1`/`Q2`/`R5` part choices below are unaffected either way, so this does
-not block ordering. Options, for the design owner rather than for this file to
-settle:
+Trough current is 131 − 55 = **76 mA**, so the converter stays in continuous
+conduction — this is not a regulation problem. But it is worth recording for
+design-doc risk 4, because **the relatively noisiest mode is also the boot
+default**. The old bypass scheme had the opposite property (4 emitters meant
+`D` = 0.145 and only ~21 % ripple at half power); that is the one thing given
+up in this trade, and it is the right trade against losing regulation entirely.
 
-- **Bypass 2 emitters instead of 4** (6 in circuit): hot low-bin string 7.04 V,
-  **1.74 V** of headroom. Safe. "Half power" becomes 75 % power.
-- **Bypass 3** (5 in circuit): hot low-bin 5.9 V, +0.6 V. Still thin.
-- **Drop the half-power mode** and let `R1` be the only output knob.
-
-Bypassing 2 is the cheapest fix — it changes which node `Q1` lands on and
-nothing else.
+It is also a second argument against ever dropping `L1` below 22 µH.
 
 ---
 
 ## Bill of materials
 
-22 designators, not 21 — see `C4`.
+**21 designators.** Arithmetic, since the count has moved twice:
+
+```
+design doc's BOM, enumerated   13 singles + D2–D9 (8) + J1  = 22
+                               (the doc says 21; it undercounts by one)
++ C4, the missing COMP cap                                  = 23
+− Q2, R2, R5  (deleted by the switched-sense-resistor scheme) = 20
++ R1b         (R1 becomes R1a + R1b)                        = 21
+```
 
 | Ref | Value | LCSC | Package | JLC | Stock | Datasheet |
 |---|---|---|---|---|---|---|
@@ -295,24 +359,92 @@ nothing else.
 | **L1** | 22 µH shielded, Isat 1.6 A, 130 mΩ | `C2849503` | SMD 5 × 5 × 4.0 mm | Extended | 1 455 | [LCSC](https://www.lcsc.com/product-detail/C2849503.html) |
 | **D1** | Schottky 60 V 1 A, `Vf` 580 mV @1 A | `C77343` | SOD-123 | Extended | 45 265 | [LCSC](https://www.lcsc.com/product-detail/C77343.html) |
 | **C1** | 10 µF 25 V X5R input | `C15850` | 0805 | **Basic** | 5.9 M | [LCSC](https://www.lcsc.com/product-detail/C15850.html) |
-| **C2** | **1 µF 50 V** X7R output | `C28323` | 0805 | **Basic** | 2.8 M | [LCSC](https://www.lcsc.com/product-detail/C28323.html) |
+| **C2** | **4.7 µF 50 V** X5R output | `C98192` | 0805 | Extended | 442 501 | [LCSC](https://www.lcsc.com/product-detail/C98192.html) |
 | **C3** | 100 nF 50 V X7R input bypass | `C307331` | 0402 | **Basic** | 13 M | [LCSC](https://www.lcsc.com/product-detail/C307331.html) |
-| **C4** | **220 nF 16 V X7R — COMP compensation, NEW** | `C16772` | 0402 | **Basic** | 2.8 M | [LCSC](https://www.lcsc.com/product-detail/C16772.html) |
-| **R1** | **2.00 Ω 1 %** (100 mA) / 2.49 Ω (80 mA) | `C17606` / `C17525` | 0805 | Extended | 16 011 / 3 098 | [LCSC](https://www.lcsc.com/product-detail/C17606.html) |
-| **Q1** | AO3400A N-MOSFET 30 V, `Vgs(th)` 1.45 V max, 48 mΩ @2.5 V | `C20917` | SOT-23 | **Basic** | 830 590 | [LCSC](https://www.lcsc.com/product-detail/C20917.html) |
-| **Q2** | MMBT3904 NPN 40 V, hFE 100–300 | `C20526` | SOT-23 | **Basic** | 250 471 | [LCSC](https://www.lcsc.com/product-detail/C20526.html) |
-| **R2** | 100 kΩ 1 % gate pull-up to 5.3 V | `C25741` | 0402 | **Basic** | 9.7 M | [LCSC](https://www.lcsc.com/product-detail/C25741.html) |
-| **R3** | 10 kΩ 1 % Q2 base, from `HB` | `C25744` | 0402 | **Basic** | 25.5 M | [LCSC](https://www.lcsc.com/product-detail/C25744.html) |
-| **R4** | 100 kΩ 1 % Q2 base pull-down | `C25741` | 0402 | **Basic** | 9.7 M | as R2 |
-| **R5** | 4.7 Ω 1 % bypass inrush limiter, 47 mW | `C17675` | 0805 | **Basic** | 80 222 | [LCSC](https://www.lcsc.com/product-detail/C17675.html) |
+| **C4** | **220 nF 16 V X7R — COMP compensation** | `C16772` | 0402 | **Basic** | 2.8 M | [LCSC](https://www.lcsc.com/product-detail/C16772.html) |
+| **R1a** | **4.02 Ω 1 %** (50 mA) / 4.99 Ω (40 mA) | `C367870` / `C25273` | 0805 | Extended | 925 / 36 227 | [LCSC](https://www.lcsc.com/product-detail/C367870.html) |
+| **R1b** | same value as `R1a` | `C367870` / `C25273` | 0805 | Extended | — | as R1a |
+| **Q1** | AO3400A N-MOSFET 30 V, `Vgs(th)` ≤1.45 V, `Rds(on)` ≤48 mΩ @2.5 V | `C20917` | SOT-23 | **Basic** | 830 584 | [AO datasheet](https://www.lcsc.com/datasheet/lcsc_datasheet_1811081213_Alpha---Omega-Semicon-AO3400A_C20917.pdf) |
+| **R3** | 10 kΩ 1 % Q1 gate series, from `HB` — *see note* | `C25744` | 0402 | **Basic** | 25.5 M | [LCSC](https://www.lcsc.com/product-detail/C25744.html) |
+| **R4** | 100 kΩ 1 % Q1 gate pull-down | `C25741` | 0402 | **Basic** | 9.7 M | [LCSC](https://www.lcsc.com/product-detail/C25741.html) |
 | **D2–D9** | 850 nm IR ×8 — **2835** | `C7500098` | SMD 3.5 × 2.8 mm, 90° | Extended | 626 | JNJ, link above |
 | | 850 nm IR ×8 — **3535** | `C7529167` | SMD 3.5 × 3.5 mm, 60° | Extended | 536 | JNJ, link above |
 | **J1** | 4-pin header, `+ − IR HB` | **PENDING** | **PENDING — measurement 11** | — | — | — |
 
-**Extended-part loading fees: 5 distinct parts** (`U1`, `L1`, `D1`, `R1`,
-`D2–D9`). Everything else is Basic. Deliberate: the three parts where a Basic
-substitute would have cost real margin are the driver, the inductor and the
-emitters, and those are exactly the three where no Basic option exists anyway.
+**Deleted in this revision:** `Q2` (MMBT3904 inverter) — Q1's source is now at
+ground with the correct sense, so nothing needs inverting. `R2` (gate pull-up
+to 5.3 V) — the gate is driven directly. `R5` (4.7 Ω inrush limiter) — it
+existed only to limit the `C2` dump into a shortened string, and there is no
+shortened string any more.
+
+**Extended-part loading fees: 6 distinct parts** (`U1`, `L1`, `D1`, `C2`,
+`R1a`/`R1b`, `D2–D9`) — one more than before, because 4.7 µF 50 V 0805 has no
+Basic equivalent. `R1a` and `R1b` share one fee by sharing a value.
+
+### Q1 — gate drive and the resulting current error
+
+Verified from the Alpha & Omega AO3400A datasheet (Rev. 2, p.2 Static
+Parameters): `Rds(on)` ≤ **48 mΩ** at `Vgs` = 2.5 V (typ 24 mΩ), ≤32 mΩ at
+4.5 V; `Vgs(th)` 0.65 / 1.05 / **1.45 V max**; `Vgs` absolute max ±12 V. The
+Rds(on) figures are specified at 3–5 A; at our ~50 mA the channel is nowhere
+near pinch-off, so 48 mΩ is a conservative bound.
+
+**Current error contributed by `Rds(on)`, at the 100 mA option:**
+
+| | `Rds(on)` | full-power current | error |
+|---|---|---|---|
+| 25 °C | 48 mΩ | 98.92 mA | −1.09 % |
+| ~90 °C (`Rds(on)` ≈ ×1.6) | 77 mΩ | 98.57 mA | **−1.43 %** |
+
+Worst case **−1.43 %**, inside the ~2 % threshold, so **`R1b` is not trimmed**.
+
+**⚠ `R3`/`R4` now form a voltage divider on the gate — this is new.** With the
+old MMBT3904, `R3` was a *base* resistor: the junction clamps at ~0.7 V and
+`R4` sank only ~7 µA, so the divider was irrelevant. A MOSFET gate is a DC
+open circuit, so `R3` and `R4` divide:
+
+```
+Vgate = HB × 100k / (100k + 10k) = 0.909 × HB
+```
+
+At `HB` = 3.3 V that is **3.00 V** — above the 2.5 V spec point, so the ≤48 mΩ
+bound holds and there is 2.07× margin over the 1.45 V maximum threshold. It
+works. But it throws away 9 % of the gate drive for no remaining benefit.
+
+**Recommendation: `R3` = 1 kΩ (`C11702`, UNI-ROYAL, Basic, 10.4 M stock)**,
+giving `0.990 × HB` = 3.27 V. Same package, same Basic status, no cost. The
+10 kΩ in the table above is what the brief specified and is safe; this is a
+free improvement, not a correction.
+
+**⚠ `Q1`'s gate drive now depends on measurement 3, which is outstanding.**
+Previously `Q2` + `R2` referenced the gate to the 5.3 V rail, so `HB` only had
+to clear a BJT's `Vbe` and its actual level barely mattered. Now `HB` drives
+the gate directly. At 3.3 V or 5 V this is fine. **At 1.8 V it would not be** —
+`0.909 × 1.8` = 1.64 V against a 1.45 V maximum threshold is not a working
+design. Measurement 3 has moved onto the critical path.
+
+### Why deleting R5 is safe
+
+Switching `R1b` in and out is a **setpoint change on a running converter**, not
+a capacitor dump — the multi-amp spike `R5` existed to limit cannot occur
+because no capacitor is ever connected across a shortened string.
+
+When Q1 turns on, FB drops instantaneously from 200 mV to 100 mV and the loop
+ramps the current up, damped by the 220 nF `C4` compensation capacitor and the
+`tREF` = 180 µs VREF filter (§7.6). When Q1 turns off, FB rises to 400 mV —
+well under the **3 V FB absolute maximum** (§7.1 p.4). Both directions are
+soft.
+
+Note the corollary: `C4`, the capacitor the design doc's BOM was missing
+entirely, is now doing double duty as compensation *and* as the damping that
+makes `R5` unnecessary.
+
+### Failure modes are still benign in both directions
+
+`Q1` shorted → board stuck at full power. `Q1` open → board stuck at half
+power. Neither damages anything, which preserves the property the design doc
+claimed for the old bypass. (The doc's wording describes the bypass; the
+property survives the topology change.)
 
 `J1` is left blank on purpose. Its pitch, mounting style, radial position and
 cable-exit direction are all measurement 11, and the whole point of the header
@@ -328,18 +460,35 @@ that does not connect.
   tighter than measurement 2 suggests; it saturates under a current-limit event.
 - **D2–D9** → `C22466172` (Silverlight 2835, 3 908 stock) if the run exceeds
   78 boards.
+- **R1a/R1b** → `C17615` (3.9 Ω, 46 416 stock) for volume, at +1.9 % on full
+  power. See the thermal caveat under "R1a / R1b values".
+- **R3** → `C11702` (1 kΩ, Basic) — recommended, recovers 9 % of gate drive.
 
 ---
 
-## Three corrections to the design doc's BOM
+## Layout rules derived here — carry into Task 8
 
-Sourcing turned up three places where the doc's part values are wrong against
-the driver that was actually selected. All three follow from one fact: **OVP
-trips at 37–39 V on the SW node**, so on an open-string fault the output rail
-reaches ~38 V for 8 switching cycles before the latch fires (§8.3.2, verified).
+1. **No RC on the `CTRL` net.** The only route into the EasyScale dimming
+   protocol is a 260 µs–1 ms low glitch on the rising edge. A series resistor
+   alone is fine; a series resistor *with* capacitance, or a soft pull-up
+   fighting the GPIO, could manufacture exactly that glitch. Drive `CTRL`
+   straight from `IR_LED`. Full reasoning under "Enable semantics" above.
+2. Keep the `C1`–`U1`–`D1`–`C2` loop as one tight cluster on the back
+   (design-doc risk 4). `D1` was kept in SOD-123 rather than SMA for this.
+3. `L1` is magnetically shielded specifically because it shares a board with
+   the image sensor. Do not substitute an unshielded drum-core part.
+
+---
+
+## Corrections to the design doc's BOM
+
+Sourcing turned up four wrong part values plus one missing part. Three of them
+follow from one fact: **OVP trips at 37–39 V on the SW node**, so on an
+open-string fault the output rail reaches ~38 V for 8 switching cycles before
+the latch fires (§8.3.2, verified).
 
 1. **`C2` must be 50 V, not 25 V.** It sits on the output node and sees the OVP
-   excursion. `C28323` (50 V, Basic) fixes it at no cost.
+   excursion.
 2. **`D1` must be ≥ 40 V, not 30 V.** Same reason; TI §9.1.3 says outright that
    "the reverse breakdown voltage of the diode must exceed the open LED
    protection voltage", and TI's own reference design uses a 40 V MBR0540.
@@ -347,18 +496,32 @@ reaches ~38 V for 8 switching cycles before the latch fires (§8.3.2, verified).
 3. **`C4` is missing entirely.** SOT-23-6 pin 5 is **COMP**, the
    transconductance error amplifier output, and TI §9.1.4 requires a
    compensation capacitor to ground — "a 220 nF ceramic capacitor is suitable
-   for most applications". The doc's 21-designator BOM has no such part. The
-   board is 22 designators.
+   for most applications".
+4. **`L1` is 22 µH, not 33 µH** — TI's recommended range is 10–22 µH (§7.2).
+5. **Vf is ~1.5 V at 100 mA, not 1.7–2.0 V**, which is what invalidated the
+   4-of-8 bypass and forced the switched-sense-resistor scheme.
 
-Plus the two already covered above: `L1` is 22 µH (TI's 10–22 µH recommended
-range), and the 4-of-8 bypass needs rethinking against a real 1.5 V Vf.
+### C2 = 4.7 µF — and why 1 µF was worse than it looked
 
-### One thing deliberately left as-is
+`C2` was pinned at 1 µF purely to cap the bypass inrush energy. With the bypass
+gone that constraint is gone, so `C2` moves mid-range into TI's recommended
+1–10 µF (§9.1.5, which warns that below-range "the boost regulator can
+potentially become unstable").
 
-`C2` = 1 µF is the **bottom** of TI's recommended 1–10 µF output-cap range, and
-TI warns that "if the output capacitor is below the range, the boost regulator
-can potentially become unstable" (§9.1.5). The design doc chose 1 µF on purpose
-to cap bypass inrush, and 1 µF is *inside* the range, so it stands. But this is
-a build-and-measure item, not a settled one: check loop stability on the first
-board before committing, and remember that raising `C2` raises the `R5`
-inrush energy it was sized against.
+This matters more than a tidy-up, because of DC bias. A 50 V 0805 MLCC loses a
+large fraction of its rated capacitance at 12–19 V of applied DC:
+
+- old `C2`, 1 µF X7R 50 V 0805 → **plausibly ~0.6–0.7 µF effective, i.e.
+  *below* TI's 1 µF floor**. The stability concern flagged in the previous
+  revision was probably understated.
+- new `C2`, 4.7 µF X5R 50 V 0805 (`C98192`) → roughly 2–2.8 µF effective,
+  comfortably inside the range.
+
+**⚠ Those derating figures are an engineering estimate, not a verified
+number.** No DC-bias curve for `C98192` was read — Samsung publishes one via
+their characterisation tool and it was not retrieved in this session. Pull it
+(or measure the fitted part) before relying on the exact value. The *direction*
+is not in doubt; the magnitude is.
+
+Output ripple improves as a side effect: the design doc's `I·D/(f·C)` gives
+~23 mV at 2.4 µF effective, against the 69 mV it quoted for 1 µF at 1 MHz.
