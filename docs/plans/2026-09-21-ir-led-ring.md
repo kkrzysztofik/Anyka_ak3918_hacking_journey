@@ -638,9 +638,11 @@ fn test_night_config_defaults_to_treating_white_led_as_visible() {
 
 **Step 2: Run the tests to verify they fail**
 
+The vendored toolchain lives at the **repo root**, not under `cross-compile/`:
+
 ```bash
 cd cross-compile && \
-  toolchain/arm-anykav200-crosstool-ng/bin/cargo test --target x86_64-unknown-linux-gnu \
+  ../toolchain/arm-anykav200-crosstool-ng/bin/cargo test --target x86_64-unknown-linux-gnu \
   -p onvif-rust night_mode::tests::test_mirror_lamp 2>&1 | tail -20
 ```
 
@@ -704,7 +706,7 @@ fn mirror_lamp_to_white(steps: &mut Vec<Step>) {
 
 ```bash
 cd cross-compile && \
-  toolchain/arm-anykav200-crosstool-ng/bin/cargo test --target x86_64-unknown-linux-gnu \
+  ../toolchain/arm-anykav200-crosstool-ng/bin/cargo test --target x86_64-unknown-linux-gnu \
   -p onvif-rust mirror_lamp 2>&1 | tail -20
 ```
 
@@ -731,13 +733,19 @@ left to mirror, which is the correct outcome.
 
 ```bash
 cd cross-compile && \
-  toolchain/arm-anykav200-crosstool-ng/bin/cargo test --target x86_64-unknown-linux-gnu -p onvif-rust 2>&1 | tail -20
-PATH="$PWD/toolchain/arm-anykav200-crosstool-ng/bin:$PATH" \
-  cargo clippy --target x86_64-unknown-linux-gnu -p onvif-rust -- -D warnings 2>&1 | tail -20
+  ../toolchain/arm-anykav200-crosstool-ng/bin/cargo test --target x86_64-unknown-linux-gnu -p onvif-rust 2>&1 | tail -20
+cd cross-compile && \
+  PATH="$(git rev-parse --show-toplevel)/toolchain/arm-anykav200-crosstool-ng/bin:$PATH" \
+  cargo clippy --target x86_64-unknown-linux-gnu -p onvif-rust -- -D warnings; echo "exit=$?"
 ```
 
-Expected: all tests pass, clippy clean. The `PATH` prefix on clippy is
-required — without it the vendored toolchain dies with `E0514`.
+Expected: all tests pass, `exit=0` from clippy. Two non-negotiables here:
+
+- The `PATH` prefix on clippy is required — without it the vendored toolchain
+  dies with `E0514`.
+- Run clippy **raw, not through `rtk`**, and read `$?`. The RTK filter has been
+  observed printing a success verdict over a real exit-1. Never trust a
+  filtered pass/fail verdict.
 
 **Step 8: Document the key**
 
