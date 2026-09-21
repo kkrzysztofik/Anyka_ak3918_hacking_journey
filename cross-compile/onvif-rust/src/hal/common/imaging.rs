@@ -71,7 +71,7 @@ pub(crate) trait ImagingHalTrait: Send + Sync {
     async fn set_saturation(&self, value: i32) -> i32;
     async fn set_sharpness(&self, value: i32) -> i32;
     async fn set_ir_filter(&self, enabled: bool) -> i32;
-    async fn set_wdr(&self, enabled: bool) -> i32;
+    async fn set_wdr(&self, level: i32) -> i32;
     /// AE average luma (`current_calc_avg_lumi`), or `None` if unavailable.
     async fn get_ae_luma(&self) -> Option<u8>;
     /// The vendor's day/night luminance ratio, or `None` if unavailable.
@@ -177,13 +177,20 @@ pub(crate) async fn imaging_set_ir_filter(
     check_result(ret, "imaging_set_ir_filter")
 }
 
-#[allow(dead_code)] // Called from platform layer on ARM
-pub(crate) async fn imaging_set_wdr(
-    enabled: bool,
-    ffi: &dyn ImagingHalTrait,
-) -> PlatformResult<()> {
-    let ret = ffi.set_wdr(enabled).await;
+/// Apply a wide-dynamic-range level, as an ONVIF 0-100 value.
+///
+/// WDR is a regular `VPSS_EFFECT_WDR` effect, so it takes the same signed
+/// `[-50, 50]` offset as the other effects.
+pub(crate) async fn imaging_set_wdr(value: f32, ffi: &dyn ImagingHalTrait) -> PlatformResult<()> {
+    validate_onvif_range(value, "wdr level")?;
+    let ret = ffi.set_wdr(onvif_to_effect_value(value)).await;
     check_result(ret, "imaging_set_wdr")
+}
+
+/// Return WDR to the ISP profile's own setting.
+pub(crate) async fn imaging_set_wdr_disabled(ffi: &dyn ImagingHalTrait) -> PlatformResult<()> {
+    let ret = ffi.set_wdr(0).await;
+    check_result(ret, "imaging_set_wdr_disabled")
 }
 
 #[cfg(test)]
@@ -378,30 +385,30 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_imaging_set_wdr_calls_ffi_enabled() {
+    async fn test_imaging_set_wdr_sends_effect_offset() {
         let mut mock_ffi = MockImagingHalTrait::new();
-
         mock_ffi
             .expect_set_wdr()
-            .with(eq(true))
+            .with(eq(20)) // 70.0 -> +20 offset from the profile default
             .times(1)
             .returning(|_| AK_SUCCESS_I32);
 
-        let result = imaging_set_wdr(true, &mock_ffi).await;
+        let result = imaging_set_wdr(70.0, &mock_ffi).await;
         assert!(result.is_ok());
     }
 
+    /// WDR off must mean "profile default", not "minimum", so it cannot be
+    /// mapped through the same offset as an explicit level.
     #[tokio::test]
-    async fn test_imaging_set_wdr_calls_ffi_disabled() {
+    async fn test_imaging_set_wdr_disabled_sends_profile_default() {
         let mut mock_ffi = MockImagingHalTrait::new();
-
         mock_ffi
             .expect_set_wdr()
-            .with(eq(false))
+            .with(eq(0))
             .times(1)
             .returning(|_| AK_SUCCESS_I32);
 
-        let result = imaging_set_wdr(false, &mock_ffi).await;
+        let result = imaging_set_wdr_disabled(&mock_ffi).await;
         assert!(result.is_ok());
     }
 
@@ -414,7 +421,7 @@ mod tests {
             .times(1)
             .returning(|_| AK_FAILED_I32);
 
-        let result = imaging_set_wdr(true, &mock_ffi).await;
+        let result = imaging_set_wdr(70.0, &mock_ffi).await;
         assert!(result.is_err());
         match result {
             Err(PlatformError::HardwareFailure(msg)) => {

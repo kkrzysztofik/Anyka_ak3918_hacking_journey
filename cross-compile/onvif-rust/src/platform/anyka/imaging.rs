@@ -241,6 +241,15 @@ impl ImagingControl for AnykaImagingControl {
             .await?;
         }
 
+        if current.wdr != settings.wdr {
+            if settings.wdr.enabled {
+                crate::hal::common::imaging::imaging_set_wdr(settings.wdr.level, self.ffi.as_ref())
+                    .await?;
+            } else {
+                crate::hal::common::imaging::imaging_set_wdr_disabled(self.ffi.as_ref()).await?;
+            }
+        }
+
         *self.settings.write() = settings.clone();
         self.mark_imaging_update_and_request_idr("set_settings");
         tracing::info!(

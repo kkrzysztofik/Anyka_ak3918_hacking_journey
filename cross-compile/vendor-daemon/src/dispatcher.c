@@ -349,7 +349,8 @@ int process_request(int fd)
         ret = handle_isp_set_ir_filter(fd, req_buf, req_len);
         break;
     case CMD_ISP_SET_WDR:
-        ret = handle_isp_set_wdr(fd, req_buf, req_len);
+        ret = handle_isp_effect(fd, req_buf, req_len,
+                                VPSS_EFFECT_WDR, "set_wdr");
         break;
     case CMD_ISP_GET_AE_LUMA:
         ret = handle_isp_get_ae_luma(fd, req_buf, req_len);

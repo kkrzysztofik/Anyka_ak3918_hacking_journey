@@ -76,9 +76,8 @@ impl ImagingHalTrait for AnykaIpc {
         }
     }
 
-    async fn set_wdr(&self, enabled: bool) -> i32 {
-        let value: i32 = if enabled { 1 } else { 0 };
-        let req_data = value.to_le_bytes().to_vec();
+    async fn set_wdr(&self, level: i32) -> i32 {
+        let req_data = level.to_le_bytes().to_vec();
         match self.request_async(CMD_ISP_SET_WDR, &req_data).await {
             Ok((status, _)) => status,
             Err(e) => {

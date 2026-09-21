@@ -31,7 +31,7 @@ impl ImagingHalTrait for StubImagingHal {
         AK_SUCCESS_I32
     }
 
-    async fn set_wdr(&self, _enabled: bool) -> i32 {
+    async fn set_wdr(&self, _level: i32) -> i32 {
         AK_SUCCESS_I32
     }
 
@@ -86,7 +86,7 @@ mod tests {
     use super::*;
     use crate::hal::common::imaging::{
         imaging_set_brightness, imaging_set_contrast, imaging_set_ir_filter,
-        imaging_set_saturation, imaging_set_sharpness, imaging_set_wdr,
+        imaging_set_saturation, imaging_set_sharpness, imaging_set_wdr, imaging_set_wdr_disabled,
     };
 
     #[tokio::test]
@@ -127,7 +127,7 @@ mod tests {
     #[tokio::test]
     async fn test_imaging_set_wdr_success() {
         let stub = StubImagingHal;
-        let result = imaging_set_wdr(false, &stub).await;
-        assert!(result.is_ok());
+        assert!(imaging_set_wdr(70.0, &stub).await.is_ok());
+        assert!(imaging_set_wdr_disabled(&stub).await.is_ok());
     }
 }

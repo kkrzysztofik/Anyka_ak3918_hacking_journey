@@ -44,15 +44,6 @@ int handle_isp_effect(int fd, const uint8_t *req, uint32_t req_len,
     return send_response(fd, ret, NULL, 0);
 }
 
-/* CMD_ISP_SET_WDR (no-op). */
-int handle_isp_set_wdr(int fd, const uint8_t *req, uint32_t req_len)
-{
-    (void)req;
-    (void)req_len;
-    log_debug("[isp] set_wdr: no-op (libre_anyka_app SDK)");
-    return send_response(fd, STATUS_OK, NULL, 0);
-}
-
 /* CMD_ISP_SET_IR_FILTER. Wire format: [i32 mode] = 4 bytes. */
 int handle_isp_set_ir_filter(int fd, const uint8_t *req, uint32_t req_len)
 {
