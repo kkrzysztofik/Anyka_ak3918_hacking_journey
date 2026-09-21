@@ -107,7 +107,21 @@ night_threshold = 652
 lock_time_ms = 900000
 ae_day_threshold = 28
 ae_night_threshold = 8
+# Only on the replacement all-IR ring board. Default false.
+white_led_is_ir = false
 ```
+
+### `white_led_is_ir`
+
+Off by default. When `true`, every day/night transition mirrors its `IR_LED`
+write onto `WHITE_LED` (the `HB` pin of the ring board's 4-pin header), so the
+lamp still turns on before the ISP switches to night and off after it switches
+back to day.
+
+Enable it **only** on the replacement all-infrared ring board, where `HB` drives
+the half/full-power bypass and both lines are infrared. On a stock
+`RZ-XHR(08SG)-C4` that same line is the visible white floodlight: setting this
+to `true` there turns a bright visible lamp on every single night.
 
 Restart `onvif-rust` after changing config (`killall onvif-rust.bin`;
 `anyka-init` respawns it).

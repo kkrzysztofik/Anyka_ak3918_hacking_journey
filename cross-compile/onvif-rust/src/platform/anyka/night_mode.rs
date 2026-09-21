@@ -498,6 +498,13 @@ impl NightModeController {
             });
         }
 
+        // The replacement IR ring drives its bypass from HB, which the kernel
+        // calls WHITE_LED. Gated twice: the node must exist, and the operator
+        // must have declared that this camera's white line is infrared.
+        if self.cfg.white_led_is_ir && self.caps.white_led {
+            mirror_lamp_to_white(&mut steps);
+        }
+
         // Split the plan around the ISP step. `plan()` orders the GPIO writes
         // around the ISP switch (lamp on before night, off after day) so no
         // frame is captured dark, and the trailing SETTLE sleep belongs after
@@ -898,6 +905,32 @@ pub(super) fn plan(target: DayNight, pol: Polarity, ircut: bool) -> Vec<Step> {
     }
     steps.push(Step::Sleep(SETTLE));
     steps
+}
+
+/// Duplicate every `IrLed` write onto `WhiteLed`, in place.
+///
+/// Inserting each mirror directly after its source preserves `plan()`'s
+/// ordering guarantee — the lamp turns on before the ISP switches to night and
+/// off after it switches to day, so no frame is captured dark.
+fn mirror_lamp_to_white(steps: &mut Vec<Step>) {
+    let mut out = Vec::with_capacity(steps.len() + 2);
+    for step in steps.drain(..) {
+        let mirrored = match &step {
+            Step::Write {
+                node: Node::IrLed,
+                value,
+            } => Some(*value),
+            _ => None,
+        };
+        out.push(step);
+        if let Some(value) = mirrored {
+            out.push(Step::Write {
+                node: Node::WhiteLed,
+                value,
+            });
+        }
+    }
+    *steps = out;
 }
 
 #[cfg(test)]
@@ -2302,5 +2335,70 @@ mod tests {
 
         // The successful retry must not clear the newer target.
         assert_eq!(*ctl.isp_pending.lock().await, Some(DayNight::Day));
+    }
+
+    #[test]
+    fn test_mirror_lamp_duplicates_each_ir_write_onto_white() {
+        let mut steps = plan(DayNight::Night, pol(), true);
+        mirror_lamp_to_white(&mut steps);
+
+        let ir_at = steps
+            .iter()
+            .position(|s| {
+                matches!(
+                    s,
+                    Step::Write {
+                        node: Node::IrLed,
+                        value: 1
+                    }
+                )
+            })
+            .expect("night plan writes IrLed=1");
+        assert_eq!(
+            steps[ir_at + 1],
+            Step::Write {
+                node: Node::WhiteLed,
+                value: 1
+            },
+            "the white write must immediately follow the IR write so it keeps \
+             plan()'s ordering around the ISP switch"
+        );
+
+        let isp_at = steps.iter().position(|s| *s == Step::IspMode).unwrap();
+        assert!(ir_at + 1 < isp_at, "lamp on before the ISP switches to night");
+    }
+
+    #[test]
+    fn test_mirror_lamp_follows_the_ir_value_off_at_day() {
+        let mut steps = plan(DayNight::Day, pol(), true);
+        mirror_lamp_to_white(&mut steps);
+
+        let ir_at = steps
+            .iter()
+            .position(|s| {
+                matches!(
+                    s,
+                    Step::Write {
+                        node: Node::IrLed,
+                        value: 0
+                    }
+                )
+            })
+            .expect("day plan writes IrLed=0");
+        assert_eq!(
+            steps[ir_at + 1],
+            Step::Write {
+                node: Node::WhiteLed,
+                value: 0
+            }
+        );
+    }
+
+    #[test]
+    fn test_mirror_lamp_leaves_a_plan_without_lamp_writes_alone() {
+        let mut steps = vec![Step::IspMode, Step::Sleep(SETTLE)];
+        let before = steps.clone();
+        mirror_lamp_to_white(&mut steps);
+        assert_eq!(steps, before);
     }
 }
