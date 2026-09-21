@@ -823,6 +823,14 @@ describe('ImagingPage', () => {
     });
   });
 
+  it('mounts the live preview beside the cards', async () => {
+    renderWithProviders(<ImagingPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('imaging-live-preview')).toBeInTheDocument();
+    });
+  });
+
   it('fires exactly one mutation for a slider drag (commit, not per tick)', async () => {
     renderWithProviders(<ImagingPage />);
 

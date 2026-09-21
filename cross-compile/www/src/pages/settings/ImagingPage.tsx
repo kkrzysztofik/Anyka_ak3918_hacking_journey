@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 
+import { LiveVideoPlayer } from '@/components/common/LiveVideoPlayer';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import {
@@ -306,534 +307,564 @@ export default function ImagingPage() {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 gap-[24px] lg:grid-cols-2">
-          {/* Color & Brightness */}
-          <SettingsCard>
-            <SettingsCardHeader>
-              <div className="flex items-center gap-[12px]">
-                <div className="flex size-[40px] items-center justify-center rounded-[10px] bg-[rgba(255,214,10,0.1)]">
-                  <Sun className="size-5 text-[#ffd60a]" />
-                </div>
-                <div>
-                  <SettingsCardTitle data-testid="imaging-color-brightness-title">
-                    Color & Brightness
-                  </SettingsCardTitle>
-                  <SettingsCardDescription>Basic image adjustment</SettingsCardDescription>
-                </div>
-              </div>
-            </SettingsCardHeader>
-            <SettingsCardContent className="space-y-[24px]">
-              <div className="space-y-[12px]">
-                <div className="flex items-center justify-between">
-                  <Label className="text-[#e5e5e5]">Brightness</Label>
-                  <span className="text-sm text-[#a1a1a6] tabular-nums">
-                    {localSettings.brightness}%
-                  </span>
-                </div>
-                <Slider
-                  value={[localSettings.brightness]}
-                  min={options?.brightness?.min ?? 0}
-                  max={options?.brightness?.max ?? 100}
-                  step={1}
-                  onValueChange={([val]) => updateSetting('brightness', val)}
-                  className="py-1"
-                />
-              </div>
-              <div className="space-y-[12px]">
-                <div className="flex items-center justify-between">
-                  <Label className="text-[#e5e5e5]">Contrast</Label>
-                  <span className="text-sm text-[#a1a1a6] tabular-nums">
-                    {localSettings.contrast}%
-                  </span>
-                </div>
-                <Slider
-                  value={[localSettings.contrast]}
-                  min={options?.contrast?.min ?? 0}
-                  max={options?.contrast?.max ?? 100}
-                  step={1}
-                  onValueChange={([val]) => updateSetting('contrast', val)}
-                  className="py-1"
-                />
-              </div>
-              <div className="space-y-[12px]">
-                <div className="flex items-center justify-between">
-                  <Label className="text-[#e5e5e5]">Saturation</Label>
-                  <span className="text-sm text-[#a1a1a6] tabular-nums">
-                    {localSettings.saturation}%
-                  </span>
-                </div>
-                <Slider
-                  value={[localSettings.saturation]}
-                  min={options?.saturation?.min ?? 0}
-                  max={options?.saturation?.max ?? 100}
-                  step={1}
-                  onValueChange={([val]) => updateSetting('saturation', val)}
-                  className="py-1"
-                />
-              </div>
-            </SettingsCardContent>
-          </SettingsCard>
+        <div className="flex flex-col gap-[24px] lg:flex-row lg:items-start">
+          <div className="min-w-0 flex-1">
+            <div className="grid grid-cols-1 gap-[24px] lg:grid-cols-2">
+              {/* Color & Brightness */}
+              <SettingsCard>
+                <SettingsCardHeader>
+                  <div className="flex items-center gap-[12px]">
+                    <div className="flex size-[40px] items-center justify-center rounded-[10px] bg-[rgba(255,214,10,0.1)]">
+                      <Sun className="size-5 text-[#ffd60a]" />
+                    </div>
+                    <div>
+                      <SettingsCardTitle data-testid="imaging-color-brightness-title">
+                        Color & Brightness
+                      </SettingsCardTitle>
+                      <SettingsCardDescription>Basic image adjustment</SettingsCardDescription>
+                    </div>
+                  </div>
+                </SettingsCardHeader>
+                <SettingsCardContent className="space-y-[24px]">
+                  <div className="space-y-[12px]">
+                    <div className="flex items-center justify-between">
+                      <Label className="text-[#e5e5e5]">Brightness</Label>
+                      <span className="text-sm text-[#a1a1a6] tabular-nums">
+                        {localSettings.brightness}%
+                      </span>
+                    </div>
+                    <Slider
+                      value={[localSettings.brightness]}
+                      min={options?.brightness?.min ?? 0}
+                      max={options?.brightness?.max ?? 100}
+                      step={1}
+                      onValueChange={([val]) => updateSetting('brightness', val)}
+                      className="py-1"
+                    />
+                  </div>
+                  <div className="space-y-[12px]">
+                    <div className="flex items-center justify-between">
+                      <Label className="text-[#e5e5e5]">Contrast</Label>
+                      <span className="text-sm text-[#a1a1a6] tabular-nums">
+                        {localSettings.contrast}%
+                      </span>
+                    </div>
+                    <Slider
+                      value={[localSettings.contrast]}
+                      min={options?.contrast?.min ?? 0}
+                      max={options?.contrast?.max ?? 100}
+                      step={1}
+                      onValueChange={([val]) => updateSetting('contrast', val)}
+                      className="py-1"
+                    />
+                  </div>
+                  <div className="space-y-[12px]">
+                    <div className="flex items-center justify-between">
+                      <Label className="text-[#e5e5e5]">Saturation</Label>
+                      <span className="text-sm text-[#a1a1a6] tabular-nums">
+                        {localSettings.saturation}%
+                      </span>
+                    </div>
+                    <Slider
+                      value={[localSettings.saturation]}
+                      min={options?.saturation?.min ?? 0}
+                      max={options?.saturation?.max ?? 100}
+                      step={1}
+                      onValueChange={([val]) => updateSetting('saturation', val)}
+                      className="py-1"
+                    />
+                  </div>
+                </SettingsCardContent>
+              </SettingsCard>
 
-          {/* Focus & Sharpness */}
-          <SettingsCard>
-            <SettingsCardHeader>
-              <div className="flex items-center gap-[12px]">
-                <div className="flex size-[40px] items-center justify-center rounded-[10px] bg-[rgba(10,132,255,0.1)]">
-                  <ScanEye className="size-5 text-[#0a84ff]" />
-                </div>
-                <div>
-                  <SettingsCardTitle data-testid="imaging-focus-sharpness-title">
-                    Focus & Sharpness
-                  </SettingsCardTitle>
-                  <SettingsCardDescription>Lens focus and edge enhancement</SettingsCardDescription>
-                </div>
-              </div>
-            </SettingsCardHeader>
-            <SettingsCardContent className="space-y-[24px]">
-              <div className="space-y-[12px]">
-                <div className="flex items-center justify-between">
-                  <Label className="text-[#e5e5e5]">Sharpness</Label>
-                  <span className="text-sm text-[#a1a1a6] tabular-nums">
-                    {localSettings.sharpness}%
-                  </span>
-                </div>
-                <Slider
-                  value={[localSettings.sharpness]}
-                  min={options?.sharpness?.min ?? 0}
-                  max={options?.sharpness?.max ?? 100}
-                  step={1}
-                  onValueChange={([val]) => updateSetting('sharpness', val)}
-                  className="py-1"
-                />
-              </div>
-            </SettingsCardContent>
-          </SettingsCard>
+              {/* Focus & Sharpness */}
+              <SettingsCard>
+                <SettingsCardHeader>
+                  <div className="flex items-center gap-[12px]">
+                    <div className="flex size-[40px] items-center justify-center rounded-[10px] bg-[rgba(10,132,255,0.1)]">
+                      <ScanEye className="size-5 text-[#0a84ff]" />
+                    </div>
+                    <div>
+                      <SettingsCardTitle data-testid="imaging-focus-sharpness-title">
+                        Focus & Sharpness
+                      </SettingsCardTitle>
+                      <SettingsCardDescription>
+                        Lens focus and edge enhancement
+                      </SettingsCardDescription>
+                    </div>
+                  </div>
+                </SettingsCardHeader>
+                <SettingsCardContent className="space-y-[24px]">
+                  <div className="space-y-[12px]">
+                    <div className="flex items-center justify-between">
+                      <Label className="text-[#e5e5e5]">Sharpness</Label>
+                      <span className="text-sm text-[#a1a1a6] tabular-nums">
+                        {localSettings.sharpness}%
+                      </span>
+                    </div>
+                    <Slider
+                      value={[localSettings.sharpness]}
+                      min={options?.sharpness?.min ?? 0}
+                      max={options?.sharpness?.max ?? 100}
+                      step={1}
+                      onValueChange={([val]) => updateSetting('sharpness', val)}
+                      className="py-1"
+                    />
+                  </div>
+                </SettingsCardContent>
+              </SettingsCard>
 
-          {/* Orientation */}
-          <SettingsCard>
-            <SettingsCardHeader>
-              <div className="flex items-center gap-[12px]">
-                <div className="flex size-[40px] items-center justify-center rounded-[10px] bg-[rgba(10,132,255,0.1)]">
-                  <FlipVertical className="size-5 text-[#0a84ff]" />
-                </div>
-                <div>
-                  <SettingsCardTitle data-testid="imaging-orientation-title">
-                    Orientation
-                  </SettingsCardTitle>
-                  <SettingsCardDescription>
-                    Correct an upside-down camera mount
-                  </SettingsCardDescription>
-                </div>
-              </div>
-            </SettingsCardHeader>
-            <SettingsCardContent className="space-y-[24px]">
-              <div className="flex items-center justify-between gap-[16px]">
-                <div className="space-y-[4px]">
-                  <Label className="text-[#e5e5e5]" htmlFor="imaging-flip-switch">
-                    Flip image 180°
-                  </Label>
-                  <p className="text-[13px] text-[#a1a1a6]">
-                    Applies immediately to the live stream
-                  </p>
-                </div>
-                <Switch
-                  id="imaging-flip-switch"
-                  checked={videoSourceConfig?.rotate === 'ON'}
-                  onCheckedChange={(checked) => rotateMutation.mutate(checked)}
-                  disabled={!videoSourceConfig || rotateMutation.isPending}
-                  data-testid="imaging-flip-switch"
-                />
-              </div>
-            </SettingsCardContent>
-          </SettingsCard>
+              {/* Orientation */}
+              <SettingsCard>
+                <SettingsCardHeader>
+                  <div className="flex items-center gap-[12px]">
+                    <div className="flex size-[40px] items-center justify-center rounded-[10px] bg-[rgba(10,132,255,0.1)]">
+                      <FlipVertical className="size-5 text-[#0a84ff]" />
+                    </div>
+                    <div>
+                      <SettingsCardTitle data-testid="imaging-orientation-title">
+                        Orientation
+                      </SettingsCardTitle>
+                      <SettingsCardDescription>
+                        Correct an upside-down camera mount
+                      </SettingsCardDescription>
+                    </div>
+                  </div>
+                </SettingsCardHeader>
+                <SettingsCardContent className="space-y-[24px]">
+                  <div className="flex items-center justify-between gap-[16px]">
+                    <div className="space-y-[4px]">
+                      <Label className="text-[#e5e5e5]" htmlFor="imaging-flip-switch">
+                        Flip image 180°
+                      </Label>
+                      <p className="text-[13px] text-[#a1a1a6]">
+                        Applies immediately to the live stream
+                      </p>
+                    </div>
+                    <Switch
+                      id="imaging-flip-switch"
+                      checked={videoSourceConfig?.rotate === 'ON'}
+                      onCheckedChange={(checked) => rotateMutation.mutate(checked)}
+                      disabled={!videoSourceConfig || rotateMutation.isPending}
+                      data-testid="imaging-flip-switch"
+                    />
+                  </div>
+                </SettingsCardContent>
+              </SettingsCard>
 
-          {/* White Balance (STUB) */}
-          <SettingsCard>
-            <SettingsCardHeader>
-              <div className="flex items-center gap-[12px]">
-                <div className="flex size-[40px] items-center justify-center rounded-[10px] bg-[rgba(255,45,85,0.1)]">
-                  <Palette className="size-5 text-[#ff2d55]" />
-                </div>
-                <div>
-                  <SettingsCardTitle>White Balance</SettingsCardTitle>
-                  <SettingsCardDescription>
-                    Color temperature adjustment (Unavailable)
-                  </SettingsCardDescription>
-                </div>
-              </div>
-            </SettingsCardHeader>
-            <SettingsCardContent className="pointer-events-none space-y-[24px] opacity-60">
-              <div className="space-y-[12px]">
-                <Label className="text-[#e5e5e5]">Mode</Label>
-                <select
-                  value="auto"
-                  disabled
-                  className="h-10 w-full appearance-none rounded-md border border-[#3a3a3c] bg-[#2c2c2e] px-3 py-2 text-sm text-white disabled:opacity-50"
-                  data-testid="imaging-white-balance-mode-select"
-                >
-                  <option value="auto">Auto</option>
-                </select>
-              </div>
-            </SettingsCardContent>
-          </SettingsCard>
+              {/* White Balance (STUB) */}
+              <SettingsCard>
+                <SettingsCardHeader>
+                  <div className="flex items-center gap-[12px]">
+                    <div className="flex size-[40px] items-center justify-center rounded-[10px] bg-[rgba(255,45,85,0.1)]">
+                      <Palette className="size-5 text-[#ff2d55]" />
+                    </div>
+                    <div>
+                      <SettingsCardTitle>White Balance</SettingsCardTitle>
+                      <SettingsCardDescription>
+                        Color temperature adjustment (Unavailable)
+                      </SettingsCardDescription>
+                    </div>
+                  </div>
+                </SettingsCardHeader>
+                <SettingsCardContent className="pointer-events-none space-y-[24px] opacity-60">
+                  <div className="space-y-[12px]">
+                    <Label className="text-[#e5e5e5]">Mode</Label>
+                    <select
+                      value="auto"
+                      disabled
+                      className="h-10 w-full appearance-none rounded-md border border-[#3a3a3c] bg-[#2c2c2e] px-3 py-2 text-sm text-white disabled:opacity-50"
+                      data-testid="imaging-white-balance-mode-select"
+                    >
+                      <option value="auto">Auto</option>
+                    </select>
+                  </div>
+                </SettingsCardContent>
+              </SettingsCard>
 
-          {/* Exposure — the sensor's AE owns the picture; manual values are
+              {/* Exposure — the sensor's AE owns the picture; manual values are
               unreachable on this ISP, so the card is honest about that. */}
-          <SettingsCard>
-            <SettingsCardHeader>
-              <div className="flex items-center gap-[12px]">
-                <div className="flex size-[40px] items-center justify-center rounded-[10px] bg-[rgba(48,209,88,0.1)]">
-                  <Camera className="size-5 text-[#30d158]" />
-                </div>
-                <div>
-                  <SettingsCardTitle>Exposure Settings</SettingsCardTitle>
-                  <SettingsCardDescription>
-                    Auto-exposure is active; manual exposure is not supported by this sensor
-                  </SettingsCardDescription>
-                </div>
-              </div>
-            </SettingsCardHeader>
-            <SettingsCardContent className="space-y-[24px]">
-              <div className="space-y-[12px]">
-                <Label className="text-[#e5e5e5]">Exposure Mode</Label>
-                <select
-                  value={localSettings.exposureMode ?? 'AUTO'}
-                  onChange={(e) =>
-                    updateSetting('exposureMode', e.target.value as 'AUTO' | 'MANUAL')
-                  }
-                  className="h-10 w-full appearance-none rounded-md border border-[#3a3a3c] bg-[#2c2c2e] px-3 py-2 text-sm text-white focus:border-transparent focus:ring-2 focus:ring-[#0a84ff] focus:outline-none"
-                  data-testid="imaging-exposure-mode-select"
-                >
-                  {(options?.exposure?.modes?.length ? options.exposure.modes : ['AUTO']).map(
-                    (mode) => (
-                      <option key={mode} value={mode}>
-                        {mode === 'AUTO' ? 'Auto' : 'Manual'}
-                      </option>
-                    ),
-                  )}
-                </select>
-                {options?.exposure?.gainRange && (
-                  <p className="text-xs text-[#8e8e93]" data-testid="imaging-exposure-gain-range">
-                    Auto gain range: 0–{options.exposure.gainRange.max.toFixed(1)} dB
-                  </p>
-                )}
-              </div>
-            </SettingsCardContent>
-          </SettingsCard>
+              <SettingsCard>
+                <SettingsCardHeader>
+                  <div className="flex items-center gap-[12px]">
+                    <div className="flex size-[40px] items-center justify-center rounded-[10px] bg-[rgba(48,209,88,0.1)]">
+                      <Camera className="size-5 text-[#30d158]" />
+                    </div>
+                    <div>
+                      <SettingsCardTitle>Exposure Settings</SettingsCardTitle>
+                      <SettingsCardDescription>
+                        Auto-exposure is active; manual exposure is not supported by this sensor
+                      </SettingsCardDescription>
+                    </div>
+                  </div>
+                </SettingsCardHeader>
+                <SettingsCardContent className="space-y-[24px]">
+                  <div className="space-y-[12px]">
+                    <Label className="text-[#e5e5e5]">Exposure Mode</Label>
+                    <select
+                      value={localSettings.exposureMode ?? 'AUTO'}
+                      onChange={(e) =>
+                        updateSetting('exposureMode', e.target.value as 'AUTO' | 'MANUAL')
+                      }
+                      className="h-10 w-full appearance-none rounded-md border border-[#3a3a3c] bg-[#2c2c2e] px-3 py-2 text-sm text-white focus:border-transparent focus:ring-2 focus:ring-[#0a84ff] focus:outline-none"
+                      data-testid="imaging-exposure-mode-select"
+                    >
+                      {(options?.exposure?.modes?.length ? options.exposure.modes : ['AUTO']).map(
+                        (mode) => (
+                          <option key={mode} value={mode}>
+                            {mode === 'AUTO' ? 'Auto' : 'Manual'}
+                          </option>
+                        ),
+                      )}
+                    </select>
+                    {options?.exposure?.gainRange && (
+                      <p
+                        className="text-xs text-[#8e8e93]"
+                        data-testid="imaging-exposure-gain-range"
+                      >
+                        Auto gain range: 0–{options.exposure.gainRange.max.toFixed(1)} dB
+                      </p>
+                    )}
+                  </div>
+                </SettingsCardContent>
+              </SettingsCard>
 
-          {/* Infrared (IR Cut Filter) — hide when backend probed and found no hardware */}
-          {irCutSupported && (
-            <SettingsCard>
-              <SettingsCardHeader>
-                <div className="flex items-center gap-[12px]">
-                  <div className="flex size-[40px] items-center justify-center rounded-[10px] bg-[rgba(191,90,242,0.1)]">
-                    <Moon className="size-5 text-[#bf5af2]" />
-                  </div>
-                  <div>
-                    <SettingsCardTitle data-testid="imaging-infrared-settings-title">
-                      Infrared Settings
-                    </SettingsCardTitle>
-                    <SettingsCardDescription>IR cut filter control</SettingsCardDescription>
-                  </div>
-                </div>
-              </SettingsCardHeader>
-              <SettingsCardContent className="space-y-[24px]">
-                <div className="space-y-[12px]">
-                  <Label className="text-[#e5e5e5]" data-testid="imaging-ir-cut-filter-mode-label">
-                    IR Cut Filter Mode
-                  </Label>
-                  <select
-                    value={localSettings.irCutFilter || 'AUTO'}
-                    onChange={(e) =>
-                      updateSetting('irCutFilter', e.target.value as 'ON' | 'OFF' | 'AUTO')
-                    }
-                    className="h-10 w-full appearance-none rounded-md border border-[#3a3a3c] bg-[#2c2c2e] px-3 py-2 text-sm text-white focus:border-transparent focus:ring-2 focus:ring-[#0a84ff] focus:outline-none"
-                    data-testid="imaging-ir-cut-filter-select"
-                  >
-                    {/* The card only renders when the list is non-empty or absent, so
+              {/* Infrared (IR Cut Filter) — hide when backend probed and found no hardware */}
+              {irCutSupported && (
+                <SettingsCard>
+                  <SettingsCardHeader>
+                    <div className="flex items-center gap-[12px]">
+                      <div className="flex size-[40px] items-center justify-center rounded-[10px] bg-[rgba(191,90,242,0.1)]">
+                        <Moon className="size-5 text-[#bf5af2]" />
+                      </div>
+                      <div>
+                        <SettingsCardTitle data-testid="imaging-infrared-settings-title">
+                          Infrared Settings
+                        </SettingsCardTitle>
+                        <SettingsCardDescription>IR cut filter control</SettingsCardDescription>
+                      </div>
+                    </div>
+                  </SettingsCardHeader>
+                  <SettingsCardContent className="space-y-[24px]">
+                    <div className="space-y-[12px]">
+                      <Label
+                        className="text-[#e5e5e5]"
+                        data-testid="imaging-ir-cut-filter-mode-label"
+                      >
+                        IR Cut Filter Mode
+                      </Label>
+                      <select
+                        value={localSettings.irCutFilter || 'AUTO'}
+                        onChange={(e) =>
+                          updateSetting('irCutFilter', e.target.value as 'ON' | 'OFF' | 'AUTO')
+                        }
+                        className="h-10 w-full appearance-none rounded-md border border-[#3a3a3c] bg-[#2c2c2e] px-3 py-2 text-sm text-white focus:border-transparent focus:ring-2 focus:ring-[#0a84ff] focus:outline-none"
+                        data-testid="imaging-ir-cut-filter-select"
+                      >
+                        {/* The card only renders when the list is non-empty or absent, so
                         the fallback here covers exactly the not-yet-loaded case. */}
-                    {(
-                      options?.irCutFilterModes ??
-                      (Object.keys(IR_CUT_LABELS) as Array<keyof typeof IR_CUT_LABELS>)
-                    ).map((mode) => (
-                      <option key={mode} value={mode}>
-                        {IR_CUT_LABELS[mode]}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </SettingsCardContent>
-            </SettingsCard>
-          )}
+                        {(
+                          options?.irCutFilterModes ??
+                          (Object.keys(IR_CUT_LABELS) as Array<keyof typeof IR_CUT_LABELS>)
+                        ).map((mode) => (
+                          <option key={mode} value={mode}>
+                            {IR_CUT_LABELS[mode]}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </SettingsCardContent>
+                </SettingsCard>
+              )}
 
-          {/* Illumination (IR lamp + white floodlight) */}
-          <SettingsCard data-testid="imaging-illumination-card">
-            <SettingsCardHeader>
-              <div className="flex items-center gap-[12px]">
-                <div className="flex size-[40px] items-center justify-center rounded-[10px] bg-[rgba(255,159,10,0.1)]">
-                  <Lightbulb className="size-5 text-[#ff9f0a]" />
-                </div>
-                <div>
-                  <SettingsCardTitle data-testid="imaging-illumination-title">
-                    Illumination
-                  </SettingsCardTitle>
-                  <SettingsCardDescription>IR lamp and white floodlight</SettingsCardDescription>
-                </div>
-              </div>
-            </SettingsCardHeader>
-            <SettingsCardContent className="space-y-[24px]">
-              <div className="flex items-center justify-between">
-                <Label className="text-[#e5e5e5]" data-testid="imaging-ir-lamp-label">
-                  IR Lamp
-                </Label>
-                <Switch
-                  checked={irLampOn}
-                  onCheckedChange={(checked) =>
-                    toggleLamp(checked, setIrLampOn, 'tt:IRLamp|On', 'tt:IRLamp|Off')
-                  }
-                  disabled={!profileToken || lampMutation.isPending}
-                  data-testid="imaging-ir-lamp-switch"
-                />
-              </div>
-              <div className="flex items-center justify-between">
-                <Label className="text-[#e5e5e5]" data-testid="imaging-white-light-label">
-                  White Light
-                </Label>
-                <Switch
-                  checked={whiteLightOn}
-                  onCheckedChange={(checked) =>
-                    toggleLamp(checked, setWhiteLightOn, 'tt:WhiteLight|On', 'tt:WhiteLight|Off')
-                  }
-                  disabled={!profileToken || lampMutation.isPending}
-                  data-testid="imaging-white-light-switch"
-                />
-              </div>
-            </SettingsCardContent>
-          </SettingsCard>
+              {/* Illumination (IR lamp + white floodlight) */}
+              <SettingsCard data-testid="imaging-illumination-card">
+                <SettingsCardHeader>
+                  <div className="flex items-center gap-[12px]">
+                    <div className="flex size-[40px] items-center justify-center rounded-[10px] bg-[rgba(255,159,10,0.1)]">
+                      <Lightbulb className="size-5 text-[#ff9f0a]" />
+                    </div>
+                    <div>
+                      <SettingsCardTitle data-testid="imaging-illumination-title">
+                        Illumination
+                      </SettingsCardTitle>
+                      <SettingsCardDescription>
+                        IR lamp and white floodlight
+                      </SettingsCardDescription>
+                    </div>
+                  </div>
+                </SettingsCardHeader>
+                <SettingsCardContent className="space-y-[24px]">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-[#e5e5e5]" data-testid="imaging-ir-lamp-label">
+                      IR Lamp
+                    </Label>
+                    <Switch
+                      checked={irLampOn}
+                      onCheckedChange={(checked) =>
+                        toggleLamp(checked, setIrLampOn, 'tt:IRLamp|On', 'tt:IRLamp|Off')
+                      }
+                      disabled={!profileToken || lampMutation.isPending}
+                      data-testid="imaging-ir-lamp-switch"
+                    />
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <Label className="text-[#e5e5e5]" data-testid="imaging-white-light-label">
+                      White Light
+                    </Label>
+                    <Switch
+                      checked={whiteLightOn}
+                      onCheckedChange={(checked) =>
+                        toggleLamp(
+                          checked,
+                          setWhiteLightOn,
+                          'tt:WhiteLight|On',
+                          'tt:WhiteLight|Off',
+                        )
+                      }
+                      disabled={!profileToken || lampMutation.isPending}
+                      data-testid="imaging-white-light-switch"
+                    />
+                  </div>
+                </SettingsCardContent>
+              </SettingsCard>
 
-          {/* Backlight & WDR */}
-          <SettingsCard>
-            <SettingsCardHeader>
-              <div className="flex items-center gap-[12px]">
-                <div className="flex size-[40px] items-center justify-center rounded-[10px] bg-[rgba(255,159,10,0.1)]">
-                  <Contrast className="size-5 text-[#ff9f0a]" />
-                </div>
-                <div>
-                  <SettingsCardTitle data-testid="imaging-backlight-wdr-title">
-                    Backlight & WDR
-                  </SettingsCardTitle>
-                  <SettingsCardDescription>
-                    Wide Dynamic Range and backlight compensation
-                  </SettingsCardDescription>
-                </div>
-              </div>
-            </SettingsCardHeader>
-            <SettingsCardContent className="space-y-[24px]">
-              {/* Wide Dynamic Range */}
-              <div className="space-y-[12px]">
-                <div className="flex items-center justify-between">
-                  <Label className="text-[#e5e5e5]">WDR Mode</Label>
-                </div>
-                <select
-                  value={localSettings.wideDynamicRange?.mode || 'OFF'}
-                  onChange={(e) =>
-                    updateSetting('wideDynamicRange', {
-                      mode: e.target.value as 'ON' | 'OFF',
-                      level: localSettings.wideDynamicRange?.level || 50,
-                    })
-                  }
-                  className="h-10 w-full appearance-none rounded-md border border-[#3a3a3c] bg-[#2c2c2e] px-3 py-2 text-sm text-white focus:border-transparent focus:ring-2 focus:ring-[#0a84ff] focus:outline-none"
-                  data-testid="imaging-wdr-mode-select"
-                >
-                  {options?.wideDynamicRange?.modes?.map((mode) => (
-                    <option key={mode} value={mode}>
-                      {mode}
-                    </option>
-                  )) || (
-                    <>
-                      <option value="OFF">Off</option>
-                      <option value="ON">On</option>
-                    </>
-                  )}
-                </select>
-                {localSettings.wideDynamicRange?.mode === 'ON' && (
+              {/* Backlight & WDR */}
+              <SettingsCard>
+                <SettingsCardHeader>
+                  <div className="flex items-center gap-[12px]">
+                    <div className="flex size-[40px] items-center justify-center rounded-[10px] bg-[rgba(255,159,10,0.1)]">
+                      <Contrast className="size-5 text-[#ff9f0a]" />
+                    </div>
+                    <div>
+                      <SettingsCardTitle data-testid="imaging-backlight-wdr-title">
+                        Backlight & WDR
+                      </SettingsCardTitle>
+                      <SettingsCardDescription>
+                        Wide Dynamic Range and backlight compensation
+                      </SettingsCardDescription>
+                    </div>
+                  </div>
+                </SettingsCardHeader>
+                <SettingsCardContent className="space-y-[24px]">
+                  {/* Wide Dynamic Range */}
                   <div className="space-y-[12px]">
                     <div className="flex items-center justify-between">
-                      <Label className="text-[#e5e5e5]" data-testid="imaging-wdr-level-label">
-                        WDR Level
-                      </Label>
-                      <span className="text-sm text-[#a1a1a6] tabular-nums">
-                        {localSettings.wideDynamicRange.level}%
-                      </span>
+                      <Label className="text-[#e5e5e5]">WDR Mode</Label>
                     </div>
-                    <Slider
-                      value={[localSettings.wideDynamicRange.level]}
-                      min={options?.wideDynamicRange?.level?.min ?? 0}
-                      max={options?.wideDynamicRange?.level?.max ?? 100}
-                      step={1}
-                      onValueChange={([val]) =>
+                    <select
+                      value={localSettings.wideDynamicRange?.mode || 'OFF'}
+                      onChange={(e) =>
                         updateSetting('wideDynamicRange', {
-                          mode: localSettings.wideDynamicRange?.mode || 'OFF',
-                          level: val,
+                          mode: e.target.value as 'ON' | 'OFF',
+                          level: localSettings.wideDynamicRange?.level || 50,
                         })
                       }
-                      className="py-1"
-                    />
+                      className="h-10 w-full appearance-none rounded-md border border-[#3a3a3c] bg-[#2c2c2e] px-3 py-2 text-sm text-white focus:border-transparent focus:ring-2 focus:ring-[#0a84ff] focus:outline-none"
+                      data-testid="imaging-wdr-mode-select"
+                    >
+                      {options?.wideDynamicRange?.modes?.map((mode) => (
+                        <option key={mode} value={mode}>
+                          {mode}
+                        </option>
+                      )) || (
+                        <>
+                          <option value="OFF">Off</option>
+                          <option value="ON">On</option>
+                        </>
+                      )}
+                    </select>
+                    {localSettings.wideDynamicRange?.mode === 'ON' && (
+                      <div className="space-y-[12px]">
+                        <div className="flex items-center justify-between">
+                          <Label className="text-[#e5e5e5]" data-testid="imaging-wdr-level-label">
+                            WDR Level
+                          </Label>
+                          <span className="text-sm text-[#a1a1a6] tabular-nums">
+                            {localSettings.wideDynamicRange.level}%
+                          </span>
+                        </div>
+                        <Slider
+                          value={[localSettings.wideDynamicRange.level]}
+                          min={options?.wideDynamicRange?.level?.min ?? 0}
+                          max={options?.wideDynamicRange?.level?.max ?? 100}
+                          step={1}
+                          onValueChange={([val]) =>
+                            updateSetting('wideDynamicRange', {
+                              mode: localSettings.wideDynamicRange?.mode || 'OFF',
+                              level: val,
+                            })
+                          }
+                          className="py-1"
+                        />
+                      </div>
+                    )}
                   </div>
-                )}
-              </div>
 
-              {/* Backlight Compensation */}
-              <div className="space-y-[12px]">
-                <div className="flex items-center justify-between">
-                  <Label className="text-[#e5e5e5]">Backlight Compensation Mode</Label>
-                </div>
-                <select
-                  value={localSettings.backlightCompensation?.mode || 'OFF'}
-                  onChange={(e) =>
-                    updateSetting('backlightCompensation', {
-                      mode: e.target.value as 'ON' | 'OFF',
-                      level: localSettings.backlightCompensation?.level || 50,
-                    })
-                  }
-                  className="h-10 w-full appearance-none rounded-md border border-[#3a3a3c] bg-[#2c2c2e] px-3 py-2 text-sm text-white focus:border-transparent focus:ring-2 focus:ring-[#0a84ff] focus:outline-none"
-                  data-testid="imaging-backlight-mode-select"
-                >
-                  {options?.backlightCompensation?.modes?.map((mode) => (
-                    <option key={mode} value={mode}>
-                      {mode}
-                    </option>
-                  )) || (
-                    <>
-                      <option value="OFF">Off</option>
-                      <option value="ON">On</option>
-                    </>
-                  )}
-                </select>
-                {localSettings.backlightCompensation?.mode === 'ON' && (
+                  {/* Backlight Compensation */}
                   <div className="space-y-[12px]">
                     <div className="flex items-center justify-between">
-                      <Label className="text-[#e5e5e5]" data-testid="imaging-backlight-level-label">
-                        Backlight Level
+                      <Label className="text-[#e5e5e5]">Backlight Compensation Mode</Label>
+                    </div>
+                    <select
+                      value={localSettings.backlightCompensation?.mode || 'OFF'}
+                      onChange={(e) =>
+                        updateSetting('backlightCompensation', {
+                          mode: e.target.value as 'ON' | 'OFF',
+                          level: localSettings.backlightCompensation?.level || 50,
+                        })
+                      }
+                      className="h-10 w-full appearance-none rounded-md border border-[#3a3a3c] bg-[#2c2c2e] px-3 py-2 text-sm text-white focus:border-transparent focus:ring-2 focus:ring-[#0a84ff] focus:outline-none"
+                      data-testid="imaging-backlight-mode-select"
+                    >
+                      {options?.backlightCompensation?.modes?.map((mode) => (
+                        <option key={mode} value={mode}>
+                          {mode}
+                        </option>
+                      )) || (
+                        <>
+                          <option value="OFF">Off</option>
+                          <option value="ON">On</option>
+                        </>
+                      )}
+                    </select>
+                    {localSettings.backlightCompensation?.mode === 'ON' && (
+                      <div className="space-y-[12px]">
+                        <div className="flex items-center justify-between">
+                          <Label
+                            className="text-[#e5e5e5]"
+                            data-testid="imaging-backlight-level-label"
+                          >
+                            Backlight Level
+                          </Label>
+                          <span className="text-sm text-[#a1a1a6] tabular-nums">
+                            {localSettings.backlightCompensation.level}%
+                          </span>
+                        </div>
+                        <Slider
+                          value={[localSettings.backlightCompensation.level]}
+                          min={options?.backlightCompensation?.level?.min ?? 0}
+                          max={options?.backlightCompensation?.level?.max ?? 100}
+                          step={1}
+                          onValueChange={([val]) =>
+                            updateSetting('backlightCompensation', {
+                              mode: localSettings.backlightCompensation?.mode || 'OFF',
+                              level: val,
+                            })
+                          }
+                          className="py-1"
+                        />
+                      </div>
+                    )}
+                  </div>
+                </SettingsCardContent>
+              </SettingsCard>
+
+              {/* Advanced — tint / mains / style. ONVIF has no fields for these,
+              so they apply on commit (no per-drag IPC) over /api/imaging. */}
+              <SettingsCard>
+                <SettingsCardHeader>
+                  <div className="flex items-center gap-[12px]">
+                    <div className="flex size-[40px] items-center justify-center rounded-[10px] bg-[rgba(191,90,242,0.1)]">
+                      <Palette className="size-5 text-[#bf5af2]" />
+                    </div>
+                    <div>
+                      <SettingsCardTitle data-testid="imaging-advanced-title">
+                        Advanced
+                      </SettingsCardTitle>
+                      <SettingsCardDescription>
+                        Tint, mains frequency, picture style
+                      </SettingsCardDescription>
+                    </div>
+                  </div>
+                </SettingsCardHeader>
+                <SettingsCardContent className="space-y-[24px]">
+                  <div className="space-y-[12px]">
+                    <div className="flex items-center justify-between">
+                      <Label className="text-[#e5e5e5]" data-testid="imaging-hue-label">
+                        Color Tint
                       </Label>
                       <span className="text-sm text-[#a1a1a6] tabular-nums">
-                        {localSettings.backlightCompensation.level}%
+                        {effectiveAdvanced.hue}
                       </span>
                     </div>
                     <Slider
-                      value={[localSettings.backlightCompensation.level]}
-                      min={options?.backlightCompensation?.level?.min ?? 0}
-                      max={options?.backlightCompensation?.level?.max ?? 100}
+                      value={[effectiveAdvanced.hue]}
+                      min={0}
+                      max={100}
                       step={1}
                       onValueChange={([val]) =>
-                        updateSetting('backlightCompensation', {
-                          mode: localSettings.backlightCompensation?.mode || 'OFF',
-                          level: val,
-                        })
+                        setAdvancedLocal({ ...effectiveAdvanced, hue: val })
+                      }
+                      onValueCommit={([val]) =>
+                        advancedMutation.mutate(
+                          { hue: val },
+                          {
+                            onSuccess: () => toast.success('Color tint saved'),
+                          },
+                        )
                       }
                       className="py-1"
+                      data-testid="imaging-hue-slider"
                     />
                   </div>
-                )}
-              </div>
-            </SettingsCardContent>
-          </SettingsCard>
-
-          {/* Advanced — tint / mains / style. ONVIF has no fields for these,
-              so they apply on commit (no per-drag IPC) over /api/imaging. */}
-          <SettingsCard>
-            <SettingsCardHeader>
-              <div className="flex items-center gap-[12px]">
-                <div className="flex size-[40px] items-center justify-center rounded-[10px] bg-[rgba(191,90,242,0.1)]">
-                  <Palette className="size-5 text-[#bf5af2]" />
-                </div>
-                <div>
-                  <SettingsCardTitle data-testid="imaging-advanced-title">
-                    Advanced
-                  </SettingsCardTitle>
-                  <SettingsCardDescription>
-                    Tint, mains frequency, picture style
-                  </SettingsCardDescription>
-                </div>
-              </div>
-            </SettingsCardHeader>
-            <SettingsCardContent className="space-y-[24px]">
-              <div className="space-y-[12px]">
-                <div className="flex items-center justify-between">
-                  <Label className="text-[#e5e5e5]" data-testid="imaging-hue-label">
-                    Color Tint
-                  </Label>
-                  <span className="text-sm text-[#a1a1a6] tabular-nums">
-                    {effectiveAdvanced.hue}
-                  </span>
-                </div>
-                <Slider
-                  value={[effectiveAdvanced.hue]}
-                  min={0}
-                  max={100}
-                  step={1}
-                  onValueChange={([val]) => setAdvancedLocal({ ...effectiveAdvanced, hue: val })}
-                  onValueCommit={([val]) =>
-                    advancedMutation.mutate(
-                      { hue: val },
-                      {
-                        onSuccess: () => toast.success('Color tint saved'),
-                      },
-                    )
-                  }
-                  className="py-1"
-                  data-testid="imaging-hue-slider"
-                />
-              </div>
-              <div className="space-y-[12px]">
-                <Label className="text-[#e5e5e5]" data-testid="imaging-power-hz-label">
-                  Mains frequency (reduces flicker under artificial light)
-                </Label>
-                <select
-                  value={String(effectiveAdvanced.powerHz)}
-                  onChange={(e) => {
-                    const powerHz = Number(e.target.value) as 50 | 60;
-                    setAdvancedLocal({ ...effectiveAdvanced, powerHz });
-                    advancedMutation.mutate(
-                      { powerHz },
-                      {
-                        onSuccess: () => toast.success('Mains frequency saved'),
-                      },
-                    );
-                  }}
-                  className="h-10 w-full appearance-none rounded-md border border-[#3a3a3c] bg-[#2c2c2e] px-3 py-2 text-sm text-white focus:border-transparent focus:ring-2 focus:ring-[#0a84ff] focus:outline-none"
-                  data-testid="imaging-power-hz-select"
-                >
-                  <option value="50">50 Hz</option>
-                  <option value="60">60 Hz</option>
-                </select>
-              </div>
-              <div className="space-y-[12px]">
-                <Label className="text-[#e5e5e5]" data-testid="imaging-style-label">
-                  Picture style
-                </Label>
-                <select
-                  value={String(effectiveAdvanced.styleId)}
-                  onChange={(e) => {
-                    const styleId = Number(e.target.value) as 0 | 1 | 2;
-                    setAdvancedLocal({ ...effectiveAdvanced, styleId });
-                    advancedMutation.mutate(
-                      { styleId },
-                      {
-                        onSuccess: () => toast.success('Picture style saved'),
-                      },
-                    );
-                  }}
-                  className="h-10 w-full appearance-none rounded-md border border-[#3a3a3c] bg-[#2c2c2e] px-3 py-2 text-sm text-white focus:border-transparent focus:ring-2 focus:ring-[#0a84ff] focus:outline-none"
-                  data-testid="imaging-style-select"
-                >
-                  <option value="0">Default (0)</option>
-                  <option value="1">Style 1</option>
-                  <option value="2">Style 2</option>
-                </select>
-              </div>
-            </SettingsCardContent>
-          </SettingsCard>
+                  <div className="space-y-[12px]">
+                    <Label className="text-[#e5e5e5]" data-testid="imaging-power-hz-label">
+                      Mains frequency (reduces flicker under artificial light)
+                    </Label>
+                    <select
+                      value={String(effectiveAdvanced.powerHz)}
+                      onChange={(e) => {
+                        const powerHz = Number(e.target.value) as 50 | 60;
+                        setAdvancedLocal({ ...effectiveAdvanced, powerHz });
+                        advancedMutation.mutate(
+                          { powerHz },
+                          {
+                            onSuccess: () => toast.success('Mains frequency saved'),
+                          },
+                        );
+                      }}
+                      className="h-10 w-full appearance-none rounded-md border border-[#3a3a3c] bg-[#2c2c2e] px-3 py-2 text-sm text-white focus:border-transparent focus:ring-2 focus:ring-[#0a84ff] focus:outline-none"
+                      data-testid="imaging-power-hz-select"
+                    >
+                      <option value="50">50 Hz</option>
+                      <option value="60">60 Hz</option>
+                    </select>
+                  </div>
+                  <div className="space-y-[12px]">
+                    <Label className="text-[#e5e5e5]" data-testid="imaging-style-label">
+                      Picture style
+                    </Label>
+                    <select
+                      value={String(effectiveAdvanced.styleId)}
+                      onChange={(e) => {
+                        const styleId = Number(e.target.value) as 0 | 1 | 2;
+                        setAdvancedLocal({ ...effectiveAdvanced, styleId });
+                        advancedMutation.mutate(
+                          { styleId },
+                          {
+                            onSuccess: () => toast.success('Picture style saved'),
+                          },
+                        );
+                      }}
+                      className="h-10 w-full appearance-none rounded-md border border-[#3a3a3c] bg-[#2c2c2e] px-3 py-2 text-sm text-white focus:border-transparent focus:ring-2 focus:ring-[#0a84ff] focus:outline-none"
+                      data-testid="imaging-style-select"
+                    >
+                      <option value="0">Default (0)</option>
+                      <option value="1">Style 1</option>
+                      <option value="2">Style 2</option>
+                    </select>
+                  </div>
+                </SettingsCardContent>
+              </SettingsCard>
+            </div>
+          </div>
+          <aside
+            className="w-full shrink-0 lg:sticky lg:top-[48px] lg:w-[320px]"
+            data-testid="imaging-live-preview"
+          >
+            <LiveVideoPlayer streamType="main" className="w-full" />
+          </aside>
         </div>
       </div>
     </div>
