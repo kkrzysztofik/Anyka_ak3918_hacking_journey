@@ -95,6 +95,10 @@ export default function ProfilesPage() {
     profileToken: string;
     family: ConfigFamily;
   } | null>(null);
+  const [pendingRemove, setPendingRemove] = useState<{
+    profileToken: string;
+    family: ConfigFamily;
+  } | null>(null);
 
   // Track open state for each profile card
   const [openProfiles, setOpenProfiles] = useState<Record<string, boolean>>({});
@@ -339,7 +343,7 @@ export default function ProfilesPage() {
                           setPicker({ profileToken: profile.token, family: 'VideoEncoder' })
                         }
                         onRemove={() =>
-                          removeMutation.mutate({
+                          setPendingRemove({
                             profileToken: profile.token,
                             family: 'VideoEncoder',
                           })
@@ -546,6 +550,47 @@ export default function ProfilesPage() {
             onAttached={() => queryClient.invalidateQueries({ queryKey: ['profiles'] })}
           />
         )}
+
+        {/* Remove confirmation — dropping the video encoder makes the profile unstreamable */}
+        <AlertDialog
+          open={!!pendingRemove}
+          onOpenChange={(o) => {
+            if (!o) setPendingRemove(null);
+          }}
+        >
+          <AlertDialogContent
+            className="border-[#3a3a3c] bg-[#1c1c1e] text-white"
+            data-testid="remove-config-dialog"
+          >
+            <AlertDialogHeader>
+              <AlertDialogTitle className="text-white" data-testid="remove-config-dialog-title">
+                Remove video encoder?
+              </AlertDialogTitle>
+              <AlertDialogDescription className="text-[#a1a1a6]">
+                Removing the video encoder leaves this profile with no stream. Clients requesting
+                its stream URI will receive an error until an encoder is attached again.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel
+                className="border-[#3a3a3c] bg-transparent text-white hover:bg-[#2c2c2e]"
+                data-testid="remove-config-dialog-cancel"
+              >
+                Cancel
+              </AlertDialogCancel>
+              <AlertDialogAction
+                onClick={() => {
+                  if (pendingRemove) removeMutation.mutate(pendingRemove);
+                  setPendingRemove(null);
+                }}
+                className="bg-[#dc2626] text-white hover:bg-[#ef4444]"
+                data-testid="remove-config-dialog-confirm"
+              >
+                Remove
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
     </div>
   );

@@ -539,4 +539,34 @@ describe('ProfilesPage config tiles (attach/detach)', () => {
       'config only — no metadata stream',
     );
   });
+
+  it('gates video encoder removal behind a confirmation', async () => {
+    vi.mocked(getProfiles).mockResolvedValue([
+      {
+        token: 'ProfileEnc',
+        name: 'Enc',
+        fixed: false,
+        videoEncoderConfiguration: {
+          token: 'VideoEncoderConfig_0',
+          name: 'H264',
+          encoding: 'H264',
+        },
+      } as MediaProfile,
+    ]);
+    vi.mocked(removeConfiguration).mockResolvedValue(undefined);
+
+    const user = userEvent.setup();
+    await expandProfileCard(user, 'ProfileEnc');
+
+    // Clicking Remove opens the confirmation; the service is not called yet.
+    await user.click(await screen.findByTestId('video-encoder-config-ProfileEnc-remove-button'));
+    expect(await screen.findByTestId('remove-config-dialog')).toHaveTextContent('no stream');
+    expect(removeConfiguration).not.toHaveBeenCalled();
+
+    // Confirming fires the remove.
+    await user.click(screen.getByTestId('remove-config-dialog-confirm'));
+    await waitFor(() =>
+      expect(removeConfiguration).toHaveBeenCalledWith('ProfileEnc', 'VideoEncoder'),
+    );
+  });
 });
