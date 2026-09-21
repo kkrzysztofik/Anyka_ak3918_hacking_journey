@@ -14,14 +14,15 @@ use parking_lot::RwLock;
 
 use crate::config::profiles::{
     ProfilesFile, StoredAudioEncoderConfig, StoredAudioSource, StoredAudioSourceConfig,
-    StoredProfile, StoredVideoEncoderConfig, StoredVideoSource, StoredVideoSourceConfig,
+    StoredMetadataConfig, StoredProfile, StoredVideoEncoderConfig, StoredVideoSource,
+    StoredVideoSourceConfig,
 };
 use crate::config::{ConfigRuntime, PersistenceHandle, ProfileStorage};
 use crate::onvif::error::{OnvifError, OnvifResult};
 use crate::onvif::types::common::{
     AudioEncoderConfiguration, AudioSource, AudioSourceConfiguration, IntRange, IntRectangle,
-    MulticastConfiguration, Name, PTZConfiguration, Profile, ReferenceToken,
-    VideoEncoderConfiguration, VideoRateControl, VideoResolution, VideoSource,
+    MetadataConfiguration, MulticastConfiguration, Name, PTZConfiguration, PTZFilter, Profile,
+    ReferenceToken, VideoEncoderConfiguration, VideoRateControl, VideoResolution, VideoSource,
     VideoSourceConfiguration,
 };
 use crate::onvif::types::media::{
@@ -36,8 +37,8 @@ use super::faults::{
 };
 use super::types::{
     AUDIO_ENCODER_CONFIG_PREFIX, AUDIO_SOURCE_CONFIG_PREFIX, DEFAULT_AUDIO_SOURCE_TOKEN,
-    DEFAULT_VIDEO_SOURCE_TOKEN, MAX_PROFILES, PROFILE_TOKEN_PREFIX, VIDEO_ENCODER_CONFIG_PREFIX,
-    VIDEO_SOURCE_CONFIG_PREFIX,
+    DEFAULT_VIDEO_SOURCE_TOKEN, METADATA_CONFIG_PREFIX, MAX_PROFILES, PROFILE_TOKEN_PREFIX,
+    VIDEO_ENCODER_CONFIG_PREFIX, VIDEO_SOURCE_CONFIG_PREFIX,
 };
 
 /// Profile Manager for managing media profiles.
@@ -58,6 +59,8 @@ pub struct ProfileManager {
     audio_source_configs: RwLock<HashMap<ReferenceToken, AudioSourceConfiguration>>,
     /// Audio encoder configurations.
     audio_encoder_configs: RwLock<HashMap<ReferenceToken, AudioEncoderConfiguration>>,
+    /// Metadata configurations.
+    metadata_configs: RwLock<HashMap<ReferenceToken, MetadataConfiguration>>,
     /// Profile counter for generating unique tokens.
     profile_counter: AtomicU32,
     /// Maximum sensor resolution for profile validation.
@@ -178,6 +181,7 @@ impl ProfileManager {
             video_encoder_configs: RwLock::new(HashMap::new()),
             audio_source_configs: RwLock::new(HashMap::new()),
             audio_encoder_configs: RwLock::new(HashMap::new()),
+            metadata_configs: RwLock::new(HashMap::new()),
             profile_counter: AtomicU32::new(0),
             max_sensor_resolution,
             config,
@@ -208,6 +212,10 @@ impl ProfileManager {
         self.audio_source_configs.write().insert(
             format!("{}0", AUDIO_SOURCE_CONFIG_PREFIX),
             default_sources.audio_source_config,
+        );
+        self.metadata_configs.write().insert(
+            format!("{}0", METADATA_CONFIG_PREFIX),
+            defaults::create_default_metadata_configuration(),
         );
 
         // Initialize profiles from configuration (stream_profile_1..4 always exist with defaults).
@@ -993,6 +1001,83 @@ impl ProfileManager {
         Ok(())
     }
 
+    // ========================================================================
+    // Metadata Configuration Operations
+    // ========================================================================
+
+    /// Get all metadata configurations.
+    pub fn get_metadata_configurations(&self) -> Vec<MetadataConfiguration> {
+        self.metadata_configs.read().values().cloned().collect()
+    }
+
+    /// Get a metadata configuration by token.
+    pub fn get_metadata_configuration(
+        &self,
+        token: &ReferenceToken,
+    ) -> OnvifResult<MetadataConfiguration> {
+        self.metadata_configs
+            .read()
+            .get(token)
+            .cloned()
+            .ok_or_else(|| no_config_error(token))
+    }
+
+    /// Replace a metadata configuration.
+    pub fn set_metadata_configuration(&self, config: MetadataConfiguration) -> OnvifResult<()> {
+        {
+            let mut configs = self.metadata_configs.write();
+            if !configs.contains_key(&config.token) {
+                return Err(no_config_error(&config.token));
+            }
+            configs.insert(config.token.clone(), config);
+        }
+        self.persist_all();
+        Ok(())
+    }
+
+    /// Attach a metadata configuration to a profile.
+    pub fn add_metadata_configuration(
+        &self,
+        profile_token: &ReferenceToken,
+        config_token: &ReferenceToken,
+    ) -> OnvifResult<()> {
+        let config = self.get_metadata_configuration(config_token)?;
+        {
+            let mut profiles = self.profiles.write();
+            let profile = profiles
+                .get_mut(profile_token)
+                .ok_or_else(|| no_profile_error(profile_token))?;
+            profile.metadata_configuration = Some(config);
+        }
+        self.persist_all();
+        Ok(())
+    }
+
+    /// Remove the metadata configuration from a profile.
+    pub fn remove_metadata_configuration(
+        &self,
+        profile_token: &ReferenceToken,
+    ) -> OnvifResult<()> {
+        {
+            let mut profiles = self.profiles.write();
+            let profile = profiles
+                .get_mut(profile_token)
+                .ok_or_else(|| no_profile_error(profile_token))?;
+            profile.metadata_configuration = None;
+        }
+        self.persist_all();
+        Ok(())
+    }
+
+    /// Get compatible metadata configurations for a profile.
+    pub fn get_compatible_metadata_configurations(
+        &self,
+        _profile_token: &ReferenceToken,
+    ) -> Vec<MetadataConfiguration> {
+        // All metadata configurations are compatible.
+        self.get_metadata_configurations()
+    }
+
     /// Persist the current profile state to storage if available.
     ///
     /// Snapshots the in-memory state into `profile_storage` (cheap, under lock)
@@ -1040,6 +1125,7 @@ impl ProfileManager {
         let video_encoder_configs = self.video_encoder_configs.read();
         let audio_source_configs = self.audio_source_configs.read();
         let audio_encoder_configs = self.audio_encoder_configs.read();
+        let metadata_configs = self.metadata_configs.read();
 
         ProfilesFile {
             profiles: profiles.values().map(Self::profile_to_stored).collect(),
@@ -1067,7 +1153,7 @@ impl ProfileManager {
                 .values()
                 .map(Self::audio_encoder_config_to_stored)
                 .collect(),
-            metadata_configs: Vec::new(),
+            metadata_configs: metadata_configs.values().map(Self::metadata_to_stored).collect(),
         }
     }
 
@@ -1407,6 +1493,54 @@ impl ProfileManager {
         })
     }
 
+    fn stored_to_metadata_config(s: &StoredMetadataConfig) -> MetadataConfiguration {
+        MetadataConfiguration {
+            token: s.token.clone(),
+            name: s.name.clone(),
+            use_count: s.use_count as i32,
+            ptz_status: Some(PTZFilter {
+                status: s.ptz_status,
+                position: s.ptz_position,
+            }),
+            analytics: Some(s.analytics),
+            multicast: Some(MulticastConfiguration {
+                address: crate::onvif::types::common::IpAddress {
+                    address_type: crate::onvif::types::common::IpType::IPv4,
+                    ipv4_address: Some("0.0.0.0".to_string()),
+                    ipv6_address: None,
+                },
+                port: 0,
+                ttl: 0,
+                auto_start: false,
+            }),
+            session_timeout: s
+                .session_timeout
+                .clone()
+                .unwrap_or_else(|| "PT60S".to_string()),
+            extension: None,
+        }
+    }
+
+    fn metadata_to_stored(config: &MetadataConfiguration) -> StoredMetadataConfig {
+        StoredMetadataConfig {
+            token: config.token.clone(),
+            name: config.name.clone(),
+            use_count: config.use_count as u32,
+            ptz_status: config
+                .ptz_status
+                .as_ref()
+                .map(|f| f.status)
+                .unwrap_or(false),
+            ptz_position: config
+                .ptz_status
+                .as_ref()
+                .map(|f| f.position)
+                .unwrap_or(false),
+            analytics: config.analytics.unwrap_or(false),
+            session_timeout: Some(config.session_timeout.clone()),
+        }
+    }
+
     fn stored_to_profile(&self, stored: &StoredProfile, file: &ProfilesFile) -> Option<Profile> {
         let video_source_configuration = stored.video_source_config.as_ref().and_then(|token| {
             file.video_source_configs
@@ -1452,6 +1586,13 @@ impl ProfileManager {
             None
         };
 
+        let metadata_configuration = stored.metadata_config.as_ref().and_then(|token| {
+            file.metadata_configs
+                .iter()
+                .find(|c| c.token == *token)
+                .map(Self::stored_to_metadata_config)
+        });
+
         Some(Profile {
             token: stored.token.clone(),
             fixed: Some(stored.fixed),
@@ -1461,7 +1602,7 @@ impl ProfileManager {
             video_encoder_configuration,
             audio_encoder_configuration,
             ptz_configuration,
-            metadata_configuration: None,
+            metadata_configuration,
             extension: None,
         })
     }
@@ -1475,6 +1616,7 @@ impl ProfileManager {
         self.video_encoder_configs.write().clear();
         self.audio_source_configs.write().clear();
         self.audio_encoder_configs.write().clear();
+        self.metadata_configs.write().clear();
     }
 
     // ========================================================================
@@ -1547,6 +1689,31 @@ mod tests {
         let manager = ProfileManager::new();
         let profiles = manager.get_profiles();
         assert_eq!(profiles.len(), 2);
+    }
+
+    #[test]
+    fn metadata_configuration_is_available_and_attachable() {
+        let manager = ProfileManager::new();
+
+        let configs = manager.get_metadata_configurations();
+        assert_eq!(configs.len(), 1, "expected exactly one default metadata config");
+
+        let token = configs[0].token.clone();
+        manager
+            .add_metadata_configuration(&"Profile_MainStream".to_string(), &token)
+            .expect("attach should succeed");
+
+        let profile = manager.get_profile(&"Profile_MainStream".to_string()).unwrap();
+        assert_eq!(
+            profile.metadata_configuration.as_ref().map(|c| c.token.clone()),
+            Some(token)
+        );
+
+        manager
+            .remove_metadata_configuration(&"Profile_MainStream".to_string())
+            .expect("detach should succeed");
+        let profile = manager.get_profile(&"Profile_MainStream".to_string()).unwrap();
+        assert!(profile.metadata_configuration.is_none());
     }
 
     #[test]
