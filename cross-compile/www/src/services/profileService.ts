@@ -402,6 +402,114 @@ export async function setVideoSourceConfiguration(
   await soapRequest(ENDPOINTS.media, body, 'SetVideoSourceConfigurationResponse');
 }
 
+// ---------------------------------------------------------------------------
+// Attach / detach / compatible-config operations for the six profile
+// configuration families. These map onto the ONVIF Media profile operations
+// (AddXConfiguration, RemoveXConfiguration, GetCompatibleXConfigurations). The
+// device has one instance of each kind; the picker lists whatever it advertises
+// as compatible and attaching is a profile-field update.
+// ---------------------------------------------------------------------------
+
+export type ConfigurationReference = { '@_ref': string };
+
+async function addConfiguration(
+  profileToken: string,
+  configType: string,
+  configToken: string,
+): Promise<void> {
+  const body = `<trt:Add${configType}Configuration>
+    <trt:ProfileToken>${escapeXml(profileToken)}</trt:ProfileToken>
+    <trt:${configType}Configuration ref="${escapeXml(configToken)}" />
+  </trt:Add${configType}Configuration>`;
+  await soapRequest(ENDPOINTS.media, body, `Add${configType}ConfigurationResponse`);
+}
+
+async function removeConfiguration(profileToken: string, configType: string): Promise<void> {
+  const body = `<trt:Remove${configType}Configuration>
+    <trt:ProfileToken>${escapeXml(profileToken)}</trt:ProfileToken>
+  </trt:Remove${configType}Configuration>`;
+  await soapRequest(ENDPOINTS.media, body, `Remove${configType}ConfigurationResponse`);
+}
+
+async function getCompatibleConfigurations(
+  profileToken: string,
+  configType: string,
+): Promise<string[]> {
+  const body = `<trt:GetCompatible${configType}Configurations>
+    <trt:ProfileToken>${escapeXml(profileToken)}</trt:ProfileToken>
+  </trt:GetCompatible${configType}Configurations>`;
+  const data = await soapRequest<Record<string, unknown>>(
+    ENDPOINTS.media,
+    body,
+    `GetCompatible${configType}ConfigurationsResponse`,
+  );
+  const refs = data?.[`${configType}Configurations`] as
+    Array<ConfigurationReference> | ConfigurationReference | undefined;
+  if (!refs) return [];
+  const list = Array.isArray(refs) ? refs : [refs];
+  return list.map((r) => safeString(r['@_ref'], ''));
+}
+
+export function addVideoSourceConfiguration(profileToken: string, configToken: string) {
+  return addConfiguration(profileToken, 'VideoSource', configToken);
+}
+export function removeVideoSourceConfiguration(profileToken: string) {
+  return removeConfiguration(profileToken, 'VideoSource');
+}
+export function getCompatibleVideoSourceConfigurations(profileToken: string) {
+  return getCompatibleConfigurations(profileToken, 'VideoSource');
+}
+
+export function addVideoEncoderConfiguration(profileToken: string, configToken: string) {
+  return addConfiguration(profileToken, 'VideoEncoder', configToken);
+}
+export function removeVideoEncoderConfiguration(profileToken: string) {
+  return removeConfiguration(profileToken, 'VideoEncoder');
+}
+export function getCompatibleVideoEncoderConfigurations(profileToken: string) {
+  return getCompatibleConfigurations(profileToken, 'VideoEncoder');
+}
+
+export function addAudioSourceConfiguration(profileToken: string, configToken: string) {
+  return addConfiguration(profileToken, 'AudioSource', configToken);
+}
+export function removeAudioSourceConfiguration(profileToken: string) {
+  return removeConfiguration(profileToken, 'AudioSource');
+}
+export function getCompatibleAudioSourceConfigurations(profileToken: string) {
+  return getCompatibleConfigurations(profileToken, 'AudioSource');
+}
+
+export function addAudioEncoderConfiguration(profileToken: string, configToken: string) {
+  return addConfiguration(profileToken, 'AudioEncoder', configToken);
+}
+export function removeAudioEncoderConfiguration(profileToken: string) {
+  return removeConfiguration(profileToken, 'AudioEncoder');
+}
+export function getCompatibleAudioEncoderConfigurations(profileToken: string) {
+  return getCompatibleConfigurations(profileToken, 'AudioEncoder');
+}
+
+export function addPTZConfiguration(profileToken: string, configToken: string) {
+  return addConfiguration(profileToken, 'PTZ', configToken);
+}
+export function removePTZConfiguration(profileToken: string) {
+  return removeConfiguration(profileToken, 'PTZ');
+}
+export function getCompatiblePTZConfigurations(profileToken: string) {
+  return getCompatibleConfigurations(profileToken, 'PTZ');
+}
+
+export function addMetadataConfiguration(profileToken: string, configToken: string) {
+  return addConfiguration(profileToken, 'Metadata', configToken);
+}
+export function removeMetadataConfiguration(profileToken: string) {
+  return removeConfiguration(profileToken, 'Metadata');
+}
+export function getCompatibleMetadataConfigurations(profileToken: string) {
+  return getCompatibleConfigurations(profileToken, 'Metadata');
+}
+
 /**
  * Helper function to parse H264 options
  */

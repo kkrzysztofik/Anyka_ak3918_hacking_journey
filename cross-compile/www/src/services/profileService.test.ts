@@ -5,12 +5,30 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { apiClient } from '@/services/api';
 import {
+  addAudioEncoderConfiguration,
+  addAudioSourceConfiguration,
+  addMetadataConfiguration,
+  addPTZConfiguration,
+  addVideoEncoderConfiguration,
+  addVideoSourceConfiguration,
   createProfile,
   deleteProfile,
+  getCompatibleAudioEncoderConfigurations,
+  getCompatibleAudioSourceConfigurations,
+  getCompatibleMetadataConfigurations,
+  getCompatiblePTZConfigurations,
+  getCompatibleVideoEncoderConfigurations,
+  getCompatibleVideoSourceConfigurations,
   getProfiles,
   getVideoEncoderConfiguration,
   getVideoEncoderConfigurationOptions,
   getVideoSourceConfiguration,
+  removeAudioEncoderConfiguration,
+  removeAudioSourceConfiguration,
+  removeMetadataConfiguration,
+  removePTZConfiguration,
+  removeVideoEncoderConfiguration,
+  removeVideoSourceConfiguration,
   setVideoEncoderConfiguration,
   setVideoSourceConfiguration,
 } from '@/services/profileService';
@@ -25,6 +43,92 @@ vi.mock('@/services/api', () => ({
     media: '/onvif/media_service',
   },
 }));
+
+describe('profile configuration attach/detach/compatible', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const families = [
+    {
+      type: 'VideoSource',
+      add: addVideoSourceConfiguration,
+      remove: removeVideoSourceConfiguration,
+      getCompatible: getCompatibleVideoSourceConfigurations,
+    },
+    {
+      type: 'VideoEncoder',
+      add: addVideoEncoderConfiguration,
+      remove: removeVideoEncoderConfiguration,
+      getCompatible: getCompatibleVideoEncoderConfigurations,
+    },
+    {
+      type: 'AudioSource',
+      add: addAudioSourceConfiguration,
+      remove: removeAudioSourceConfiguration,
+      getCompatible: getCompatibleAudioSourceConfigurations,
+    },
+    {
+      type: 'AudioEncoder',
+      add: addAudioEncoderConfiguration,
+      remove: removeAudioEncoderConfiguration,
+      getCompatible: getCompatibleAudioEncoderConfigurations,
+    },
+    {
+      type: 'PTZ',
+      add: addPTZConfiguration,
+      remove: removePTZConfiguration,
+      getCompatible: getCompatiblePTZConfigurations,
+    },
+    {
+      type: 'Metadata',
+      add: addMetadataConfiguration,
+      remove: removeMetadataConfiguration,
+      getCompatible: getCompatibleMetadataConfigurations,
+    },
+  ];
+
+  for (const family of families) {
+    describe(family.type, () => {
+      it(`add emits Add${family.type}Configuration with the profile and config refs`, async () => {
+        vi.mocked(apiClient.post).mockResolvedValueOnce(
+          createMockSOAPResponse(`<Add${family.type}ConfigurationResponse />`),
+        );
+        await family.add('P_1', 'C_9');
+        const body = vi.mocked(apiClient.post).mock.calls[0][1] as string;
+        expect(body).toContain(`<trt:Add${family.type}Configuration>`);
+        expect(body).toContain('<trt:ProfileToken>P_1</trt:ProfileToken>');
+        expect(body).toContain(`<trt:${family.type}Configuration ref="C_9" />`);
+      });
+
+      it(`remove emits Remove${family.type}Configuration with the profile ref`, async () => {
+        vi.mocked(apiClient.post).mockResolvedValueOnce(
+          createMockSOAPResponse(`<Remove${family.type}ConfigurationResponse />`),
+        );
+        await family.remove('P_1');
+        const body = vi.mocked(apiClient.post).mock.calls[0][1] as string;
+        expect(body).toContain(`<trt:Remove${family.type}Configuration>`);
+        expect(body).toContain('<trt:ProfileToken>P_1</trt:ProfileToken>');
+      });
+
+      it(`getCompatible emits the request and parses the ref tokens`, async () => {
+        vi.mocked(apiClient.post).mockResolvedValueOnce(
+          createMockSOAPResponse(
+            `<GetCompatible${family.type}ConfigurationsResponse>` +
+              `<${family.type}Configurations ref="C_1" />` +
+              `<${family.type}Configurations ref="C_2" />` +
+              `</GetCompatible${family.type}ConfigurationsResponse>`,
+          ),
+        );
+        const tokens = await family.getCompatible('P_1');
+        const body = vi.mocked(apiClient.post).mock.calls[0][1] as string;
+        expect(body).toContain(`<trt:GetCompatible${family.type}Configurations>`);
+        expect(body).toContain('<trt:ProfileToken>P_1</trt:ProfileToken>');
+        expect(tokens).toEqual(['C_1', 'C_2']);
+      });
+    });
+  }
+});
 
 describe('profileService', () => {
   beforeEach(() => {
