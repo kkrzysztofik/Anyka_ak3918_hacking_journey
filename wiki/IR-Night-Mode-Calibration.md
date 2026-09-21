@@ -123,6 +123,14 @@ the half/full-power bypass and both lines are infrared. On a stock
 `RZ-XHR(08SG)-C4` that same line is the visible white floodlight: setting this
 to `true` there turns a bright visible lamp on every single night.
 
+The line latches. Nothing drives `WHITE_LED` at startup and the mirror only runs
+on a transition, so setting this back to `false` does **not** turn an already-lit
+lamp off — not even across a restart. Clear it by hand:
+
+```sh
+echo 0 > /sys/user-gpio/WHITE_LED
+```
+
 Restart `onvif-rust` after changing config (`killall onvif-rust.bin`;
 `anyka-init` respawns it).
 

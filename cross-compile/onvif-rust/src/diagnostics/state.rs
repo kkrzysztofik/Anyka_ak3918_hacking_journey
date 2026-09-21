@@ -585,6 +585,7 @@ mod tests {
             ircut_a: Some(false),
             ircut_b: Some(true),
             white_led: None,
+            white_led_is_ir: false,
             supported: crate::platform::VisionSupported {
                 ir_led: true,
                 ircut: true,

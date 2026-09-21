@@ -537,6 +537,11 @@ pub struct VisionDiagnostics {
     pub ircut_b: Option<bool>,
     /// White LED state (`true` = on), or `None` if undriven.
     pub white_led: Option<bool>,
+    /// `true` when this camera is configured as an all-infrared ring, so every
+    /// day/night transition mirrors `IR_LED` onto `WHITE_LED`. Reported so
+    /// "is the mirror actually active" is answerable from outside the process
+    /// — the shipped log level hides anything below `error`.
+    pub white_led_is_ir: bool,
     /// Which vision-switching components are present on this camera model.
     pub supported: VisionSupported,
 }
