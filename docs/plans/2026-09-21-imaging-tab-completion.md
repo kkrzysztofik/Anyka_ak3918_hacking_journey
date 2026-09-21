@@ -695,7 +695,18 @@ Then `$CARGO test`, `clippy`, `fmt`, commit.
 
 ## Task 9: White balance hardware gate + UI
 
-**Step 1:** On `.198`, set MANUAL with a strongly red-biased `cr_gain`, grab a frame, confirm the colour cast is visible and in the expected direction. Then AUTO, confirm it corrects. A gain that changes nothing means the mapping or the units are wrong — stop and measure rather than shipping it.
+**GATE RESULT (2026-09-21, firmware `0152b67c`, camera `.198`): FAILED — no visible effect; investigation done, control marked unavailable.**
+
+Measurements (`scripts/debugging/wb_gate.sh`): MANUAL with cr=3.0/cb=1.0 and cr=4.0/cb=1.0 left the frame's mean U/V identical to the AUTO baseline (U≈93, V≈54 both before and after; a real effect moves one of them by tens of counts in either units scale — 8.8 fixed-point or raw multiplier). The plumbing is verifiably live: `SetImagingSettings` is SOAP-OK, `GetImagingSettings` reads the gains back from the driver, and the daemon's `AK_ISP_get_mwb_attr` ioctl returns exactly the bytes written — so the values land in the kernel ISP instance's `mwb_para`/`wb_type_para` and are never applied to the pipeline.
+
+Investigation trail (all source in `cross-compile/anyka_reference/`):
+1. `ak_vpss_isp_set_wb_type/set_mwb_attr` (libplat_vpss) are pure passthroughs to the same `AK_ISP_*` SDK ioctls — switching layers changes nothing (Task 7's VPSS-preference deviation was therefore moot).
+2. The SDK is a real kernel ioctl on `/dev/isp_char` (`component/ispsdk_lib/ak_isp_sdk.c`); the 3A manual branch (`if (WB_OPS_TYPE_MANU == isp->wb_type_para.wb_type)` in `component/ispdrv_lib/ak39_isp2_3a.c:1353`, GAIN_SHIFT=8) lives in the kernel ISP module (`[aec_*]` kernel threads on the camera), so write and 3A share one `isp` instance.
+3. The camera's user-space `libplat_drv.so` is a 26 KB slim build containing none of the 3A code; the vendor's own aipc never touches white balance at all; the AWB attr struct has no auto/manual mode field and the ISP conf has no WB entry. The shipped kernel 3.4.35 is not built from the available UVC source tree (no `ISP:` printks in its ring buffer), so whether its 3A even contains the manual branch is unresolvable from the sources we have.
+
+Decision per the gate's own rule and the plan's fallback ("mark it unsupported, document it, never fake it"): the ONVIF plumbing from Tasks 7–8 **stays** (it is an honest, spec-conformant surface: Set persists into the driver state the vendor exposes, Get reads it back, no in-memory echo), but the Imaging tab keeps its **"Unavailable" stub card** (disabled, no fake controls). If a future kernel/firmware applies the manual branch, the same SetImagingSettings call will start working with no plumbing change.
+
+**Step 1 (gate, done — see above):** On `.198`, set MANUAL with a strongly red-biased `cr_gain`, grab a frame, confirm the colour cast is visible and in the expected direction. Then AUTO, confirm it corrects. A gain that changes nothing means the mapping or the units are wrong — stop and measure rather than shipping it.
 
 **Step 2:** In `cross-compile/www/src/pages/settings/ImagingPage.tsx`, replace the stubbed White Balance card (`:423-450`) with a real mode select plus two gain sliders shown only in MANUAL. Add `getWhiteBalance`-style parsing to `cross-compile/www/src/services/imagingService.ts` following the existing `parseWideDynamicRangeSettings` pattern.
 
