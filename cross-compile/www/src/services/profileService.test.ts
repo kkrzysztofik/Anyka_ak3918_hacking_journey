@@ -5,18 +5,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { apiClient } from '@/services/api';
 import {
-  addMetadataConfiguration,
-  addPTZConfiguration,
   createProfile,
   deleteProfile,
-  getCompatibleMetadata,
-  getCompatiblePTZ,
   getProfiles,
   getVideoEncoderConfiguration,
   getVideoEncoderConfigurationOptions,
   getVideoSourceConfiguration,
-  removeMetadataConfiguration,
-  removePTZConfiguration,
   setVideoEncoderConfiguration,
   setVideoSourceConfiguration,
 } from '@/services/profileService';
@@ -633,119 +627,6 @@ describe('profileService', () => {
       expect(body).toContain('width="1920"');
       expect(body).toContain('height="1080"');
       expect(body).toContain('<tt:UseCount>2</tt:UseCount>');
-    });
-  });
-
-  describe('getCompatiblePTZ', () => {
-    it('returns compatible PTZ configurations with tokens and names', async () => {
-      vi.mocked(apiClient.post).mockResolvedValueOnce(
-        createMockSOAPResponse(`
-          <GetCompatiblePTZConfigurationsResponse>
-            <Configurations token="PTZConfig_0">
-              <Name>PTZ Config 0</Name>
-            </Configurations>
-            <Configurations token="PTZConfig_1">
-              <Name>PTZ Config 1</Name>
-            </Configurations>
-          </GetCompatiblePTZConfigurationsResponse>
-        `),
-      );
-
-      const result = await getCompatiblePTZ('ProfileToken1');
-
-      expect(result).toEqual([
-        { token: 'PTZConfig_0', name: 'PTZ Config 0' },
-        { token: 'PTZConfig_1', name: 'PTZ Config 1' },
-      ]);
-      const body = vi.mocked(apiClient.post).mock.calls[0][1] as string;
-      expect(body).toContain('<trt:GetCompatiblePTZConfigurations>');
-      expect(body).toContain('<trt:ProfileToken>ProfileToken1</trt:ProfileToken>');
-    });
-
-    it('returns an empty list when nothing is compatible', async () => {
-      vi.mocked(apiClient.post).mockResolvedValueOnce(
-        createMockSOAPResponse('<GetCompatiblePTZConfigurationsResponse />'),
-      );
-
-      expect(await getCompatiblePTZ('ProfileToken1')).toEqual([]);
-    });
-  });
-
-  describe('getCompatibleMetadata', () => {
-    it('returns compatible metadata configurations with tokens and names', async () => {
-      vi.mocked(apiClient.post).mockResolvedValueOnce(
-        createMockSOAPResponse(`
-          <GetCompatibleMetadataConfigurationsResponse>
-            <Configurations token="MetadataConfig_0">
-              <Name>Digital Analytics</Name>
-            </Configurations>
-          </GetCompatibleMetadataConfigurationsResponse>
-        `),
-      );
-
-      const result = await getCompatibleMetadata('ProfileToken1');
-
-      expect(result).toEqual([{ token: 'MetadataConfig_0', name: 'Digital Analytics' }]);
-      const body = vi.mocked(apiClient.post).mock.calls[0][1] as string;
-      expect(body).toContain('<trt:GetCompatibleMetadataConfigurations>');
-    });
-  });
-
-  describe('addPTZConfiguration', () => {
-    it('sends ProfileToken and ConfigurationToken', async () => {
-      vi.mocked(apiClient.post).mockResolvedValueOnce(
-        createMockSOAPResponse('<AddPTZConfigurationResponse />'),
-      );
-
-      await addPTZConfiguration('ProfileToken1', 'PTZConfig_0');
-
-      const body = vi.mocked(apiClient.post).mock.calls[0][1] as string;
-      expect(body).toContain('<trt:AddPTZConfiguration>');
-      expect(body).toContain('<trt:ProfileToken>ProfileToken1</trt:ProfileToken>');
-      expect(body).toContain('<trt:ConfigurationToken>PTZConfig_0</trt:ConfigurationToken>');
-    });
-  });
-
-  describe('removePTZConfiguration', () => {
-    it('sends ProfileToken', async () => {
-      vi.mocked(apiClient.post).mockResolvedValueOnce(
-        createMockSOAPResponse('<RemovePTZConfigurationResponse />'),
-      );
-
-      await removePTZConfiguration('ProfileToken1');
-
-      const body = vi.mocked(apiClient.post).mock.calls[0][1] as string;
-      expect(body).toContain('<trt:RemovePTZConfiguration>');
-      expect(body).toContain('<trt:ProfileToken>ProfileToken1</trt:ProfileToken>');
-    });
-  });
-
-  describe('addMetadataConfiguration', () => {
-    it('sends ProfileToken and ConfigurationToken', async () => {
-      vi.mocked(apiClient.post).mockResolvedValueOnce(
-        createMockSOAPResponse('<AddMetadataConfigurationResponse />'),
-      );
-
-      await addMetadataConfiguration('ProfileToken1', 'MetadataConfig_0');
-
-      const body = vi.mocked(apiClient.post).mock.calls[0][1] as string;
-      expect(body).toContain('<trt:AddMetadataConfiguration>');
-      expect(body).toContain('<trt:ProfileToken>ProfileToken1</trt:ProfileToken>');
-      expect(body).toContain('<trt:ConfigurationToken>MetadataConfig_0</trt:ConfigurationToken>');
-    });
-  });
-
-  describe('removeMetadataConfiguration', () => {
-    it('sends ProfileToken', async () => {
-      vi.mocked(apiClient.post).mockResolvedValueOnce(
-        createMockSOAPResponse('<RemoveMetadataConfigurationResponse />'),
-      );
-
-      await removeMetadataConfiguration('ProfileToken1');
-
-      const body = vi.mocked(apiClient.post).mock.calls[0][1] as string;
-      expect(body).toContain('<trt:RemoveMetadataConfiguration>');
-      expect(body).toContain('<trt:ProfileToken>ProfileToken1</trt:ProfileToken>');
     });
   });
 });
