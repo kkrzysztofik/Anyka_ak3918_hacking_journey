@@ -255,7 +255,11 @@ mod tests {
         assert!(result.is_ok());
         let response = result.unwrap();
         assert!(response.media_uri.uri.contains("rtsp://"));
-        assert!(response.media_uri.uri.ends_with("/main"), "got {}", response.media_uri.uri);
+        assert!(
+            response.media_uri.uri.ends_with("/main"),
+            "got {}",
+            response.media_uri.uri
+        );
     }
 
     #[test]
@@ -278,7 +282,11 @@ mod tests {
         );
         assert!(result.is_ok());
         let response = result.unwrap();
-        assert!(response.media_uri.uri.ends_with("/sub"), "got {}", response.media_uri.uri);
+        assert!(
+            response.media_uri.uri.ends_with("/sub"),
+            "got {}",
+            response.media_uri.uri
+        );
     }
 
     #[test]
