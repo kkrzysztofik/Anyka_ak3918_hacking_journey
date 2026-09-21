@@ -104,7 +104,9 @@ enum cmd_id {
     CMD_ISP_SET_WB_TYPE            = 112,
     CMD_ISP_SET_MWB_ATTR           = 113,
     CMD_ISP_GET_MWB_ATTR           = 114,
-    /* 115-117: hue, power_hz, style_id effects */
+    CMD_ISP_SET_HUE                = 115,
+    CMD_ISP_SET_POWER_HZ           = 116,
+    CMD_ISP_SET_STYLE_ID           = 117,
     CMD_ISP_GET_BLC                = 118,
     CMD_ISP_AE_SET_ATTR            = 119, /* [i32 a_gain_max][i32 exp_time_max], <=0 = leave alone (RMW) */
     CMD_ISP_AE_GET_RUN_INFO        = 120, /* -> 36-byte vpss_isp_ae_run_info */

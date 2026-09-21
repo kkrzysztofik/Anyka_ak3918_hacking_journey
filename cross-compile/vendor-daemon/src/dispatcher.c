@@ -352,6 +352,18 @@ int process_request(int fd)
         ret = handle_isp_effect(fd, req_buf, req_len,
                                 VPSS_EFFECT_WDR, "set_wdr");
         break;
+    case CMD_ISP_SET_HUE:
+        ret = handle_isp_effect(fd, req_buf, req_len,
+                                VPSS_EFFECT_HUE, "set_hue");
+        break;
+    case CMD_ISP_SET_POWER_HZ:
+        ret = handle_isp_effect(fd, req_buf, req_len,
+                                VPSS_POWER_HZ, "set_power_hz");
+        break;
+    case CMD_ISP_SET_STYLE_ID:
+        ret = handle_isp_effect(fd, req_buf, req_len,
+                                VPSS_STYLE_ID, "set_style_id");
+        break;
     case CMD_ISP_GET_AE_LUMA:
         ret = handle_isp_get_ae_luma(fd, req_buf, req_len);
         break;
