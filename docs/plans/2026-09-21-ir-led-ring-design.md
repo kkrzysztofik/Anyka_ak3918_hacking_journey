@@ -142,7 +142,7 @@ follow-up.
 | Ref | Part | Note |
 |---|---|---|
 | U1 | Boost LED driver, SOT-23-6, Vout ≥ 20 V, **OVP required** | TPS61165 or HT7938A (JLCPCB C259955); datasheet verification outstanding |
-| L1 | 22–33 µH shielded, Isat ≥ 600 mA | **height-critical** |
+| L1 | 33 µH shielded, Isat ≥ 600 mA | back side; height against the body, not the dome |
 | D1 | Schottky 30 V 0.5 A, SOD-123 | |
 | C1 | 10 µF 25 V 0805 | input |
 | C3 | 100 nF 0402 | input bypass |
@@ -157,39 +157,74 @@ follow-up.
 | D2–D9 | 850 nm IR, 2835 or 3535 | package pending measurement 14 |
 | J1 | 4-pin header | stock footprint, `+ − IR HB` |
 
-Inductor sizing: `L = Vin·D / (f·ΔI)` = 5 × 0.69 / (1 MHz × 113 mA) ≈ 30 µH at
-30 % ripple on a 376 mA average input current.
-
-Total board dissipation ~1.9 W (1.6 W emitters, ~0.3 W converter) on aluminium
-core. Comfortable.
+Inductor sizing against the **measured** 5.3 V rail: `D = 1 − 5.3/16 = 0.67`,
+input current `16 × 0.1 / (0.85 × 5.3) = 355 mA`, `ΔI` at 30 % = 107 mA, so
+`L = Vin·D / (f·ΔI)` = 5.3 × 0.67 / (1 MHz × 107 mA) ≈ **33 µH**.
 
 ## Substrate and mechanical
 
-Single-layer aluminium MCPCB, top copper only, per the spec. Mechanical
-envelope matches the stock board exactly: outer profile with its locating
-notches, centre bore, both mounting holes, header footprint and cable exit, so
-the stock cable and dome assembly still fit.
+**Two-layer FR4, emitters on the front, converter cluster on the back.**
+Superseded the spec's single-layer aluminium MCPCB on 2026-09-22.
+
+The reason aluminium was specified — LED die temperature as the binding
+constraint — does not survive contact with the actual mechanics. The ring bolts
+to a plastic housing and sits in still air inside a dome, with no conduction
+path to any heatsink. The dominant thermal resistance is therefore
+**board-to-air**, roughly 40 K/W on a ~40 mm disc regardless of substrate. What
+an aluminium core actually buys is *spreading* — no hot spot under each die —
+not a lower total rise.
+
+Budget: 8 emitters × ~130 mW of heat (at ~30 % wall-plug efficiency on 180 mW
+electrical) + ~250 mW converter loss ≈ **1.25 W**, giving ~50 °C above internal
+ambient on either substrate. Note this is **3.5× the stock board's IR
+dissipation** — the stock ring runs 4 IR at 50 mA, about 0.36 W. This is a
+materially warmer board than the one it replaces.
+
+FR4 recovers most of the spreading with thermal vias under every emitter pad
+and copper pours on both layers, and buys something aluminium cannot have at
+any price: **a ground plane**. That retires risk 4 below.
+
+Two-sided is not a layout preference, it is forced: an aluminium MCPCB is
+copper / dielectric / solid aluminium, so its back *is* the metal core and
+cannot carry components at all. Choosing to populate the back is choosing FR4.
+
+Mechanical envelope matches the stock board exactly: outer profile with its
+locating notches, centre bore, both mounting holes, header footprint and cable
+exit, so the stock cable and dome assembly still fit.
+
+### The lens array
+
+The stock IR optics are a **separate clear plastic lens array** that sits over
+the board — not integrated dome emitters. The board itself carries eight flat
+SMD packages; the array provides domes over the four IR positions. It is a
+full-disc cover over the emitter ring.
+
+Two consequences: it defines the front-side keep-out (which is why the
+converter goes on the back regardless of how much height exists above the
+front), and it constrains emitter selection, since its domes must sit correctly
+over whatever package is chosen.
 
 ## Known risks
 
-1. **Height clearance.** The stock board is flat — emitters, resistors, one
-   SOT-23. This design needs a 22–33 µH inductor, 2–3 mm tall even in a small
-   shielded package. If the dome or lens shroud clears the ring by less than
-   ~3.5 mm there is nowhere to put a switching converter, and the design falls
-   back to a linear current sink or plain resistor ballast. **Measure before
-   anything else.**
-2. **Rail voltage.** 5 V is inferred from stock resistor values, never
-   measured. A 12 V result inverts the topology: a boost cannot produce 16 V
-   from 12 V for this string, and the design returns to a buck.
-3. **Rail current headroom.** 376 mA continuous at full power, versus a stock
+1. **Back-side clearance.** ~~Height above the front~~ — superseded
+   2026-09-22. The lens array covers the front, so the converter goes on the
+   back and the clearance that matters is between the board's back face and
+   whatever it mounts against. A 33 µH inductor is 2–3 mm tall even in a small
+   shielded package. Under ~3.5 mm and the design falls back to a linear
+   current sink or plain resistor ballast. **Still the first thing to measure.**
+2. ~~**Rail voltage.**~~ **RESOLVED 2026-09-22: 5.3 V measured at the header.**
+   The boost topology is confirmed. A 12 V result would have inverted it back
+   to a buck; it did not.
+3. **Rail current headroom.** 355 mA continuous at full power, versus a stock
    board that lit one 4-emitter channel at a time. Browning out that rail
    reboots the SoC.
-4. **Switching noise near the image sensor.** A single-layer MCPCB has no
-   ground plane, and the SW node swings 16 V at ~1 MHz a few centimetres from
-   the CMOS sensor. This risks banding in exactly the night frames the board
-   exists to improve. Mitigation is keeping the C1–U1–D1–C2 loop as one tight
-   cluster. A single converter is not automatically quieter than two — the
-   higher output voltage raises dV/dt even as the converter count drops.
+4. ~~**Switching noise near the image sensor.**~~ **Largely retired by the FR4
+   decision** — a two-layer board gives the SW node a return plane, which was
+   the missing mitigation. Residual: keep the C1–U1–D1–C2 loop as one tight
+   cluster on the back, and remember that a single converter is not
+   automatically quieter than two, since the higher output voltage raises dV/dt
+   even as the converter count drops. The converter now also sits on the
+   opposite face from the emitters, with the plane between it and the sensor.
 5. **Single string, single point of failure.** One open emitter kills all
    eight. U1's OVP must shut down cleanly rather than running the output away.
 6. **Driver enable semantics.** TPS61165's CTRL pin uses a one-wire dimming
@@ -201,10 +236,11 @@ the stock cable and dome assembly still fit.
 
 Electrical, camera running, board still connected:
 
-1. Header rail voltage, `+` to `−`, in day mode and in night mode with IR on.
-   Confirm the silkscreen pin order.
-2. Height clearance above the board to the nearest obstruction, and where the
-   tallest region is.
+1. ~~Header rail voltage~~ — **DONE 2026-09-22: 5.3 V.** Silkscreen pin order
+   `− + IR HB` confirmed from photos; verify against the cable before layout.
+2. **Back-side clearance** between the board's back face and whatever it mounts
+   against, and where the most generous region is. (Was "height above the
+   board" — the lens array makes the front unusable.)
 3. `IR` and `HB` logic levels when asserted — 3.3 V or 5 V. Drive from telnet
    via the `IR_LED` and `WHITE_LED` nodes.
 4. Stock board total current draw with the IR channel on.
@@ -225,7 +261,12 @@ Mechanical, board out, calipers:
 13. LED pad centres: radius from centre and angular position of all eight.
 14. Radial lobe width, bore edge to outer edge at an LED position — decides
     2835 versus 3535 (`SPEC.md` open item 4).
-15. Largest contiguous clear area for the converter cluster, with dimensions.
+15. Largest contiguous clear area **on the back** for the converter cluster,
+    with dimensions — noting where the mounting bosses and the cable land.
+16. The lens array: outer diameter, how it locates on the board, its internal
+    dome positions, and the standoff height between board face and dome. This
+    decides both the front keep-out and whether a 3535 emitter still sits
+    correctly under a dome sized for the stock package.
 
 ## Evaluation rig
 
@@ -245,7 +286,8 @@ committing R1's value.
 - U1 selected against its datasheet; R1 and L1 locked to concrete values.
 - Footprints: SOT-23-6, the chosen LED package, passives, the stock header.
 - `Edge.Cuts` outline from measurements 7–12.
-- Schematic, then layout.
-- JLCPCB aluminium MCPCB fab package and BOM with LCSC part numbers.
+- Schematic, then layout: emitters front, converter back, ground pour on both
+  layers, thermal vias under every emitter pad.
+- JLCPCB **two-layer FR4** fab package and BOM with LCSC part numbers.
 - `plan()` change in `onvif-rust` to drive `Node::WhiteLed` on the night
   transition.

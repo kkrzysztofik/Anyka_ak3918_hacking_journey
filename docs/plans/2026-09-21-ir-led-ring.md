@@ -51,11 +51,10 @@ Instrument:
 ## Electrical
 | # | Measurement | Value | Notes |
 |---|---|---|---|
-| 1 | Header rail, day mode | | V |
-| 1 | Header rail, night mode, IR on | | V |
-| 1 | Silkscreen pin order confirmed | | expected `+ − IR HB` |
-| 2 | Height clearance above board | | mm |
-| 2 | Location of tallest clear region | | |
+| 1 | Header rail | **5.3** | V — measured 2026-09-22, gate PASSED |
+| 1 | Silkscreen pin order | `- + IR HB` | read from photo; confirm against cable |
+| 2 | Back-side clearance | | mm — GATE, must be ≥3.5 |
+| 2 | Location of most generous back region | | |
 | 3 | `IR` line asserted | | V |
 | 3 | `HB` line asserted | | V |
 | 4 | Board current, IR channel on | | mA |
@@ -64,25 +63,25 @@ Instrument:
 | 6 | Striped component, covered | | Ω |
 ```
 
-**Step 2: Measure the rail (gate)**
+**Step 2: Measure the rail (gate) — DONE 2026-09-22, PASSED**
 
-Probe `+` to `−` at the header with the camera running, once in day mode and
-once in night mode with the IR on.
+Measured **5.3 V** at the header. The boost topology is confirmed; a 12 V
+result would have sent it back to a buck. L1 recomputed against 5.3 V:
+`D = 1 − 5.3/16 = 0.67`, input 355 mA, `ΔI` 107 mA, **L1 ≈ 33 µH**.
 
-- **5 V ± 10 %** → design proceeds as written.
-- **12 V** → **STOP.** A boost cannot make 16 V from 12 V for this string. The
-  topology returns to a buck and the design doc needs revising before any
-  further task. Report this and halt.
+Nothing further to do in this step.
 
-**Step 3: Measure height clearance (gate)**
+**Step 3: Measure BACK-side clearance (gate)**
 
-Measure from the board's top surface to the nearest obstruction — dome, lens
-shroud, whatever sits above it — and note where the most generous region is.
+Revised 2026-09-22. The front is covered by the stock lens array, so the
+converter lives on the back of a two-layer FR4 board. Measure from the board's
+**back** face to whatever it mounts against, and note where the most generous
+region is and where the mounting bosses and cable land.
 
 - **≥ 3.5 mm somewhere usable** → proceeds.
-- **< 3.5 mm everywhere** → **STOP.** There is nowhere to put a 22–33 µH
+- **< 3.5 mm everywhere** → **STOP.** There is nowhere to put a 33 µH
   inductor. The design falls back to option 3 (linear current sink) or option 4
-  (resistor ballast on aluminium) from the design doc. Report and halt.
+  (resistor ballast) from the design doc. Report and halt.
 
 **Step 4: Measure the GPIO logic levels**
 
@@ -440,32 +439,42 @@ rtk git commit -m "feat(ir): schematic for the boost driver, string and bypass"
 Routing is interactive work in pcbnew. These are the constraints it must
 satisfy, not a click-by-click script.
 
-**Step 1: Place the eight emitters**
+Substrate is **two-layer FR4**: emitters on `F.Cu`, converter on `B.Cu`.
+
+**Step 1: Place the eight emitters, front side**
 
 At measurement 13's radius and angles. These positions are fixed by the optics
-and the dome; everything else works around them.
+and the lens array; everything else works around them. Check every placement
+against measurement 16 — a pad that drifts puts its emitter off-axis under its
+dome.
 
-**Step 2: Place the converter cluster**
+**Step 2: Thermal vias under every emitter pad**
 
-Into the clear area from measurement 15. **C1 → U1 → D1 → C2 must form one
-tight loop** — that loop is the dominant EMI radiator, and on a single-layer
-aluminium board with no ground plane there is nothing to shield the sensor
-sitting centimetres away. This is design risk 4 and layout is the only place it
-gets mitigated.
+This is what replaces the aluminium core, and it is not optional. A grid of
+0.3 mm vias through each emitter's thermal pad into the back-side pour. The
+board dissipates ~1.25 W with no conduction path to any heatsink, which is
+**3.5× the stock board's IR dissipation** — the vias and the two pours are the
+entire thermal design.
 
-**Step 3: Size the copper**
+**Step 3: Place the converter cluster, back side**
 
-Single layer, top copper only. Widths from the currents:
+Into the clear back area from measurement 15. **C1 → U1 → D1 → C2 must form
+one tight loop.** Keep it on `B.Cu` over an unbroken ground pour — that plane
+is the mitigation that the single-layer design could not have, and it now also
+sits between the switcher and the sensor.
+
+**Step 4: Size the copper and pour both layers**
 
 | Net | Current | Minimum width |
 |---|---|---|
-| `VIN` from J1 | 376 mA | 0.5 mm |
+| `VIN` from J1 | 355 mA | 0.5 mm |
 | `SW` node | ~450 mA peak | 0.5 mm, kept short |
 | LED string | 100 mA | 0.3 mm |
 | Signal (`HB`, gate, base) | negligible | 0.2 mm |
 
-Widen beyond these where there is free area — copper is thermal relief on an
-MCPCB, which is the whole reason for the substrate.
+Ground pour on both layers, stitched. Do not let the pour under the converter
+be split by a signal trace — a slot in the return path under the `SW` node
+undoes the reason for choosing FR4.
 
 **Step 4: Run DRC**
 
@@ -475,9 +484,10 @@ kicad-cli pcb drc ir_design/kicad/ir-ring.kicad_pcb \
 echo "exit=$?"
 ```
 
-Expected: `exit=0`. Set the design rules to JLCPCB's aluminium process
-minimums first — they are looser than their FR4 rules, typically 0.2 mm
-track/clearance and no vias at all on single-layer aluminium.
+Expected: `exit=0`. Set the design rules to JLCPCB's standard two-layer FR4
+minimums first — 0.127 mm track/clearance, 0.3 mm via with 0.2 mm drill. Vias
+are now both allowed and load-bearing, which was not true of the superseded
+aluminium process.
 
 **Step 5: Verify the 1:1 print again with components placed**
 
@@ -489,7 +499,7 @@ sits inside the clear region from measurement 15.
 
 ```bash
 rtk git add ir_design/kicad
-rtk git commit -m "feat(ir): single-layer aluminium layout, DRC clean"
+rtk git commit -m "feat(ir): two-layer FR4 layout, emitters front, converter back"
 ```
 
 ---
@@ -499,18 +509,19 @@ rtk git commit -m "feat(ir): single-layer aluminium layout, DRC clean"
 **Files:**
 - Create: `ir_design/fab/` (gerbers, drill, BOM, CPL)
 
-**Step 1: Export gerbers for a single-layer board**
+**Step 1: Export gerbers for a two-layer board**
 
 ```bash
 mkdir -p ir_design/fab
 kicad-cli pcb export gerbers ir_design/kicad/ir-ring.kicad_pcb \
   --output ir_design/fab \
-  --layers F.Cu,F.Mask,F.Paste,F.Silkscreen,Edge.Cuts
+  --layers F.Cu,F.Mask,F.Paste,F.Silkscreen,B.Cu,B.Mask,B.Paste,B.Silkscreen,Edge.Cuts
 kicad-cli pcb export drill ir_design/kicad/ir-ring.kicad_pcb \
   --output ir_design/fab --format excellon
 ```
 
-Only front layers — there is no back copper on a single-layer MCPCB.
+Both sides now — the back carries the converter. The drill file is also
+load-bearing this time: it holds the thermal vias, not just the mounting holes.
 
 **Step 2: Export BOM and placement**
 
@@ -519,8 +530,12 @@ kicad-cli sch export bom ir_design/kicad/ir-ring.kicad_sch \
   --output ir_design/fab/bom.csv \
   --fields "Reference,Value,Footprint,LCSC"
 kicad-cli pcb export pos ir_design/kicad/ir-ring.kicad_pcb \
-  --output ir_design/fab/cpl.csv --format csv --units mm --side front
+  --output ir_design/fab/cpl.csv --format csv --units mm --side both
 ```
+
+`--side both` — assembly needs placements for both faces. Exporting `front`
+only would silently drop the entire converter from the CPL and you would get
+boards back with eight emitters and nothing to drive them.
 
 **Step 3: Verify the gerbers before ordering**
 
@@ -540,14 +555,15 @@ blank LCSC field means JLCPCB will not place that part.
 
 **Step 5: Note the fab options in the order**
 
-Aluminium core, 1 oz copper, thickness from measurement 12, white or black
-soldermask. Single layer — do not let the quote default to 2-layer FR4.
+Two-layer FR4, **2 oz copper** (the pours are the thermal design — do not
+accept the 1 oz default), thickness from measurement 12, white soldermask on
+the front for reflectivity. Assembly on **both sides**.
 
 **Step 6: Commit**
 
 ```bash
 rtk git add ir_design/fab
-rtk git commit -m "feat(ir): JLCPCB aluminium MCPCB fab package"
+rtk git commit -m "feat(ir): JLCPCB two-layer FR4 fab package"
 ```
 
 ---
