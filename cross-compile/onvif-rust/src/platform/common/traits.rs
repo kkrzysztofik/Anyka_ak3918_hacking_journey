@@ -323,7 +323,7 @@ pub struct ExposureSettings {
 }
 
 /// Imaging settings.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct ImagingSettings {
     /// Brightness (0.0 to 100.0).
     pub brightness: f32,
@@ -346,6 +346,32 @@ pub struct ImagingSettings {
     pub white_balance: WhiteBalanceSettings,
     /// Exposure control (AUTO only on this device).
     pub exposure: ExposureSettings,
+    /// Colour tint, ONVIF-style 0.0-100.0 (50 = neutral).
+    pub hue: f32,
+    /// Mains frequency for flicker reduction; 50 or 60.
+    pub power_hz: u16,
+    /// ISP picture-style id; 0-2.
+    pub style_id: u8,
+}
+
+impl Default for ImagingSettings {
+    fn default() -> Self {
+        Self {
+            brightness: 0.0,
+            contrast: 0.0,
+            saturation: 0.0,
+            sharpness: 0.0,
+            ir_cut_filter: Default::default(),
+            ir_led: false,
+            wdr: Default::default(),
+            backlight_compensation: Default::default(),
+            white_balance: Default::default(),
+            exposure: Default::default(),
+            hue: 50.0,
+            power_hz: 50,
+            style_id: 0,
+        }
+    }
 }
 
 /// Imaging options (valid ranges for settings).
@@ -1261,6 +1287,9 @@ mod tests {
             },
             white_balance: WhiteBalanceSettings::default(),
             exposure: ExposureSettings::default(),
+            hue: 50.0,
+            power_hz: 50,
+            style_id: 0,
         };
         assert_eq!(settings.brightness, 50.0);
         assert_eq!(

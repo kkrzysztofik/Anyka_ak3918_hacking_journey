@@ -103,6 +103,13 @@ pub(crate) trait ImagingHalTrait: Send + Sync {
     /// Select the exposure mode: `true` = auto (the AE loop runs),
     /// `false` = manual (the driver applies the manual-AE parameters).
     async fn set_ae_mode(&self, auto: bool) -> i32;
+    /// Colour tint (`VPSS_EFFECT_HUE`, raw ISP scale -100..100).
+    async fn set_hue(&self, value: i32) -> i32;
+    /// Mains frequency for flicker reduction (`VPSS_POWER_HZ`, 50 or 60 only —
+    /// the vendor lib silently accepts anything else, so callers validate).
+    async fn set_power_hz(&self, hz: u16) -> i32;
+    /// ISP picture-style id (`VPSS_STYLE_ID`, 0..=2; must match an isp cfg entry).
+    async fn set_style_id(&self, style_id: u8) -> i32;
 }
 
 /// Wire size of the daemon's `AK_ISP_MWB_ATTR` response
@@ -238,6 +245,39 @@ pub(crate) async fn imaging_set_wdr(value: f32, ffi: &dyn ImagingHalTrait) -> Pl
 pub(crate) async fn imaging_set_wdr_disabled(ffi: &dyn ImagingHalTrait) -> PlatformResult<()> {
     let ret = ffi.set_wdr(0).await;
     check_result(ret, "imaging_set_wdr_disabled")
+}
+
+/// Apply a colour-tint level, as an ONVIF 0-100 value (50 = neutral).
+pub(crate) async fn imaging_set_hue(value: f32, ffi: &dyn ImagingHalTrait) -> PlatformResult<()> {
+    validate_onvif_range(value, "hue")?;
+    let ret = ffi.set_hue(onvif_to_effect_value(value)).await;
+    check_result(ret, "imaging_set_hue")
+}
+
+/// Apply the mains frequency used for flicker reduction. The vendor lib
+/// silently accepts anything that is not 50/60, so the range check lives here.
+pub(crate) async fn imaging_set_power_hz(hz: u16, ffi: &dyn ImagingHalTrait) -> PlatformResult<()> {
+    if hz != 50 && hz != 60 {
+        return Err(PlatformError::InvalidParameter(format!(
+            "power_hz must be 50 or 60 (got {hz})"
+        )));
+    }
+    let ret = ffi.set_power_hz(hz).await;
+    check_result(ret, "imaging_set_power_hz")
+}
+
+/// Apply an ISP picture-style id (0-2; must match an entry in the isp cfg).
+pub(crate) async fn imaging_set_style_id(
+    style_id: u8,
+    ffi: &dyn ImagingHalTrait,
+) -> PlatformResult<()> {
+    if style_id > 2 {
+        return Err(PlatformError::InvalidParameter(format!(
+            "style_id must be 0-2 (got {style_id})"
+        )));
+    }
+    let ret = ffi.set_style_id(style_id).await;
+    check_result(ret, "imaging_set_style_id")
 }
 
 /// Apply a backlight-compensation level, as an ONVIF 0-100 value.

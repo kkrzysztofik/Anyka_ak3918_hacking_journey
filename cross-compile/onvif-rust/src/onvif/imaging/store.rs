@@ -332,7 +332,15 @@ impl ImagingSettingsStore {
 
         // Apply to platform if available
         if let Some(ref control) = self.platform_control {
-            let platform_settings = ImagingSettingsStore::onvif_to_platform_settings(settings);
+            let mut platform_settings = ImagingSettingsStore::onvif_to_platform_settings(settings);
+            // The ONVIF surface does not model hue / power_hz / style_id, so
+            // an ONVIF set must carry the current values across instead of
+            // resetting them to defaults.
+            if let Ok(current) = control.get_settings().await {
+                platform_settings.hue = current.hue;
+                platform_settings.power_hz = current.power_hz;
+                platform_settings.style_id = current.style_id;
+            }
             control.set_settings(&platform_settings).await?;
         }
 
@@ -698,6 +706,9 @@ impl ImagingSettingsStore {
                     mode: e.mode.clone(),
                 })
                 .unwrap_or_default(),
+            hue: 50.0,
+            power_hz: 50,
+            style_id: 0,
         }
     }
 

@@ -369,6 +369,9 @@ impl StubPlatformBuilder {
             backlight_compensation: ToggleWithLevel::default(),
             white_balance: crate::platform::common::WhiteBalanceSettings::default(),
             exposure: crate::platform::common::ExposureSettings::default(),
+            hue: 50.0,
+            power_hz: 50,
+            style_id: 0,
         }
     }
 
@@ -1477,6 +1480,9 @@ mod tests {
             backlight_compensation: ToggleWithLevel::default(),
             white_balance: crate::platform::common::WhiteBalanceSettings::default(),
             exposure: crate::platform::common::ExposureSettings::default(),
+            hue: 50.0,
+            power_hz: 50,
+            style_id: 0,
         };
 
         let platform = StubPlatformBuilder::new()
@@ -1736,6 +1742,9 @@ mod tests {
             },
             white_balance: crate::platform::common::WhiteBalanceSettings::default(),
             exposure: crate::platform::common::ExposureSettings::default(),
+            hue: 50.0,
+            power_hz: 50,
+            style_id: 0,
         };
 
         imaging.set_settings(&new_settings).await.unwrap();

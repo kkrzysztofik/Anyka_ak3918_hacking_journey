@@ -706,6 +706,12 @@ pub struct ImagingConfig {
     /// was previously unimplementable at this layer.
     pub ir_cut_filter: crate::onvif::types::common::IrCutFilterMode,
     pub ir_led: bool,
+    /// Colour tint, ONVIF-style 0.0-100.0 (50 = neutral).
+    pub hue: f64,
+    /// Mains frequency for flicker reduction; 50 or 60.
+    pub power_hz: u16,
+    /// ISP picture-style id; 0-2.
+    pub style_id: u8,
     pub night: NightConfig,
 }
 
@@ -718,6 +724,9 @@ impl Default for ImagingConfig {
             sharpness: 50.0,
             ir_cut_filter: crate::onvif::types::common::IrCutFilterMode::AUTO,
             ir_led: false,
+            hue: 50.0,
+            power_hz: 50,
+            style_id: 0,
             night: NightConfig::default(),
         }
     }

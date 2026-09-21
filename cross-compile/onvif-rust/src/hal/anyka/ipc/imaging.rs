@@ -19,8 +19,9 @@ use super::{
     AnykaIpc, CMD_ISP_AE_GET_RUN_INFO, CMD_ISP_AE_SET_ATTR, CMD_ISP_AE_SET_MODE,
     CMD_ISP_GET_AE_ATTR, CMD_ISP_GET_AE_LUMA, CMD_ISP_GET_AWB_STAT, CMD_ISP_GET_LUM_FACTOR,
     CMD_ISP_GET_MWB_ATTR, CMD_ISP_SET_BLC, CMD_ISP_SET_BRIGHTNESS, CMD_ISP_SET_CONTRAST,
-    CMD_ISP_SET_IR_FILTER, CMD_ISP_SET_MWB_ATTR, CMD_ISP_SET_SATURATION, CMD_ISP_SET_SHARPNESS,
-    CMD_ISP_SET_WB_TYPE, CMD_ISP_SET_WDR,
+    CMD_ISP_SET_HUE, CMD_ISP_SET_IR_FILTER, CMD_ISP_SET_MWB_ATTR, CMD_ISP_SET_POWER_HZ,
+    CMD_ISP_SET_SATURATION, CMD_ISP_SET_SHARPNESS, CMD_ISP_SET_STYLE_ID, CMD_ISP_SET_WB_TYPE,
+    CMD_ISP_SET_WDR,
 };
 
 #[async_trait]
@@ -331,6 +332,39 @@ impl ImagingHalTrait for AnykaIpc {
             Err(e) => {
                 error!(error = %e, "get_ae_run_info IPC failed");
                 None
+            }
+        }
+    }
+
+    async fn set_hue(&self, value: i32) -> i32 {
+        let req_data = value.to_le_bytes().to_vec();
+        match self.request_async(CMD_ISP_SET_HUE, &req_data).await {
+            Ok((status, _)) => status,
+            Err(e) => {
+                error!(error = %e, "set_hue IPC failed");
+                AK_FAILED_I32
+            }
+        }
+    }
+
+    async fn set_power_hz(&self, hz: u16) -> i32 {
+        let req_data = (hz as i32).to_le_bytes().to_vec();
+        match self.request_async(CMD_ISP_SET_POWER_HZ, &req_data).await {
+            Ok((status, _)) => status,
+            Err(e) => {
+                error!(error = %e, "set_power_hz IPC failed");
+                AK_FAILED_I32
+            }
+        }
+    }
+
+    async fn set_style_id(&self, style_id: u8) -> i32 {
+        let req_data = (style_id as i32).to_le_bytes().to_vec();
+        match self.request_async(CMD_ISP_SET_STYLE_ID, &req_data).await {
+            Ok((status, _)) => status,
+            Err(e) => {
+                error!(error = %e, "set_style_id IPC failed");
+                AK_FAILED_I32
             }
         }
     }

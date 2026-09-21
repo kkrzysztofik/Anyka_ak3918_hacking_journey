@@ -123,6 +123,9 @@ impl AnykaImagingControl {
                 backlight_compensation: ToggleWithLevel::default(),
                 white_balance: WhiteBalanceSettings::default(),
                 exposure: ExposureSettings::default(),
+                hue: cfg.hue as f32,
+                power_hz: cfg.power_hz,
+                style_id: cfg.style_id,
             }),
             video_encoder: None,
             night,
@@ -251,6 +254,19 @@ impl ImagingControl for AnykaImagingControl {
                 "manual exposure is not supported on this device".to_string(),
             ));
         }
+        crate::hal::common::imaging::validate_onvif_range(settings.hue, "hue")?;
+        if settings.power_hz != 50 && settings.power_hz != 60 {
+            return Err(crate::platform::PlatformError::InvalidParameter(format!(
+                "power_hz must be 50 or 60 (got {})",
+                settings.power_hz
+            )));
+        }
+        if settings.style_id > 2 {
+            return Err(crate::platform::PlatformError::InvalidParameter(format!(
+                "style_id must be 0-2 (got {})",
+                settings.style_id
+            )));
+        }
 
         // Day/night first: GPIO transitions must not be blocked by ISP color
         // controls (which can fail independently over IPC).
@@ -301,6 +317,23 @@ impl ImagingControl for AnykaImagingControl {
             } else {
                 crate::hal::common::imaging::imaging_set_wdr_disabled(self.ffi.as_ref()).await?;
             }
+        }
+        if !Self::approximately_equal(current.hue, settings.hue) {
+            crate::hal::common::imaging::imaging_set_hue(settings.hue, self.ffi.as_ref()).await?;
+            self.settings.write().hue = settings.hue;
+            self.mark_imaging_update_and_request_idr("set_hue");
+        }
+        if current.power_hz != settings.power_hz {
+            crate::hal::common::imaging::imaging_set_power_hz(settings.power_hz, self.ffi.as_ref())
+                .await?;
+            self.settings.write().power_hz = settings.power_hz;
+            self.mark_imaging_update_and_request_idr("set_power_hz");
+        }
+        if current.style_id != settings.style_id {
+            crate::hal::common::imaging::imaging_set_style_id(settings.style_id, self.ffi.as_ref())
+                .await?;
+            self.settings.write().style_id = settings.style_id;
+            self.mark_imaging_update_and_request_idr("set_style_id");
         }
 
         if current.backlight_compensation != settings.backlight_compensation {
@@ -594,6 +627,118 @@ mod tests {
             err,
             crate::platform::PlatformError::NotSupported(_)
         ));
+    }
+
+    /// The vendor lib silently accepts any power frequency that is not
+    /// 50/60 (it breaks out of the switch and returns success), so the
+    /// platform must reject it before the IPC call ever happens.
+    #[tokio::test]
+    async fn test_set_settings_rejects_bad_power_hz_without_ipc() {
+        use crate::hal::common::imaging::MockImagingHalTrait;
+
+        let dir = tempfile::tempdir().unwrap();
+        let paths = crate::platform::anyka::night_mode::NodePaths::rooted(dir.path(), dir.path());
+        let mut mock_ffi = MockImagingHalTrait::new();
+        mock_ffi.expect_set_power_hz().times(0);
+
+        let control = AnykaImagingControl::with_ffi_and_paths(
+            Arc::new(mock_ffi),
+            paths,
+            crate::config::types::ImagingConfig::default(),
+            None,
+        );
+
+        let settings = ImagingSettings {
+            power_hz: 55,
+            ..ImagingSettings::default()
+        };
+
+        let err = control.set_settings(&settings).await.unwrap_err();
+        assert!(matches!(
+            err,
+            crate::platform::PlatformError::InvalidParameter(ref m) if m.contains("55")
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_set_settings_rejects_style_id_above_two() {
+        use crate::hal::common::imaging::MockImagingHalTrait;
+
+        let dir = tempfile::tempdir().unwrap();
+        let paths = crate::platform::anyka::night_mode::NodePaths::rooted(dir.path(), dir.path());
+        let mut mock_ffi = MockImagingHalTrait::new();
+        mock_ffi.expect_set_style_id().times(0);
+
+        let control = AnykaImagingControl::with_ffi_and_paths(
+            Arc::new(mock_ffi),
+            paths,
+            crate::config::types::ImagingConfig::default(),
+            None,
+        );
+
+        let settings = ImagingSettings {
+            style_id: 3,
+            ..ImagingSettings::default()
+        };
+
+        let err = control.set_settings(&settings).await.unwrap_err();
+        assert!(matches!(
+            err,
+            crate::platform::PlatformError::InvalidParameter(ref m) if m.contains("3")
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_set_settings_applies_power_hz_style_and_hue() {
+        use crate::hal::common::AK_SUCCESS_I32;
+        use crate::hal::common::imaging::MockImagingHalTrait;
+        use mockall::predicate::eq;
+
+        let dir = tempfile::tempdir().unwrap();
+        let paths = crate::platform::anyka::night_mode::NodePaths::rooted(dir.path(), dir.path());
+        let mut mock_ffi = MockImagingHalTrait::new();
+        mock_ffi
+            .expect_set_power_hz()
+            .with(eq(60))
+            .times(1)
+            .returning(|_| AK_SUCCESS_I32);
+        mock_ffi
+            .expect_set_style_id()
+            .with(eq(1))
+            .times(1)
+            .returning(|_| AK_SUCCESS_I32);
+        // 60.0 ONVIF -> +10 raw (onvif_to_effect_value).
+        mock_ffi
+            .expect_set_hue()
+            .with(eq(10))
+            .times(1)
+            .returning(|_| AK_SUCCESS_I32);
+
+        let control = AnykaImagingControl::with_ffi_and_paths(
+            Arc::new(mock_ffi),
+            paths,
+            crate::config::types::ImagingConfig::default(),
+            None,
+        );
+
+        let settings = ImagingSettings {
+            // The config defaults: everything but the three new knobs stays
+            // where it started, so only those may trigger IPC.
+            brightness: 50.0,
+            contrast: 50.0,
+            saturation: 50.0,
+            sharpness: 50.0,
+            hue: 60.0,
+            power_hz: 60,
+            style_id: 1,
+            ..ImagingSettings::default()
+        };
+        control.set_settings(&settings).await.unwrap();
+
+        let applied = control.get_settings().await.unwrap();
+        assert_eq!(applied.power_hz, 60);
+        assert_eq!(applied.style_id, 1);
+        assert_eq!(applied.hue, 60.0);
     }
 
     /// The gain ceiling is profile-dependent (day/night), so GetOptions reads

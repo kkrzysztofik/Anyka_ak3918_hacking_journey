@@ -294,7 +294,9 @@ const CMD_ISP_SET_BLC: i32 = 111;
 const CMD_ISP_SET_WB_TYPE: i32 = 112;
 const CMD_ISP_SET_MWB_ATTR: i32 = 113;
 const CMD_ISP_GET_MWB_ATTR: i32 = 114;
-// 115-117 are reserved for the Phase-3 hue/power_hz/style effect commands.
+const CMD_ISP_SET_HUE: i32 = 115;
+const CMD_ISP_SET_POWER_HZ: i32 = 116;
+const CMD_ISP_SET_STYLE_ID: i32 = 117;
 const CMD_ISP_AE_SET_ATTR: i32 = 119;
 const CMD_ISP_AE_GET_RUN_INFO: i32 = 120;
 const CMD_ISP_AE_SET_MODE: i32 = 121;
@@ -587,6 +589,9 @@ impl AnykaIpc {
             CMD_ISP_SET_WB_TYPE => "ISP_SET_WB_TYPE",
             CMD_ISP_SET_MWB_ATTR => "ISP_SET_MWB_ATTR",
             CMD_ISP_GET_MWB_ATTR => "ISP_GET_MWB_ATTR",
+            CMD_ISP_SET_HUE => "ISP_SET_HUE",
+            CMD_ISP_SET_POWER_HZ => "ISP_SET_POWER_HZ",
+            CMD_ISP_SET_STYLE_ID => "ISP_SET_STYLE_ID",
             CMD_GET_ERROR_NO => "GET_ERROR_NO",
             CMD_GET_ERROR_STR => "GET_ERROR_STR",
             CMD_HELLO => "HELLO",

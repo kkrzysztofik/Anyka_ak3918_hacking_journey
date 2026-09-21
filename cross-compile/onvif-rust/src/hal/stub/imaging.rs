@@ -75,6 +75,18 @@ impl ImagingHalTrait for StubImagingHal {
         None
     }
 
+    async fn set_hue(&self, _value: i32) -> i32 {
+        AK_SUCCESS_I32
+    }
+
+    async fn set_power_hz(&self, _hz: u16) -> i32 {
+        AK_SUCCESS_I32
+    }
+
+    async fn set_style_id(&self, _style_id: u8) -> i32 {
+        AK_SUCCESS_I32
+    }
+
     async fn set_ae_mode(&self, _auto: bool) -> i32 {
         AK_SUCCESS_I32
     }
