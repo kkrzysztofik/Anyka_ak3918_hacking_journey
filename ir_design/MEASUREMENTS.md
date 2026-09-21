@@ -15,7 +15,7 @@ Photos in `photos/`.
 | 2a | Substrate is aluminium? | **No — FR4** | 2026-09-22 | two-point resistance on the bare back reads open. See "Substrate" below |
 | 3 | `IR` line asserted | | | expect 3.3 V; sets Q2 base resistor and U1 enable tolerance |
 | 3 | `HB` line asserted | | | |
-| 4 | Board current, IR channel on | | | headroom check against the new board's 355 mA |
+| 4 | Board current, IR channel on | | | headroom check against the new board's 271 mA |
 | 5 | Vf D1..D8 (diode mode) | | | resolves `SPEC.md` open item 2 — are the stock emitters degraded? |
 | 6 | Striped component, room light | | | resolves `SPEC.md` open item 3 |
 | 6 | Striped component, covered | | | no change ⇒ not a photoresistor, drop it from the new design |
@@ -55,15 +55,15 @@ With the ballast resistors gone, the limit moves to the dies:
 | | Stock | This design |
 |---|---|---|
 | IR emitters | 4 @ 50 mA (~90 mW each) | 8 @ 100 mA (~180 mW each) |
-| Total board dissipation | ~0.36 W (IR channel) | **~1.25 W** |
+| Total board dissipation | ~0.36 W (IR channel) | **~1.1 W** |
 | Substrate | 1-layer FR4, no pour | 2-layer FR4, 2 oz, thermal vias |
 
-Estimated junction temperature: ~50 °C board-wide rise from 1.25 W, plus ~15 °C
-local at each die, over ~40 °C internal ambient ≈ **Tj ~105 °C** against a
+Estimated junction temperature: ~44 °C board-wide rise from 1.1 W, plus ~13 °C
+local at each die, over ~40 °C internal ambient ≈ **Tj ~97 °C** against a
 typical 850 nm rating of 110–125 °C.
 
 Workable but not generous. **R1 is the knob**: if the evaluation rig shows
-adequate output at 80 mA, dropping there buys roughly 20 °C of margin for a
+adequate output at 80 mA, dropping there buys roughly 18 °C of margin for a
 ~20 % output cost. Decide this against measured radiant output, not on paper.
 
 ## Mechanical (calipers — outstanding)

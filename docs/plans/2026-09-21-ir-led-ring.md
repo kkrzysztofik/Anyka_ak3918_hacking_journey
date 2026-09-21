@@ -2,11 +2,13 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Produce a JLCPCB-ready aluminium-core replacement for the camera's `RZ-XHR(08SG)-C4` IR ring board — 8 × 850 nm emitters in one series string at 100 mA driven by a single boost LED driver, with a MOSFET bypass across four of them for half power — plus the `onvif-rust` change that lets the night transition assert the `HB` line.
+**Goal:** Produce a JLCPCB-ready **two-layer FR4** replacement for the camera's `RZ-XHR(08SG)-C4` IR ring board — 8 × 850 nm emitters in one series string at 100 mA driven by a single boost LED driver, with a switched sense resistor for half power — plus the `onvif-rust` change that lets the night transition assert the `HB` line.
 
-**Architecture:** One boost converter steps the 5 V header rail up to the 13.6–16.0 V that eight series 850 nm emitters need at 100 mA. Series wiring makes current matching exact, so there are no ballast resistors. An N-MOSFET with an NPN inverter shorts LEDs 5–8 when `HB` is low, halving output. Firmware gains one config key and one pure step-mirroring function so `WHITE_LED` follows `IR_LED` on boards where that line drives infrared.
+**Architecture:** One TPS61165 boost converter steps the **measured 5.3 V** header rail up to the 10.4–16.0 V that eight series 850 nm emitters need at 100 mA. Series wiring makes current matching exact, so there are no ballast resistors. An N-MOSFET gated from `HB` parallels a second sense resistor to switch between 50 mA and 100 mA — all eight emitters stay lit in both modes. Emitters on the front under the stock lens array; converter cluster on the back. Firmware gains one config key and one pure step-mirroring function so `WHITE_LED` follows `IR_LED` on boards where that line drives infrared.
 
-**Tech Stack:** KiCad 9.0.8 (Ubuntu archive), JLCPCB aluminium MCPCB process, Rust 1.x via the vendored `arm-anykav200-crosstool-ng` toolchain.
+**Tech Stack:** KiCad 9.0.8 (Ubuntu archive), JLCPCB two-layer FR4 with 2 oz copper, Rust 1.x via the vendored `arm-anykav200-crosstool-ng` toolchain.
+
+> **Revision note (2026-09-22):** the original plan specified a single-layer aluminium MCPCB and a MOSFET bypass across four emitters. Both are superseded — the stock board turned out to be FR4, and the 4-emitter bypass cannot regulate at operating temperature. See the design doc.
 
 **Design doc:** `docs/plans/2026-09-21-ir-led-ring-design.md`
 
@@ -67,14 +69,14 @@ Instrument:
 
 Measured **5.3 V** at the header. The boost topology is confirmed; a 12 V
 result would have sent it back to a buck. L1 recomputed against 5.3 V:
-`D = 1 − 5.3/16 = 0.67`, input 355 mA, `ΔI` 107 mA, **L1 ≈ 33 µH**.
+`D = 1 − 5.3/16 = 0.67`, input 271 mA at the measured Vf; L1 settled in Task 4 at **22 µH**, TI's cap.
 
 Nothing further to do in this step.
 
 **Step 3: Measure BACK-side clearance (gate) — DONE 2026-09-22, PASSED**
 
 Clearance is adequate across the whole back face, so converter placement is
-unconstrained and the 33 µH inductor fits. The fallback to a linear current
+unconstrained and the 22 µH inductor fits. The fallback to a linear current
 sink is off the table.
 
 Also settled in the same session: **the stock board is FR4, not aluminium** —
@@ -91,14 +93,15 @@ Nothing further to do in this step.
 Drive the lines from the camera over telnet and probe each at the header.
 See @.claude/skills/anyka-remote-debugging for the shell access pattern.
 
-Expect 3.3 V. A 5 V result means R2's pull-up and Q2's base resistor need
-rechecking, and the driver's enable input must tolerate 5 V.
+Expect 3.3 V. A 5 V result means R3/R4, the Q1 gate network, needs rechecking,
+and U1's `CTRL` input must tolerate 5 V (TPS61165 `CTRL` is rated to 7 V, so
+this is fine either way — but confirm rather than assume).
 
 **Step 5: Measure stock current draw**
 
 Break the `+` wire and meter it in series with the IR channel on.
 
-This is the headroom check against the new board's 376 mA at full power. If the
+This is the headroom check against the new board's 271 mA at full power. If the
 stock board draws ~200 mA and the supply has no margin, note it — it becomes a
 constraint on whether full power is usable continuously.
 
@@ -147,7 +150,8 @@ rtk git commit -m "docs(ir): electrical measurements from the stock ring board"
 | 13 | LED pad radius from centre | | mm |
 | 13 | LED angular positions (×8) | | ° |
 | 14 | Radial lobe width at an LED | | mm |
-| 15 | Largest clear area (W × H) and position | | mm |
+| 15 | Largest clear area on the BACK (W × H) and position | | mm; note mounting bosses and cable landing |
+| 16 | Lens array: OD, locating features, dome positions, standoff | | decides front keep-out and whether a 3535 fits under a stock-sized dome |
 ```
 
 **Step 2: Measure, choosing one notch as the 0° datum**
@@ -164,7 +168,7 @@ From measurement 14:
   3535's 300–500 mA continuous rating, and the larger thermal pad is free
   margin.
 - **≤ ~8 mm** → **2835**, matching the stock footprint. Note that 100 mA is
-  close to a 2835's 100–150 mA ceiling, so the aluminium substrate is doing
+  close to a 2835's 100–150 mA ceiling, so the thermal vias and pours are doing
   real work.
 
 Record the decision and the reasoning in the file.
@@ -202,7 +206,7 @@ later tasks use for scripted footprint generation and fab output; if it fails,
 the package `kicad` did not bring in the Python bindings and
 `python3-pcbnew` is needed separately.
 
-**Step 3: Verify aluminium-compatible output**
+**Step 3: Verify fab-output options**
 
 ```bash
 kicad-cli pcb export gerbers --help | head -20
@@ -261,7 +265,7 @@ D  = 1 − Vin / Vstring      # ≈ 0.69 at 5 V in, 16 V out
 L1 = Vin × D / (f × ΔI)     # ≈ 30 µH at 1 MHz
 ```
 
-Round L1 to a stocked value in 22–33 µH with `Isat ≥ 600 mA`, and **check its
+Round L1 to a stocked value (TI caps it at 22 µH) with `Isat ≥ 600 mA`, and **check its
 height against measurement 2** before accepting it. Use a 1 % resistor for R1.
 
 **Step 5: Record the full BOM with LCSC part numbers**
@@ -385,34 +389,44 @@ rtk git commit -m "feat(ir): board outline traced from the stock envelope"
 **Files:**
 - Modify: `ir_design/kicad/ir-ring.kicad_sch`
 
+U1 is **TPS61165DBVR** in SOT-23-6. Pins: VIN, SW, FB, GND, CTRL, **COMP**.
+
 **Step 1: Draw the power and driver section**
 
-J1 `+`/`−` → C1 (10 µF) and C3 (100 nF) → U1 `VIN`. L1 from `VIN` to `SW`, D1
-from `SW` to the string anode, C2 (1 µF) from string anode to ground. R1 from
-the string cathode to ground, tied to U1's feedback pin. U1's enable from J1
-`IR`.
+J1 `+`/`−` → C1 (10 µF) and C3 (100 nF) → U1 `VIN`. L1 (22 µH) from `VIN` to
+`SW`, D1 (Schottky **≥ 40 V**) from `SW` to the string anode, C2 (4.7 µF,
+**50 V** — it sees the ~38 V OVP excursion) from string anode to ground.
+**C4 (220 nF) from `COMP` to ground** — required by TI, and keep it off the
+switching loop on quiet analogue ground. U1's `CTRL` from J1 `IR`.
 
-**Step 2: Draw the string and bypass**
+**Step 2: Draw the string and the current switch**
 
-D2…D9 in series, anode of D2 at the boost output, cathode of D9 to R1.
+D2…D9 in series, anode of D2 at the boost output, cathode of D9 to the sense
+node, which ties to U1's `FB`.
 
-Q1 (N-MOSFET) drain to D6's anode, source through R5 (4.7 Ω) to D9's cathode —
-so Q1 shorts D6…D9, the four nearest ground, keeping its source within ~0.1 V
-of ground and its gate drivable without level shifting.
+**All eight emitters stay in circuit in both modes.** Half power halves the
+current, it does not shorten the string:
 
-Q2 (NPN) collector to Q1's gate, emitter to ground. R2 (100 kΩ) from Q1's gate
-to the 5 V rail. R3 (10 kΩ) from J1 `HB` to Q2's base. R4 (100 kΩ) from Q2's
-base to ground.
+- **R1a** (≈ 4.0 Ω 1 %) from the sense node to ground — permanent, sets 50 mA
+- **R1b** (same value) from the sense node to Q1's drain; Q1's source to ground
+- **R3** (10 kΩ) from J1 `HB` to Q1's gate; **R4** (100 kΩ) gate to ground
 
 Resulting logic:
-- `HB` low → Q2 off → gate pulled to 5 V → Q1 on → **half power**
-- `HB` high → Q2 on → gate low → Q1 off → **full power**
+- `HB` low → Q1 off → 4.0 Ω → 50 mA → **half power**
+- `HB` high → Q1 on → R1a‖R1b ≈ 2.0 Ω → 100 mA → **full power**
 
-**Step 3: Annotate R5's purpose in the schematic text**
+No inverter and no level shifting: Q1's source is at ground, so `HB` drives the
+gate directly. There is no Q2, R2 or R5 in this design.
 
-Add a text note beside R5: *"Limits C2 discharge into the 4-LED string when Q1
-turns on — 96 µJ otherwise. Do not remove."* A future reader will otherwise
-delete it as a pointless series resistor.
+**Step 3: Annotate the CTRL net in the schematic text**
+
+Add a text note beside U1's `CTRL` pin: *"No RC on this net. A 260 µs–1 ms low
+pulse after a rising edge enters TI's EasyScale dimming protocol and the
+illuminator comes up at an arbitrary level. A static GPIO cannot do this; an RC
+can."*
+
+(The superseded design also had an R5 inrush limiter needing a note. R5 no
+longer exists — there is no output-cap dump without a shortened string.)
 
 **Step 4: Run ERC**
 
@@ -429,7 +443,7 @@ unconnected pins are how a missed net shows up.
 
 ```bash
 rtk git add ir_design/kicad
-rtk git commit -m "feat(ir): schematic for the boost driver, string and bypass"
+rtk git commit -m "feat(ir): schematic for the boost driver, string and current switch"
 ```
 
 ---
@@ -453,9 +467,9 @@ dome.
 
 **Step 2: Thermal vias under every emitter pad**
 
-This is what replaces the aluminium core, and it is not optional. A grid of
+This is the entire thermal design, and it is not optional. A grid of
 0.3 mm vias through each emitter's thermal pad into the back-side pour. The
-board dissipates ~1.25 W with no conduction path to any heatsink, which is
+board dissipates ~1.1 W with no conduction path to any heatsink, which is
 **3.5× the stock board's IR dissipation** — the vias and the two pours are the
 entire thermal design.
 
@@ -470,7 +484,7 @@ sits between the switcher and the sensor.
 
 | Net | Current | Minimum width |
 |---|---|---|
-| `VIN` from J1 | 355 mA | 0.5 mm |
+| `VIN` from J1 | 271 mA | 0.4 mm |
 | `SW` node | ~450 mA peak | 0.5 mm, kept short |
 | LED string | 100 mA | 0.3 mm |
 | Signal (`HB`, gate, base) | negligible | 0.2 mm |
@@ -577,7 +591,7 @@ rtk git commit -m "feat(ir): JLCPCB two-layer FR4 fab package"
 
 **Why:** `plan()` at `night_mode.rs:849` writes only `Node::IrLed`.
 `Node::WhiteLed` — the `HB` line — is reachable only via `set_white_light()`
-at `imaging.rs:355`, which nothing calls on a transition. With the bypass
+at `imaging.rs:355`, which nothing calls on a transition. With the chosen
 polarity chosen, unmodified firmware would run the new board permanently at
 half power.
 
