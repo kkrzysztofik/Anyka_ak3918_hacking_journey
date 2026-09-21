@@ -2420,6 +2420,11 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let paths = NodePaths::rooted(dir.path(), dir.path());
         seed_gpio_nodes(&paths);
+        // Seeded "0", not the helper's "9" sentinel, and deliberately not
+        // folded into seed_gpio_nodes. "9" means "never written", so asserting
+        // against it would only claim the fixture is untouched; "0" means "lamp
+        // off", which is the claim this test exists to make. Widening the
+        // shared helper would force the weaker assertion on every caller.
         std::fs::write(paths.node(Node::WhiteLed), "0").unwrap();
 
         let mut ffi = MockImagingHalTrait::new();
