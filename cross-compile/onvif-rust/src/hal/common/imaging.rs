@@ -95,11 +95,40 @@ pub(crate) trait ImagingHalTrait: Send + Sync {
     /// if unavailable. A zero bin is a legitimate reading (e.g. AWB going
     /// quiet under IR illumination) and must not be conflated with `None`.
     async fn get_awb_stat(&self) -> Option<[i32; 10]>;
+    /// Override AE ceilings, preserving every other AE attribute (the daemon
+    /// read-modify-writes the struct). `None` leaves a ceiling alone.
+    async fn set_ae_attr(&self, a_gain_max: Option<i32>, exp_time_max: Option<i32>) -> i32;
+    /// The AE loop's current operating point, or `None` if unavailable.
+    async fn get_ae_run_info(&self) -> Option<AeRunInfo>;
+    /// Select the exposure mode: `true` = auto (the AE loop runs),
+    /// `false` = manual (the driver applies the manual-AE parameters).
+    async fn set_ae_mode(&self, auto: bool) -> i32;
 }
 
 /// Wire size of the daemon's `AK_ISP_MWB_ATTR` response
 /// (`u16 r_gain, u16 g_gain, u16 b_gain, s16 r_offset, s16 g_offset, s16 b_offset`).
 pub(crate) const MWB_ATTR_WIRE_LEN: usize = 12;
+
+/// Live AE operating point, decoded from `struct vpss_isp_ae_run_info`
+/// (36 bytes on the wire; the `*_step` fields are not modelled).
+///
+/// All fields are the driver's raw units — `exp_time` is a sensor line count
+/// and the gains are fixed-point. Interpretation (µs, dB) belongs to
+/// `docs/reference/anyka-ae-units.md`; nothing here pre-converts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+pub struct AeRunInfo {
+    pub avg_lumi: u8,
+    pub compensation_lumi: u8,
+    /// 1 when the driver considers the scene darked (night path).
+    pub darked_flag: u8,
+    pub a_gain: i32,
+    pub d_gain: i32,
+    pub isp_d_gain: i32,
+    pub exp_time: i32,
+}
+
+/// Wire size of `struct vpss_isp_ae_run_info` on the camera.
+pub(crate) const AE_RUN_INFO_WIRE_LEN: usize = 36;
 
 /// The driver's `WB_OPS_TYPE_MANU`: manual white balance.
 pub const WB_TYPE_MANUAL: u16 = 0;

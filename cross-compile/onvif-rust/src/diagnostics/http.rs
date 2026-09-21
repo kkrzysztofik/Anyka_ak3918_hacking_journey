@@ -102,6 +102,9 @@ fn required_level_for_path(path: &str) -> AuthLevel {
         "/sound/play" | "/sound/play/" => AuthLevel::Administrator,
         "/diagnostics" | "/diagnostics/" => AuthLevel::User,
         "/processes" | "/processes/" => AuthLevel::User,
+        // Temporary AE sweep instrumentation (see the ponytail note in the
+        // /ae-debug handlers below).
+        "/ae-debug" | "/ae-debug/" => AuthLevel::Administrator,
         // Fail closed: unknown routes require Administrator until explicitly opened.
         _ => AuthLevel::Administrator,
     }
@@ -182,6 +185,71 @@ pub async fn diagnostics_auth_middleware(
             status.into_response()
         }
     }
+}
+
+// ponytail: TEMPORARY — AE unit-sweep instrumentation for Task 10 of
+// docs/plans/2026-09-21-imaging-tab-completion.md. Delete this block and the
+// /api/ae-debug routes (server.rs) once docs/reference/anyka-ae-units.md exists.
+#[derive(Debug, Default, Deserialize)]
+pub(crate) struct AeDebugBody {
+    a_gain_max: Option<u32>,
+    exp_time_max: Option<u32>,
+    auto: Option<bool>,
+}
+
+/// PUT /api/ae-debug response: which knobs were actually applied.
+#[derive(Debug, Default, serde::Serialize)]
+pub(crate) struct AeDebugResult {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    limits: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    mode: Option<bool>,
+}
+
+/// GET /api/ae-debug — the AE loop's current operating point, raw driver units.
+pub(crate) async fn handle_get_ae_debug(
+    Extension(state): Extension<Arc<DiagnosticsState>>,
+) -> Result<Json<crate::hal::common::imaging::AeRunInfo>, StatusCode> {
+    let imaging = state
+        .platform()
+        .and_then(|p| p.imaging_control())
+        .ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
+    let info = imaging
+        .ae_run_info()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(StatusCode::NOT_FOUND)?;
+    Ok(Json(info))
+}
+
+/// PUT /api/ae-debug — override AE ceilings and/or select the exposure mode.
+pub(crate) async fn handle_put_ae_debug(
+    Extension(state): Extension<Arc<DiagnosticsState>>,
+    Json(body): Json<AeDebugBody>,
+) -> Result<Json<AeDebugResult>, StatusCode> {
+    let imaging = state
+        .platform()
+        .and_then(|p| p.imaging_control())
+        .ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
+    let mut applied = AeDebugResult::default();
+    if body.a_gain_max.is_some() || body.exp_time_max.is_some() {
+        imaging
+            .ae_set_limits(
+                body.a_gain_max.map(|v| v as i32),
+                body.exp_time_max.map(|v| v as i32),
+            )
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        applied.limits = Some(true);
+    }
+    if let Some(auto) = body.auto {
+        imaging
+            .ae_set_mode(auto)
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        applied.mode = Some(auto);
+    }
+    Ok(Json(applied))
 }
 
 #[cfg(test)]

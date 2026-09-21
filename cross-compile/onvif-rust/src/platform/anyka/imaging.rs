@@ -467,6 +467,34 @@ impl ImagingControl for AnykaImagingControl {
     ) -> PlatformResult<Option<crate::platform::common::VisionDiagnostics>> {
         Ok(Some(self.night.live_diagnostics().await))
     }
+
+    async fn ae_run_info(&self) -> PlatformResult<Option<crate::hal::common::imaging::AeRunInfo>> {
+        Ok(self.ffi.get_ae_run_info().await)
+    }
+
+    async fn ae_set_limits(
+        &self,
+        a_gain_max: Option<i32>,
+        exp_time_max: Option<i32>,
+    ) -> PlatformResult<()> {
+        let status = self.ffi.set_ae_attr(a_gain_max, exp_time_max).await;
+        if status != crate::hal::common::AK_SUCCESS_I32 {
+            return Err(crate::platform::PlatformError::HardwareFailure(format!(
+                "ae_set_limits failed (status {status})"
+            )));
+        }
+        Ok(())
+    }
+
+    async fn ae_set_mode(&self, auto: bool) -> PlatformResult<()> {
+        let status = self.ffi.set_ae_mode(auto).await;
+        if status != crate::hal::common::AK_SUCCESS_I32 {
+            return Err(crate::platform::PlatformError::HardwareFailure(format!(
+                "ae_set_mode failed (status {status})"
+            )));
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]

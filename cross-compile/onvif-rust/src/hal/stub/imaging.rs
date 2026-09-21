@@ -3,7 +3,7 @@
 use async_trait::async_trait;
 
 use crate::hal::common::AK_SUCCESS_I32;
-use crate::hal::common::imaging::{AeAttr, ImagingHalTrait};
+use crate::hal::common::imaging::{AeAttr, AeRunInfo, ImagingHalTrait};
 
 /// Stub implementation that returns success for all imaging operations.
 #[allow(dead_code)] // Used on host targets only
@@ -65,6 +65,18 @@ impl ImagingHalTrait for StubImagingHal {
 
     async fn get_awb_stat(&self) -> Option<[i32; 10]> {
         None
+    }
+
+    async fn set_ae_attr(&self, _a_gain_max: Option<i32>, _exp_time_max: Option<i32>) -> i32 {
+        AK_SUCCESS_I32
+    }
+
+    async fn get_ae_run_info(&self) -> Option<AeRunInfo> {
+        None
+    }
+
+    async fn set_ae_mode(&self, _auto: bool) -> i32 {
+        AK_SUCCESS_I32
     }
 }
 

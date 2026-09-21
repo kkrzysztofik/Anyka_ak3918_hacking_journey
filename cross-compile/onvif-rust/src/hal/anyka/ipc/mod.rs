@@ -294,6 +294,10 @@ const CMD_ISP_SET_BLC: i32 = 111;
 const CMD_ISP_SET_WB_TYPE: i32 = 112;
 const CMD_ISP_SET_MWB_ATTR: i32 = 113;
 const CMD_ISP_GET_MWB_ATTR: i32 = 114;
+// 115-117 are reserved for the Phase-3 hue/power_hz/style effect commands.
+const CMD_ISP_AE_SET_ATTR: i32 = 119;
+const CMD_ISP_AE_GET_RUN_INFO: i32 = 120;
+const CMD_ISP_AE_SET_MODE: i32 = 121;
 const CMD_GET_ERROR_NO: i32 = 200;
 const CMD_GET_ERROR_STR: i32 = 201;
 

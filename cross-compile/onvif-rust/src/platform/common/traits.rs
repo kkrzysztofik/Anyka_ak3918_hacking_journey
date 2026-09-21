@@ -570,6 +570,10 @@ pub struct VisionDiagnostics {
     /// stay distinguishable from `None` — that distinction is the whole point
     /// of the day/night AWB-gate measurement.
     pub awb_cnt: Option<[i32; 10]>,
+    /// The AE loop's current operating point in raw driver units, or `None`
+    /// if unavailable. Raw on purpose: interpreting the units (µs, dB) is the
+    /// job of `docs/reference/anyka-ae-units.md`.
+    pub ae_run_info: Option<crate::hal::common::imaging::AeRunInfo>,
     /// Raw ADC reading on AIN0 (light-sensor channel), or `None` if not read.
     pub ain0: Option<i32>,
     /// Current IR LED state (`true` = on), or `None` if undriven.
@@ -704,6 +708,27 @@ pub trait ImagingControl: Send + Sync {
     /// not need to override this method.
     async fn vision_diagnostics(&self) -> PlatformResult<Option<VisionDiagnostics>> {
         Ok(None)
+    }
+
+    /// The AE loop's current operating point in raw driver units, or `None`
+    /// if this implementation has no AE operating-point source.
+    async fn ae_run_info(&self) -> PlatformResult<Option<crate::hal::common::imaging::AeRunInfo>> {
+        Ok(None)
+    }
+
+    /// Override AE ceilings (gain and/or exposure-time maxima). `None` leaves
+    /// a ceiling alone; the platform read-modify-writes the rest.
+    async fn ae_set_limits(
+        &self,
+        _a_gain_max: Option<i32>,
+        _exp_time_max: Option<i32>,
+    ) -> PlatformResult<()> {
+        Err(PlatformError::NotSupported("ae_set_limits".to_string()))
+    }
+
+    /// Select exposure mode: `true` = auto (AE loop), `false` = manual.
+    async fn ae_set_mode(&self, _auto: bool) -> PlatformResult<()> {
+        Err(PlatformError::NotSupported("ae_set_mode".to_string()))
     }
 }
 

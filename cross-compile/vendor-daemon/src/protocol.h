@@ -106,6 +106,9 @@ enum cmd_id {
     CMD_ISP_GET_MWB_ATTR           = 114,
     /* 115-117: hue, power_hz, style_id effects */
     CMD_ISP_GET_BLC                = 118,
+    CMD_ISP_AE_SET_ATTR            = 119, /* [i32 a_gain_max][i32 exp_time_max], <=0 = leave alone (RMW) */
+    CMD_ISP_AE_GET_RUN_INFO        = 120, /* -> 36-byte vpss_isp_ae_run_info */
+    CMD_ISP_AE_SET_MODE            = 121, /* [i32] AE_MODE_WB_AUTO / AE_MODE_WB_MANU */
     /* Utility */
     CMD_GET_ERROR_NO              = 200,
     CMD_GET_ERROR_STR             = 201,

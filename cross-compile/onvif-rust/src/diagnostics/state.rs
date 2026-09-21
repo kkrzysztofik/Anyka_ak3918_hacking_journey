@@ -135,6 +135,14 @@ impl DiagnosticsState {
         )
     }
 
+    /// The attached hardware platform, if any.
+    ///
+    /// Exposed for the temporary `/api/ae-debug` sweep instrumentation in
+    /// [`super::http`]; remove it together with that route.
+    pub fn platform(&self) -> Option<&Arc<dyn Platform>> {
+        self.platform.as_ref()
+    }
+
     /// Like [`new`](Self::new) with the update root that holds `state/`;
     /// the snapshot reads `state/ntp.status` from it.
     pub fn with_update_root(
@@ -580,6 +588,7 @@ mod tests {
             ae_exp_time_max: Some(2250),
             ae_target_luminance: Some(40),
             awb_cnt: Some([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]),
+            ae_run_info: None,
             ain0: Some(100),
             ir_led: Some(true),
             ircut_a: Some(false),
