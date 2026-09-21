@@ -392,6 +392,13 @@ export default function ProfilesPage() {
                         active={!!profile.ptzConfiguration}
                         token={profile.ptzConfiguration?.token}
                         details={profile.ptzConfiguration?.name}
+                        onAdd={() => setPicker({ profileToken: profile.token, family: 'PTZ' })}
+                        onRemove={() =>
+                          removeMutation.mutate({
+                            profileToken: profile.token,
+                            family: 'PTZ',
+                          })
+                        }
                         testId={`ptz-config-${profile.token}`}
                       />
 
@@ -399,9 +406,20 @@ export default function ProfilesPage() {
                       <ConfigSection
                         title="Metadata & Analytics"
                         icon={<FileText className="size-4 text-[#64d2ff]" />}
-                        active={!!profile.metadataConfiguration} // Assuming metadata implies analytics for now
+                        active={!!profile.metadataConfiguration}
                         token={profile.metadataConfiguration?.token}
-                        details={profile.metadataConfiguration?.name}
+                        details={
+                          profile.metadataConfiguration
+                            ? `${profile.metadataConfiguration.name} · config only — no metadata stream`
+                            : undefined
+                        }
+                        onAdd={() => setPicker({ profileToken: profile.token, family: 'Metadata' })}
+                        onRemove={() =>
+                          removeMutation.mutate({
+                            profileToken: profile.token,
+                            family: 'Metadata',
+                          })
+                        }
                         testId={`metadata-config-${profile.token}`}
                       />
                     </div>

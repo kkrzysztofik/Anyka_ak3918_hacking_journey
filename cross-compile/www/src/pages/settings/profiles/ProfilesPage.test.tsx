@@ -508,4 +508,35 @@ describe('ProfilesPage config tiles (attach/detach)', () => {
       expect(removeConfiguration).toHaveBeenCalledWith('ProfileAudio', 'AudioSource'),
     );
   });
+
+  it('shows the empty state in the PTZ picker when the device has no PTZ config', async () => {
+    vi.mocked(getProfiles).mockResolvedValue([
+      { token: 'ProfileNoPtz', name: 'NoPtz', fixed: false } as MediaProfile,
+    ]);
+    vi.mocked(getCompatibleConfigurations).mockResolvedValue([]);
+
+    const user = userEvent.setup();
+    await expandProfileCard(user, 'ProfileNoPtz');
+    await user.click(await screen.findByTestId('ptz-config-ProfileNoPtz-add-button'));
+
+    expect(await screen.findByTestId('config-picker-empty')).toBeInTheDocument();
+  });
+
+  it('flags an attached metadata config as having no metadata stream', async () => {
+    vi.mocked(getProfiles).mockResolvedValue([
+      {
+        token: 'ProfileMeta',
+        name: 'Meta',
+        fixed: false,
+        metadataConfiguration: { token: 'MetadataConfig_0', name: 'Analytics' },
+      } as MediaProfile,
+    ]);
+
+    const user = userEvent.setup();
+    await expandProfileCard(user, 'ProfileMeta');
+
+    expect(screen.getByTestId('metadata-config-ProfileMeta')).toHaveTextContent(
+      'config only — no metadata stream',
+    );
+  });
 });
