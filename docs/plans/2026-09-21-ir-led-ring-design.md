@@ -1,13 +1,14 @@
 # Replacement IR LED ring board
 
 Date: 2026-09-21
-Status: design approved, no layout started
+Status: design approved; U1/passives locked, mechanical measured, no layout started
 
 Supersedes the locked decisions in `ir_design/SPEC.md` where the two conflict.
-The spec's mechanical envelope, 5 V assumption, aluminium substrate, all-IR
-channel choice and 100 mA target survive unchanged. Its electrical section —
-2S2P strings, AL8860 buck, per-branch ballast resistors, two independent
-drivers — does not.
+Surviving from the spec: the mechanical envelope, the all-IR channel choice
+and the 100 mA target. **Superseded:** the aluminium substrate (the stock board
+is FR4 and we go two-layer FR4), the 5 V assumption (measured 5.3 V), and the
+whole electrical section — 2S2P strings, AL8860 buck, per-branch ballast
+resistors, two independent drivers.
 
 ## Problem
 
@@ -52,8 +53,9 @@ so a later reader does not mistake it for an oversight.
 
 ## Topology
 
-**One boost LED driver, 8 emitters in a single series string at 100 mA, with a
-switchable bypass across four of them for half power.**
+**One SY7200A boost LED driver, 8 emitters in a single series string, with a
+switched sense resistor selecting 50 mA or 100 mA.** Emitters on the front
+under the stock lens array; converter on the back of a two-layer FR4 board.
 
 ### Why not the spec's 2S2P buck
 
@@ -73,7 +75,8 @@ Going the other way — one emitter per branch — is worse: 3.0–3.3 V dropped
 
 A boost converter can only regulate when the string voltage exceeds the input
 voltage. This is explicit in the PAM2803 datasheet as `VIN max = VF − 0.2 V`.
-Eight emitters in series is 13.6–16.0 V, comfortably above 5 V, duty ≈ 0.69.
+Eight in series is 10.4–16.0 V at the measured Vf, comfortably above the
+measured 5.3 V rail, duty ≈ 0.67.
 
 A single series string also makes current matching exact by construction. That
 removes the four per-branch ballast resistors the spec called for, and with
