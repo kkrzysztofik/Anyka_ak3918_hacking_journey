@@ -262,6 +262,25 @@ the camera.
 So the stock board *supports* a light sensor and this variant does not fit one.
 Nothing to replicate — but see the design question this raises.
 
+### ⚠ Connector pole-count mismatch: camera 6, board 5
+
+The camera-side header has **6 poles**; the ring board's connector has **5**,
+and the cable carries 5 conductors (2026-09-22).
+
+So the camera is wired for a signal this ring board variant never uses. Read
+alongside the unpopulated light-sensor position and the 9th dome in the lens
+array, the likely story is that the camera main board is a common design
+supporting a sensored ring, and this ring is the cost-reduced version.
+
+**Unresolved and worth one session with a meter:** which camera pin is unused,
+whether the cable's light-sensor conductor (board pad 3) actually lands on the
+SoC ADC, and whether the 6th pole is a second light-sensor terminal (divider
+at the camera end) or something unrelated.
+
+Until that is known, J1 on the new board stays **5-position, 1.50 mm pitch**,
+matching the stock cable. Do not widen it to 6 on the strength of the camera
+header alone — that would need a new cable.
+
 ### Lens array — 8 domes, plus a 9th
 
 **8 domes, one per emitter, plus 1 smaller dome** over the unpopulated
