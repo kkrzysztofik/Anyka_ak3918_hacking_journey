@@ -18,13 +18,15 @@ for n in nets_sec[1:]:
     nodes = {(([e for e in nd if isinstance(e, list) and e[0]=="ref"][0][1].strip('"')),
               ([e for e in nd if isinstance(e, list) and e[0]=="pin"][0][1].strip('"')))
              for nd in n if isinstance(nd, list) and nd[0] == "node"}
+    nodes = {nd for nd in nodes if not nd[0].startswith("#")}      # power symbols / flags
     got[name] = nodes
 want = {k: {tuple(v) for v in vs} for k, vs in json.load(open(os.path.join(kd, "nets.json"))).items()}
 # footprints actually attached
 comps = [e for e in tree if isinstance(e, list) and e[0] == "components"][0]
 fps = {[x for x in c if isinstance(x, list) and x[0]=="ref"][0][1].strip('"'):
        [x for x in c if isinstance(x, list) and x[0]=="footprint"][0][1].strip('"')
-       for c in comps[1:] if isinstance(c, list)}
+       for c in comps[1:] if isinstance(c, list)
+       and not [x for x in c if isinstance(x, list) and x[0]=="ref"][0][1].strip('"').startswith("#")}
 bad = 0
 for k in sorted(set(want) | set(got)):
     if want.get(k) != got.get(k):

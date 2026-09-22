@@ -13,6 +13,7 @@ PCB = os.path.join(KD, "ir-ring.kicad_pcb")
 geo = json.load(open(os.path.join(HERE, "..", "geometry.json")))
 parts = json.load(open(os.path.join(KD, "parts.json")))
 nets = json.load(open(os.path.join(KD, "nets.json")))
+KNAME = json.load(open(os.path.join(KD, "net_names.json")))   # power symbols name nets globally: "GND", not "/GND"
 mm = pcbnew.FromMM; tomm = pcbnew.ToMM
 
 # Build from scratch. pcbnew.LoadBoard() corrupts the SWIG type table in the
@@ -58,12 +59,12 @@ dflt.SetViaDiameter(mm(0.6)); dflt.SetViaDrill(mm(0.3))
 ns.SetNetclass("Power", netclass("Power", 0.5, 0.15))      # width for ~0.5 A peak; 0.15 mm clearance is
                                                            # ample at <=16 V running / 33 V clamp (IPC-2221 ~0.1 mm to 50 V)
 ns.SetNetclass("LED", netclass("LED", 0.3, 0.15))          # 100 mA string current
-for pat in ["/+5V", "/GND", "/SW", "/VOUT"]: ns.SetNetclassPatternAssignment(pat, "Power")
+for pat in ["+5V", "GND", "/SW", "/VOUT"]: ns.SetNetclassPatternAssignment(pat, "Power")
 for pat in ["/STR*", "/FB", "/R1B_Q"]: ns.SetNetclassPatternAssignment(pat, "LED")
 
 NET = {}
 for name in nets:
-    n = pcbnew.NETINFO_ITEM(B, "/" + name); B.Add(n); NET[name] = n
+    n = pcbnew.NETINFO_ITEM(B, KNAME[name]); B.Add(n); NET[name] = n
 pin_net = {(r, p): n for n, nodes in nets.items() for r, p in nodes}
 
 LIBS = {"ir-ring": os.path.join(KD, "ir-ring.pretty")}
@@ -225,7 +226,7 @@ def via_free(x, y, rv=0.3, clr=0.2):
     if any(math.dist((x, y), v) < 2 * rv + clr for v in placed_vias): return False
     for f in FP.values():
         for q in f.Pads():
-            if q.GetNetname() == "/GND": continue
+            if q.GetNetname() == "GND": continue
             bb = q.GetBoundingBox()
             x0, y0 = tomm(bb.GetLeft()) - rv - clr, tomm(bb.GetTop()) - rv - clr
             x1, y1 = tomm(bb.GetRight()) + rv + clr, tomm(bb.GetBottom()) + rv + clr

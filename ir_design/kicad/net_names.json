@@ -1,0 +1,20 @@
+{
+ "+5V": "+5V",
+ "GND": "GND",
+ "LDR": "/LDR",
+ "IL_EN": "/IL_EN",
+ "WL_EN": "/WL_EN",
+ "SW": "/SW",
+ "VOUT": "/VOUT",
+ "FB": "/FB",
+ "R1B_Q": "/R1B_Q",
+ "Q1_G": "/Q1_G",
+ "U2_C": "/U2_C",
+ "STR1": "/STR1",
+ "STR2": "/STR2",
+ "STR3": "/STR3",
+ "STR4": "/STR4",
+ "STR5": "/STR5",
+ "STR6": "/STR6",
+ "STR7": "/STR7"
+}

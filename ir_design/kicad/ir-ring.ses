@@ -449,7 +449,7 @@
           (type protect)
         )
       )
-      (net "/GND"
+      (net "GND"
         (via "Via[0-1]_600:300_um" 1661710 -1065460
           (type protect)
         )
@@ -505,7 +505,7 @@
           (type protect)
         )
       )
-      (net "/+5V"
+      (net "+5V"
         (wire
           (path B.Cu 5000
             1584585 -925179
