@@ -13,8 +13,8 @@ Photos in `photos/`.
 | 1 | Silkscreen pin order | `- + IR HB` | 2026-09-22 | read from photo `000211`; confirm against the cable before layout |
 | 2 | Back-side clearance | **adequate everywhere** | 2026-09-22 | **GATE PASSED.** No local restriction — converter placement is unconstrained on the back face |
 | 2a | Substrate is aluminium? | **No — FR4** | 2026-09-22 | two-point resistance on the bare back reads open. See "Substrate" below |
-| 3 | `IR` line asserted | | | expect 3.3 V; sets U1 CTRL tolerance |
-| 3 | `HB` line asserted | | **CRITICAL PATH** — drives Q1's gate directly. 3.3 V or 5 V fine; 1.8 V will not switch it |
+| 3 | `IR` line asserted | **3.3 V** | 2026-09-22 | within TPS61165 CTRL rating |
+| 3 | `HB` line asserted | **3.3 V** | 2026-09-22 | **GATE PASSED.** With R3 = 1 k the gate sees 3.27 V vs AO3400A's 1.45 V max threshold — 2.3x margin |
 | 4 | Board current, IR channel on | | | headroom check against the new board's 271 mA |
 | 5 | Vf D1..D8 (diode mode) | | | resolves `SPEC.md` open item 2 — are the stock emitters degraded? |
 | 6 | Striped component, room light | | | resolves `SPEC.md` open item 3 |
@@ -66,7 +66,129 @@ Workable but not generous. **R1 is the knob**: if the evaluation rig shows
 adequate output at 80 mA, dropping there buys roughly 18 °C of margin for a
 ~20 % output cost. Decide this against measured radiant output, not on paper.
 
-## Mechanical (calipers — outstanding)
+## Scan-derived geometry (2026-09-22)
+
+Source: `photos/img20260922_10485355.jpg` (front) and `img20260922_10535866.jpg`
+(back), flatbed at **3200 dpi = 31.75 um/px** at the 1/4 working scale.
+
+**Scale independently verified.** The ruler's 1/16-inch ticks measure exactly
+50.00 px at 1/4 scale = 1.5875 mm against a true 1.58750 mm. Two further
+cross-checks agree: the tape-measure photos gave ~37 mm across, and a 16.8 mm
+bore passes an M12 lens barrel, which a 10.6 mm bore (the figure implied by the
+alternative scale reading) could not.
+
+### ⚠ Coordinate frames are mirrored between the two scans
+
+Back-scan angles are **mirrored** relative to front-scan angles:
+`front = 360 - back`. Both are quoted below in their own frame and labelled.
+Angles run from +x with **+y downward in the scan image**. Fix one datum before
+`Edge.Cuts` and convert everything into it.
+
+### Centre bore
+
+| Method | Value |
+|---|---|
+| Back scan, circle fit on boundary | **16.806 mm** |
+| Back scan, area-based | 16.827 mm |
+| Front scan, circle fit | 16.471 mm |
+
+The back scan is bare laminate with a hard edge; the front reads ~0.34 mm
+smaller because solder mask and silkscreen overhang the hole. **Use 16.8 mm for
+mechanical clearance, 16.5 mm for keep-out.** Circle-fit residual 235 um mean
+means the bore is routed, not drilled, and is not perfectly round.
+
+### Outer profile (back-scan frame, from bore centre)
+
+Median radius **20.01 mm**; extent **~37.9 mm** across both X and Y. The
+outline is irregular, not a disc:
+
+| Sector (back frame) | Min radius | Depth inside nominal |
+|---|---|---|
+| 31-60 deg | 15.65 mm | 4.36 mm |
+| 77-103 deg | 16.63 mm | 3.39 mm |
+| 150-194 deg | 17.81 mm | 2.20 mm |
+| 329-359 deg | 18.01 mm | 2.00 mm |
+
+Max radius 21.89 mm at 285 deg. Full 1-degree profile is reproducible from the
+scans; it will be sampled directly into `Edge.Cuts` rather than retyped.
+
+### Mounting holes - there are THREE, not two
+
+`SPEC.md` assumed two. The back scan shows three, and they sit on a common bolt
+circle:
+
+| # | Diameter | Bolt-circle radius | Angle (back frame) |
+|---|---|---|---|
+| 1 | 1.82 mm | 16.16 mm | 130.3 deg |
+| 2 | 1.86 mm | 16.03 mm | 330.6 deg |
+| 3 | 1.86 mm | 16.12 mm | 209.7 deg |
+
+Bolt-circle radius is consistent to **0.13 mm** across all three, so
+**16.10 mm** is a sound nominal. Spacing is *not* symmetric: 79.4 / 120.9 /
+159.7 degrees. Hole diameter ~1.85 mm suits an M1.6 screw with clearance.
+
+A fourth enclosed feature sits at r = 12.71 mm, 179.2 deg, 1.35 mm across -
+smaller and off the bolt circle. Identify it before treating it as a hole.
+
+### Emitters (front-scan frame, from bore centre)
+
+Eight found, mean radius **13.12 mm** (spread 12.79-13.55 mm):
+
+| Angle (front frame) | Radius |
+|---|---|
+| 38.6 | 12.79 |
+| 80.1 | 13.08 |
+| 121.2 | 12.80 |
+| 163.6 | 13.03 |
+| 203.1 | 13.43 |
+| 240.6 | 13.55 |
+| 319.4 | 13.22 |
+| 358.3 | 13.10 |
+
+**Spacing is not 45 degrees.** Seven gaps of ~40 degrees plus one gap of
+**78.8 degrees** centred near 280 degrees, where the passives and the
+`RZ-XHR(08SG)-C4` silkscreen sit. The new layout has fewer passives, so that
+gap can close - but the lens array's dome positions must be honoured, so this
+is constrained by measurement 16, not free.
+
+Package measures **2.7-3.0 x 3.5-4.0 mm** = **2835**, some placed rotated 90
+degrees.
+
+### Emitter package decision: 3535 - RESOLVED
+
+Radial room from bore edge (8.24 mm) to the nearest outer edge (~19 mm) is
+**~10.8 mm**, well past the ~8 mm threshold `SPEC.md` set for choosing 3535.
+The operator confirms the lens array dome is **7 mm diameter**, which covers a
+3.5 mm package comfortably.
+
+**Use 3535.** Per the Task 4 sourcing the shortlisted 2835 and 3535 parts are
+the same die family with identical electricals, so this changes the footprint
+only - no circuit rework.
+
+### Header J1 - NOT yet resolved
+
+**Five pad positions**, but the silkscreen reads `+ - IR HB` - **four labels**.
+Either one position is a no-connect or two share a function. Resolve before
+drawing the footprint.
+
+Pitch measured from solder fillets is **~1.31 mm**, which is not a standard
+value - fillet centroids are not pad centres and this method is not good enough
+here. True pitch is almost certainly **1.25 mm** (JST GH / PicoBlade class).
+**This must be confirmed with calipers**; a wrong pitch means the stock cable
+does not mate.
+
+## Still outstanding
+
+| # | Item | Why it matters |
+|---|---|---|
+| 11 | Header pitch + pin count + which pin is which | blocks the J1 footprint |
+| 12 | Board thickness | fab option |
+| 16 | Lens array standoff height, dome positions | dome dia 7 mm known; standoff still needed |
+| 4 | Stock board current draw | headroom check against 271 mA |
+| 5 | Per-emitter Vf | resolves whether the originals degraded |
+| 6 | Striped component light/dark resistance | drop it or replicate it |
+
+## Mechanical (calipers — superseded by the scans above)
 
 Photo-derived estimate only, **not for layout**: outer diameter ~36–40 mm,
 centre bore ~13–14 mm. Measure properly before `Edge.Cuts`.
