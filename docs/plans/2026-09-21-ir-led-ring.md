@@ -456,7 +456,16 @@ rtk git commit -m "feat(ir): schematic for the boost driver, string and current 
 
 ---
 
-### Task 8: Layout
+### Task 8: Layout — DONE 2026-09-22 (scripted placement + Freerouting)
+
+Built by `ir_design/scripts/09_place.py`, routed by Freerouting 2.4.1, and
+filled by `10_fill.py`. **DRC with `--schematic-parity` exits 0 at error
+severity: 0 violations, 0 unconnected pads, 0 footprint errors.** Remaining
+warnings are 2 copper slivers in the F.Cu pour and silkscreen cosmetics (JLCPCB
+clips silk at mask openings). See `ir_design/scripts/README.md` for the pipeline
+and the KiCad 9.0.8 scripting traps it works around. The steps below are the
+original plan, kept for reference.
+
 
 **Files:**
 - Modify: `ir_design/kicad/ir-ring.kicad_pcb`

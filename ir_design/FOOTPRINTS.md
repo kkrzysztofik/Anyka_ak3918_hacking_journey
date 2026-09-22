@@ -168,17 +168,8 @@ the converter only.
 decodes cleanly — `3535{series}{angle}-{wavelength}{chip}{bin}` — so
 `3535EW120-85035D` reads as 120 deg, 850 nm, 35 mil.
 
-### J1, 5-position 1.50 mm — RESOLVED, use the stock library
+### J1 — Molex PicoBlade 1.25 mm right-angle THT
 
-Operator confirms the connector is **pass-through (through-hole)**. With a
-1.50 mm pitch and 5 positions that is the **JST ZH** family, and KiCad ships
-the footprint:
+**CORRECTED 2026-09-22: 1.25 mm, not 1.50.** The connector's contacts on the 3200 dpi back scan measure **1.246 mm** pitch (gaps 1.23-1.27), with outer centres 4.98 mm apart, so the 6.0 mm caliper figure spanned the outer *edges*, not the centres. It is a **PicoBlade-class ("MX1.25") right-angle THT** part with its body on the back and the opening facing the board edge. Footprint: `Connector_Molex:Molex_PicoBlade_53048-0510_1x05_P1.25mm_Horizontal`. Flipped to the back and facing outward, its **pad 5** lands on the stock `+` contact, so the netlist is pad 5 = 5V, 4 = GND, 3 = LDR, 2 = IL_EN, 1 = WL_EN. The cable's wire order is unchanged. `09_place.py` checks all five pads against the measured contacts (within 0.03 mm) and checks that the body faces outward.
 
-`Connector_JST:JST_ZH_B5B-ZR_1x05_P1.50mm_Vertical`
-
-**No custom drawing needed.** Verify pin-1 orientation and the body outline
-against the stock board on the 1:1 print before routing — the *pitch* is
-certain, the *handedness* is not.
-
-Placement note: the body mounts on the back, which is also where the converter
-cluster lives. Keep them apart during Task 8.
+Net names are printed beside the pads on the back silkscreen, so a 1:1 print overlaid on the stock board checks the mapping at a glance.

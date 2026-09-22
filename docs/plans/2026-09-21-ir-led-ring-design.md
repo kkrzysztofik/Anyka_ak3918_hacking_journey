@@ -205,7 +205,7 @@ datasheet evidence; this table is the summary.
 | U2 | **Vishay TEMT6200FX01** `C143695`, custom 0805 footprint with collector marked | **populates the stock LDR position.** 2 x 1.25 x **0.85 mm** — fits the 1.00 mm clearance. **Must be IR-filtered, see below** |
 | R6 | ~100 kΩ, start value | LDR divider bottom leg, emitter to GND. Final value set on hardware |
 | R7 | **100 kΩ**, start value | **collector limiter, added 2026-09-22.** Caps the `LDR` node at `5.3 V x R6/(R6+R7)` ≈ 2.65 V, so the 5.3 V rail can never reach the SoC's ADC pin — see below |
-| J1 | **5-position, 1.50 mm pitch** (JST ZH class) | 6.0 mm outer-to-outer measured. Silkscreen `- + IR HB` is four labels for five pads — one is a no-connect or two share a function; ring it out before drawing |
+| J1 | **Molex PicoBlade 1.25 mm, 5-pos, right-angle THT**, body on the back | Pitch measured 1.246 mm from the scan (the 6.0 mm caliper figure was edge to edge). **Pad 5 = 5V ... pad 1 = WL_EN**, reversed against the stock `+ - LDR IR HB` order by the back-side flip. Net names on the back silk |
 
 ~~Layout rule: no RC on the CTRL net.~~ **Deleted 2026-09-22 with the move to
 SY7200A**, whose EN is a plain enable (1.5 V rising / 0.4 V falling) with no

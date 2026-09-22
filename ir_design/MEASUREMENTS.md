@@ -168,7 +168,7 @@ only - no circuit rework.
 ### Header J1 - RESOLVED
 
 **Five pad positions**, outer-to-outer **6.0 mm** measured with calipers
-(2026-09-22) = 4 gaps = **1.50 mm pitch**. JST ZH class, not the 1.25 mm GH I
+(2026-09-22). ~~= 4 gaps = 1.50 mm pitch, JST ZH class~~ — see correction below. The earlier fillet estimate was the 1.25 mm GH I
 guessed from solder fillets - fillet centroids are not pad centres, and that
 method was 13 % low.
 
@@ -216,7 +216,12 @@ workable.
 
 ## Stock circuit, traced 2026-09-22
 
-### J1 pinout (5 positions, 1.50 mm pitch)
+### J1 pinout (5 positions, **1.25 mm** pitch)
+
+**CORRECTED 2026-09-22: 1.25 mm, not 1.50.** The connector's contacts on the 3200 dpi back scan measure **1.246 mm** pitch (gaps 1.23-1.27), with outer centres 4.98 mm apart, so the 6.0 mm caliper figure spanned the outer *edges*, not the centres. It is a **PicoBlade-class ("MX1.25") right-angle THT** part with its body on the back and the opening facing the board edge. Footprint: `Connector_Molex:Molex_PicoBlade_53048-0510_1x05_P1.25mm_Horizontal`. Flipped to the back and facing outward, its **pad 5** lands on the stock `+` contact, so the netlist is pad 5 = 5V, 4 = GND, 3 = LDR, 2 = IL_EN, 1 = WL_EN. The cable's wire order is unchanged. `09_place.py` checks all five pads against the measured contacts (within 0.03 mm) and checks that the body faces outward.
+
+The table below is in stock-board pad order (`+` first); the new board's footprint numbers run the other way.
+
 
 | Pad | Function | Goes to |
 |---|---|---|
@@ -293,7 +298,7 @@ supporting a sensored ring, and this ring is the cost-reduced version.
 **Resolved:** the unused pole is `LED_R`. Pad 3 is named `LDR` by the camera
 itself, so it is unambiguously the light-sensor return.
 
-Until that is known, J1 on the new board stays **5-position, 1.50 mm pitch**,
+Until that is known, J1 on the new board stays **5-position, 1.25 mm pitch** (corrected from 1.50),
 matching the stock cable. Do not widen it to 6 on the strength of the camera
 header alone — that would need a new cable.
 
