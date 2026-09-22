@@ -18,7 +18,7 @@ FPR = "Resistor_SMD:R_0402_1005Metric"
 PARTS = {
  "J1":  ("Connector_Generic:Conn_01x05", "JST ZH B5B-ZR", "Connector_JST:JST_ZH_B5B-ZR_1x05_P1.50mm_Vertical", "", (30.48, 50.8)),
  "U1":  ("ir-ring:SY7200A", "SY7200A", "Package_TO_SOT_SMD:SOT-23-6_Handsoldering", "C107309", (91.44, 50.8)),
- "L1":  ("Device:L", "33uH Isat>=500mA", "Inductor_SMD:L_Changjiang_FTC404030S", "", (137.16, 50.8)),
+ "L1":  ("Device:L", "33uH SWPA4030S330MT", "ir-ring:L_Sunlord_SWPA4030S", "C83470", (137.16, 50.8)),
  "D1":  ("Device:D_Schottky", ">=40V 1A", "Diode_SMD:D_SOD-123", "C77343", (172.72, 50.8)),
  "C1":  ("Device:C", "10uF 25V", "Capacitor_SMD:C_0805_2012Metric", "C15850", (208.28, 50.8)),
  "C3":  ("Device:C", "100nF", "Capacitor_SMD:C_0402_1005Metric", "C307331", (233.68, 50.8)),
@@ -29,7 +29,7 @@ PARTS = {
  "R2":  ("Device:R", "1M", FPR, "", (129.54, 152.4)),
  "R3":  ("Device:R", "1k", FPR, "C11702", (154.94, 152.4)),
  "R4":  ("Device:R", "100k", FPR, "C25741", (180.34, 152.4)),
- "U2":  ("Device:Q_Photo_NPN", "TEMT6200FX01", "Resistor_SMD:R_0805_2012Metric", "", (218.44, 152.4)),
+ "U2":  ("Device:Q_Photo_NPN", "TEMT6200FX01", "ir-ring:TEMT6200_0805", "C143695", (218.44, 152.4)),
  "R7":  ("Device:R", "100k", FPR, "C25741", (248.92, 152.4)),
  "R6":  ("Device:R", "100k", FPR, "C25741", (274.32, 152.4)),
 }

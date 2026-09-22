@@ -190,7 +190,7 @@ datasheet evidence; this table is the summary.
 | Ref | Part | Note |
 |---|---|---|
 | U1 | **Silergy SY7200A**, SOT23-6, `C107309` | 1 MHz fixed, Vref 200 mV, ILIM 2 A, open-LED clamp 28/30/33 V, **plain EN** (1.5 V rising). Replaced TPS61165 2026-09-22 |
-| L1 | **33 µH** shielded, Isat ≥ 500 mA | Silergy's formula gives 29 µH at Vout 16 V, 33 µH at the typical 12 V. Required Isat 356 mA. The earlier 22 µH was TI's own cap, not physics |
+| L1 | **Sunlord SWPA4030S330MT**, `C83470`, 33 µH shielded 4x4x3 | Isat 1.10 A, Irms 0.84 A, DCR 0.33/0.43 Ω — ~3x margin on both currents. Custom footprint from Sunlord Table 4-1 |
 | D1 | Schottky **≥ 40 V**, SOD-123 | must exceed the 33 V open-LED clamp |
 | C1 | 10 µF 25 V 0805 | input; datasheet wants ≥ 4.7 µF |
 | C2 | **4.7 µF 50 V** 0805 | output; datasheet wants ≥ 2.2 µF. 50 V covers the 33 V clamp |
@@ -202,7 +202,7 @@ datasheet evidence; this table is the summary.
 | R3 | **1 kΩ** | Q1 gate, from `HB`. **Not 10 kΩ** — see below |
 | R4 | 100 kΩ | Q1 gate pulldown |
 | D2–D9 | 850 nm IR, **3535** | 10.8 mm radial room, 7 mm dome. **Height limit lifted 2026-09-22** — the operator will raise the lens array rather than constrain the emitter. Same die family as the 2835 alternative, so ratings are unchanged |
-| U2 | **Vishay TEMT6200FX01** ambient light sensor, 0805 | **populates the stock LDR position.** 2 x 1.25 x **0.85 mm** — fits the 1.00 mm clearance. **Must be IR-filtered, see below** |
+| U2 | **Vishay TEMT6200FX01** `C143695`, custom 0805 footprint with collector marked | **populates the stock LDR position.** 2 x 1.25 x **0.85 mm** — fits the 1.00 mm clearance. **Must be IR-filtered, see below** |
 | R6 | ~100 kΩ, start value | LDR divider bottom leg, emitter to GND. Final value set on hardware |
 | R7 | **100 kΩ**, start value | **collector limiter, added 2026-09-22.** Caps the `LDR` node at `5.3 V x R6/(R6+R7)` ≈ 2.65 V, so the 5.3 V rail can never reach the SoC's ADC pin — see below |
 | J1 | **5-position, 1.50 mm pitch** (JST ZH class) | 6.0 mm outer-to-outer measured. Silkscreen `- + IR HB` is four labels for five pads — one is a no-connect or two share a function; ring it out before drawing |

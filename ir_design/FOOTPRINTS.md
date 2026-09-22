@@ -17,21 +17,42 @@ Library survey run against KiCad 9.0.8 stock libraries (`/usr/share/kicad/footpr
 | R3 | 1 kΩ | `Resistor_SMD:R_0402_1005Metric` |
 | R4 | 100 kΩ | `Resistor_SMD:R_0402_1005Metric` |
 | R6 | ~100 kΩ sensor divider | `Resistor_SMD:R_0402_1005Metric` |
-| U2 | TEMT6200FX01 ambient light sensor | `Resistor_SMD:R_0805_2012Metric` — the part uses a standard 0805 footprint; **verify against the Vishay drawing before committing** |
+| U2 | TEMT6200FX01 ambient light sensor, `C143695` | **custom `ir-ring:TEMT6200_0805`** — see below |
 
 `_Handsoldering` variants chosen for U1 and the passives where available: this
 is a prototype run and the larger pads cost nothing on a board with this much
 free copper.
 
-## Still to source — L1
+## L1 — RESOLVED: Sunlord SWPA4030S330MT (`C83470`)
 
-L1 is 33 µH, Isat ≥ 500 mA, DCR < 50 mΩ (Silergy's guidance). The footprint
-follows the part, not the other way round. Stock library has credible
-candidates once the part is picked — `L_Vishay_IHLP-5050`,
-`L_Chilisin_BWVS00505030`, `L_Changjiang_FTC404030S`, `L_Wuerth_MAPI-4020`.
+Spec `ir_design/swpa4030s.pdf` (SWPA1102230000 rev 11), Appendix A row:
+33 µH ±20 %, DCR **0.330 Ω typ / 0.429 Ω max**, Isat **1.10 A**, Irms
+**0.84 A**, SRF 10 MHz. Shielded, 4.0 x 4.0 x 3.0 mm max.
 
-Height is unconstrained on the back side, so prefer the lowest DCR that fits
-the clear area from measurement 15.
+Against this design (~0.36 A peak, ~0.27 A input): **~3x margin on both
+saturation and heating current**. Worst-case DCR loss ~31 mW. SRF sits 10x above
+the 1 MHz switching frequency. Silergy's "DCR < 50 mΩ" guidance targets their
+2 A applications and does not bind at our current; a 5 x 5 mm part would
+only add board area.
+
+KiCad ships no SWPA footprint. `ir-ring:L_Sunlord_SWPA4030S` is drawn from
+Table 4-1's recommended reflow pattern: pads 1.10 x 3.70 mm with a 1.90 mm
+inner gap, 3.00 mm centre to centre. Verified against the spec to 0.01 mm.
+
+## U2 — custom footprint, not generic 0805
+
+`ir-ring:TEMT6200_0805` follows Vishay's recommended solder pad
+(`ir_design/temt6200.pdf`, doc 81317 rev 1.9 p.5): two 1.0 x 1.45 mm pads with
+a **0.6 mm gap**. KiCad's `R_0805` has ~0.8 mm and no polarity marking. The
+marking is the real reason: **VECO max is 1.5 V**, so a part fitted backwards
+does not work. **Pad 1 = collector** (matches `Device:Q_Photo_NPN` pin 1), with a
+"C" on the silkscreen. On the part, the die sits toward the collector end,
+visible through the clear body, 0.82 mm from that edge. That gives a check at
+incoming inspection.
+
+VCEO max is **6 V**, and the collector sits at most at the 5.3 V rail
+through R7. That is inside the rating, close enough to note, and it rules out
+running this sensor from any higher rail.
 
 ## Custom — must be drawn
 
