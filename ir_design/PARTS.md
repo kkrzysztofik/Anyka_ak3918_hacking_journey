@@ -20,16 +20,68 @@ treated as evidence — they were wrong about this part family more than once.
 
 ---
 
-## Decision: U1 = TPS61165DBVR
+## ⚠ U1 IS BEING RE-OPENED — survey incomplete (2026-09-22)
+
+The decision below stands **provisionally**, but it was not a real selection:
+of three candidates, one was eliminated on a hard number and one was
+eliminated on availability without its datasheet ever being read. TPS61165
+was the last part standing, not the best part found.
+
+**HT7938A is obsolete, which is why no datasheet existed.** Holtek issued a
+formal EOL notice for the HT7938A-3 with a last purchase date of
+**2021-12-31**, and wound down HT7939 in the same batch; the notice now sits
+on Holtek's *expired* EOL page. Remaining distributor stock is residual
+inventory. This supersedes the "could not retrieve" note below — the part is
+dead, not merely undocumented, and it will not be restocked.
+
+### Leading alternative: Silergy SY7200A (`C107309`)
+
+Not yet adopted — **one number is still missing** (see below) — but it beats
+the incumbent on every criterion checked so far:
+
+| | TPS61165 (incumbent) | **SY7200A** |
+|---|---|---|
+| `VIN` | 3–18 V | **2.8–30 V** — 5.3 V mid-range, 32 V abs max on IN/EN |
+| OVP | 38 V, latching | 30 V typ, plus LED open-circuit protection and OTP |
+| Switch limit | 1.2 A | **2 A** |
+| Frequency | 1.2 MHz | 1 MHz |
+| Enable | CTRL, shared with EasyScale — needs a timing proof and a no-RC layout rule | **plain EN, pull high** |
+| LCSC | Extended, 4 722 stock, ~$1 | **86 130 stock, $0.11** |
+| String rating | — | up to 8 series LEDs / 30 V — **exactly this design** |
+
+The EN pin is the substantive win, not the price: TPS61165 required a full
+EasyScale timing analysis and a permanent layout constraint purely to prove a
+bare GPIO is safe. A plain EN deletes that class of failure.
+
+**Blocking: `VFB` is unverified.** LCSC serves HTML to `curl`, `WebFetch`
+returned nothing, and mirror fetches timed out. `VFB` sets R1a/R1b, so the
+swap cannot be completed without it. Get the datasheet by hand from
+<https://www.lcsc.com/product-detail/LED-Drivers_Silergy-Corp-SY7200AABC_C107309.html>
+and read the Electrical Characteristics table.
+
+Also unchecked on SY7200A: exact package for the `ABC` suffix (Silergy reuses
+suffixes across SOT23-6 and DFN), and lifecycle status.
+
+### Other candidates
+
+- **MP3202** (MPS) — `VFB` **104 mV**, which would halve sense dissipation and
+  double the resistor value. But `VIN` max is **6 V** against our 5.3 V rail,
+  only 0.7 V of margin, and OVP needs a separate OV pin wired to the string
+  top. Datasheet revisions date from 2006–2007; lifecycle unconfirmed.
+- **AP5724 / AP5725 / AP5726** (Diodes) — `VFB` 0.1 / 0.25 / 0.31 V. **`VIN`
+  max 5.5 V — disqualifying.** That is 0.2 V over a rail measured once,
+  unloaded, at one temperature.
+- **LGS63030B6** (Legend-Si, `C5123976`) — quoted 3–60 V, 1.2 MHz, boost with
+  UVP/OVP/OCP/OTP. Not yet evaluated.
+
+### Provisional decision (unchanged until the above resolves)
 
 **Texas Instruments TPS61165, SOT-23-6, LCSC/JLCPCB `C58756`, Extended part.**
-
-Decisive reason: it is the only candidate whose numbers could be verified at
-all. The HT7938A alternative is **out of stock at JLCPCB (0 units)**, is
-parametrically listed at **20 mA** output — a sixth of what this board needs —
-and its datasheet could not be retrieved from any source. The TPS61165 clears
-every requirement with margin, and its one known hazard (the EasyScale dimming
-protocol on CTRL) is provably not reachable from a static GPIO.
+It clears every requirement with verified margin, and its one known hazard —
+the EasyScale dimming protocol on CTRL — is provably unreachable from a static
+GPIO. Everything downstream in this document (R1a/R1b at 4.02 Ω, L1 at 22 µH,
+C2 at 50 V, C4 at 220 nF) is computed against it and **must be recomputed if
+U1 changes**.
 
 Datasheet: <https://www.ti.com/lit/ds/symlink/tps61165.pdf> (SLVS790E, April 2019)
 LCSC: <https://www.lcsc.com/product-detail/LED-Drivers_Texas-Instruments-Texas-Instruments-TPS61165DBVR_C58756.html>
