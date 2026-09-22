@@ -262,20 +262,36 @@ the camera.
 So the stock board *supports* a light sensor and this variant does not fit one.
 Nothing to replicate — but see the design question this raises.
 
+### Camera-side pinout — read off the camera silkscreen
+
+| Pin | Camera label | Ring board |
+|---|---|---|
+| 1 | `5V` | pad 1, `+` — measures 5.3 V |
+| 2 | `GND` | pad 2, `-` |
+| 3 | **`LDR`** | pad 3 — unpopulated light sensor |
+| 4 | `IL_EN` | pad 4 — illuminator enable, drives Q2 (IR). Firmware `IR_LED` |
+| 5 | `WL_EN` | pad 5 — white-light enable, drives Q3. Firmware `WHITE_LED` |
+| 6 | `LED_R` | **not present on the ring board** — red status LED |
+
+This maps exactly onto the continuity trace. It also names the two GPIOs:
+`IL_EN` / `WL_EN` are the `IR_LED` / `WHITE_LED` nodes the firmware writes.
+
+The 6th pole is `LED_R`, a red status indicator. Deliberately **not** carried
+onto the new board — a visible red LED defeats the point of a covert IR
+illuminator.
+
 ### ⚠ Connector pole-count mismatch: camera 6, board 5
 
 The camera-side header has **6 poles**; the ring board's connector has **5**,
-and the cable carries 5 conductors (2026-09-22).
+and the cable carries 5 conductors (2026-09-22). The unused pole is `LED_R`.
 
 So the camera is wired for a signal this ring board variant never uses. Read
 alongside the unpopulated light-sensor position and the 9th dome in the lens
 array, the likely story is that the camera main board is a common design
 supporting a sensored ring, and this ring is the cost-reduced version.
 
-**Unresolved and worth one session with a meter:** which camera pin is unused,
-whether the cable's light-sensor conductor (board pad 3) actually lands on the
-SoC ADC, and whether the 6th pole is a second light-sensor terminal (divider
-at the camera end) or something unrelated.
+**Resolved:** the unused pole is `LED_R`. Pad 3 is named `LDR` by the camera
+itself, so it is unambiguously the light-sensor return.
 
 Until that is known, J1 on the new board stays **5-position, 1.50 mm pitch**,
 matching the stock cable. Do not widen it to 6 on the strength of the camera
@@ -323,3 +339,39 @@ centre bore ~13–14 mm. Measure properly before `Edge.Cuts`.
 | 14 | Radial lobe width at an LED | | decides 2835 vs 3535 |
 | 15 | Largest clear area on the **back** | | note mounting bosses and cable landing |
 | 16 | Lens array: OD, locating features, dome positions, standoff height | | decides front keep-out and whether a 3535 sits correctly under a stock-sized dome |
+
+
+## ⚠ The unpopulated LDR probably explains a known firmware problem
+
+`wiki/IR-Night-Mode-Calibration.md` records these measurements on `.198`
+(2026-08-02), reading `/sys/kernel/ain/ain0`:
+
+| Condition | `ain0` |
+|---|---|
+| Dark box over the whole front | ~648 |
+| Room light, uncovered | ~670 |
+| Shipped thresholds | `day_threshold = 662`, `night_threshold = 652` |
+
+**A dark box to room light moves the reading 22 counts.** A working LDR swings
+hundreds. A 22-count wiggle on a ~660 baseline is drift around a fixed bias —
+exactly what an ADC reads when the divider's light-dependent leg is *not
+fitted*. And the shipped thresholds, 662 and 652, sit **inside** that 22-count
+band, so the fallback day/night decision is being made on noise.
+
+We have now physically confirmed the LDR footprint is unpopulated on this
+board, and the camera's own silkscreen names pin 3 `LDR`. Those two facts
+together make the reading above very hard to explain any other way.
+
+If this holds, the `ain0` fallback path in `night_mode.rs` has never had a real
+light signal on these cameras, which is consistent with AUTO night mode leaning
+on AE luma — and AE luma is a servo setpoint that cannot see dusk, per
+`[[ae-luma-cannot-see-dusk]]`, firing ~2.5 h late.
+
+**This is the strongest argument for populating the LDR position on the new
+board.** It is two components on a board already being respun, and it may fix
+dusk detection rather than merely improving the illuminator.
+
+Caveat before treating it as settled: confirm the same variant is fitted
+fleet-wide. `[[ae-luma-cannot-see-dusk]]` records `.121` swinging 548-639,
+a 91-count range — larger than `.198`'s 22 and worth re-checking on hardware
+before generalising.
