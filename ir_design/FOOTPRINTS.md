@@ -35,42 +35,71 @@ the clear area from measurement 15.
 
 ## Custom — must be drawn
 
-### D2–D9, 3535 IR emitter — STILL BLOCKED, and the shortlisted part is wrong
+### D2–D9 — RESOLVED: JNJ-L-3535EW120-85035D-SL-J2 (`C22447930`)
 
-`ir_design/C22447934.pdf` was read (JNJ-L-3535AW30-805xx-SL-J2-D3, rev A/2).
-**It is not the part this design needs.** Three deviations, all from the
-datasheet's own Optical Characteristics table:
+**Correction first.** An earlier revision of this file attributed
+`C22447934` to Task 4. That was wrong — I picked that code out of a search
+result and misattributed it. Task 4 actually recommended `C7529167` (3535,
+845-860 nm, Vf 1.4-1.8 V, 60 deg) and `C7500098` (2835, 840-870 nm,
+Vf 1.5-2.0 V, 90 deg). **Task 4's Vf figure was correct**; the 810 nm /
+2.5 V / 30 deg complaint was against a part it never chose. What survived
+from that review is the *beam angle* criterion, which the shortlist genuinely
+never applied, and thin stock on both (535 / 570 units).
 
-| | Datasheet | Design needs |
-|---|---|---|
-| Wavelength | **810 nm** | 850 nm |
-| `VF` | **2.5 V typ / 3.2 V max @ 350 mA** | Task 4 recorded ~1.5 V @ 100 mA — not supported by this document |
-| Viewing angle | **30 deg** | wide — the lens array dome does the focusing |
+#### Candidates evaluated 2026-09-22
 
-Matching Task 4: Tj 115 °C, 700 mA max continuous, 30 mil chip.
+| Code | Part | Vf | Angle | If max | Chip | Verdict |
+|---|---|---|---|---|---|---|
+| **C22447930** | JNJ-L-3535EW120-85035D-SL-J2 | **1.4-1.6 V** | **120 deg** | 1 A | 35 mil | **CHOSEN** |
+| C2988736 | XYC-HIRC19C120-35 | 1.4-2.0 V | 120 deg | 1.2 A | 35 mil | good alternate, looser Vf bin |
+| C2988738 | XYC-HIRC19C120-28 | 1.4-2.0 V | 120 deg | 750 mA | 28 mil | smaller die, no benefit at 100 mA |
+| C25170649 | JNJ-L-3535EW90-85028C-SL-Q2 | 1.4-1.5 V | 90 deg | 700 mA | 28 mil | viable if 120 deg proves too wide |
+| C22447925 | JNJ-L-3535AG60-85028D-SL-J2 | 1.3-1.4 V | 60 deg | 700 mA | 28 mil | 180 mW/sr — throw, not coverage |
+| C2988744 | XYC-HIRC19C120-42 | **2.8-3.2 V** | 120 deg | 1.5 A | 42 mil | **DISQUALIFIED** |
 
-**Why each one matters**
+All are 850 nm and SMD3535-3P.
 
-*810 nm is more visible to the eye than 850 nm*, not less. It glows a
-noticeable dull red. The all-IR decision was justified on covertness, and this
-part erodes exactly that. (It is also brighter to the sensor, since silicon QE
-is higher at 810 nm — a real trade, but not the one that was chosen.)
+#### Why C2988744 is out
 
-*`VF` drives the whole power budget.* At 2.5 V typ the string is ~17.6 V at
-100 mA and up to ~23 V on a cold high bin, against SY7200A's 28/30/33 V
-open-LED clamp — workable but nothing like the 1.9x headroom Task 4 claimed.
-Rail draw becomes ~390 mA, not 271 mA, and board dissipation ~2.1 W, not
-~1.1 W. The thermal estimate in the design doc is sized on the lower figure.
+`Vf` 2.8-3.2 V is a **multi-junction die** — roughly three junctions in one
+package. Eight in series is **22.4-25.6 V**, against SY7200A's open-LED clamp
+of 28/30/33 V. The clamp would sit barely above the normal operating string
+voltage, so a cold high-Vf bin could trip protection during normal running.
+Everything else on the list is single-junction at 1.3-2.0 V.
 
-*30 deg is the wrong beam for this optical stack.* The stock lens array already
-collimates; feeding it a narrow emitter compounds the focusing and gives a hot
-centre with dark edges. The stock 2835 parts are almost certainly wide-angle
-(~120 deg) with the dome doing the work. **Emitter beam angle is a selection
-criterion Task 4 never applied.**
+#### Why 120 degrees, not 60
 
-**What is needed:** the 850 nm variant of this family (part code likely
-`...-850xx-...`), or an equivalent 850 nm 3535 with a wide native beam. Its
-own `VF` curve then feeds back into the rail-draw and thermal numbers.
+The emitters all point forward on parallel axes, so the array's beam is the
+single-emitter beam — the ring does not splay it. **And the lens array dome
+narrows whatever it is given.** Starting at 120 deg and letting the dome
+collimate lands near the camera's field of view; starting at 60 deg would
+compound into a spot.
+
+The failure modes are asymmetric. Too wide costs range but keeps coverage.
+Too narrow produces a bright centre that the auto-exposure meters on, which
+then *darkens* the corners — the classic cheap-IR-camera look, and precisely
+what this board exists to fix. `C22447925`'s 180 mW/sr at 350 mA versus
+`C22447930`'s 70 is concentration, not more light.
+
+#### Why this part over the other two 120 deg options
+
+Its **Vf bin is 1.4-1.6 V**, tighter than the 1.4-2.0 V of both NEWOPTO parts.
+String voltage predictability is worth real money here: it sets duty cycle,
+rail draw and the OVP margin. The 35 mil die also runs cooler than the 28 mil
+at equal current.
+
+#### The power budget survives
+
+At 100 mA the string is roughly 11-13 V, so duty ~0.56, rail draw ~266 mA and
+LED dissipation ~1.2 W. **These are within a few percent of the 271 mA and
+1.1 W already in the design doc** — nothing downstream needs recomputing. We
+are also running at **10 % of the part's 1 A rating**, so junction temperature
+has enormous margin.
+
+Footprint still to be drawn from the datasheet's recommended pad layout.
+`ir_design/C22447934.pdf` is the same family and its part-number scheme now
+decodes cleanly — `3535{series}{angle}-{wavelength}{chip}{bin}` — so
+`3535EW120-85035D` reads as 120 deg, 850 nm, 35 mil.
 
 ### J1, 5-position 1.50 mm — RESOLVED, use the stock library
 
