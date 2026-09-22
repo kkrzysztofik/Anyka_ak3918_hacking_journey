@@ -202,6 +202,8 @@ datasheet evidence; this table is the summary.
 | R3 | **1 kΩ** | Q1 gate, from `HB`. **Not 10 kΩ** — see below |
 | R4 | 100 kΩ | Q1 gate pulldown |
 | D2–D9 | 850 nm IR, **3535 flat-top**, **height ≤ 1.0 mm** | Package resolved 2026-09-22: 10.8 mm of radial room and a 7 mm dome. **Height is a hard limit** — clearance under the lens array is 1.00 mm, and many 3535 parts are ~1.9 mm with an integral dome |
+| U2 | **Vishay TEMT6200FX01** ambient light sensor, 0805 | **populates the stock LDR position.** 2 x 1.25 x **0.85 mm** — fits the 1.00 mm clearance. **Must be IR-filtered, see below** |
+| R6 | ~100 kΩ, start value | LDR divider bottom leg, emitter to GND. Final value set on hardware |
 | J1 | **5-position, 1.50 mm pitch** (JST ZH class) | 6.0 mm outer-to-outer measured. Silkscreen `- + IR HB` is four labels for five pads — one is a no-connect or two share a function; ring it out before drawing |
 
 ~~Layout rule: no RC on the CTRL net.~~ **Deleted 2026-09-22 with the move to
@@ -212,6 +214,31 @@ than documented around.
 
 **Board: two-layer FR4, 1.0 mm** (1.05 mm measured on the stock board), 2 oz
 copper.
+
+### The light sensor must be IR-blind, or it oscillates
+
+The camera names J1 pin 3 `LDR` and the stock footprint for it is unpopulated,
+which appears to be why `ain0` cannot see daylight — see
+`ir_design/MEASUREMENTS.md`. This design populates it.
+
+**The sensor must reject near-IR.** An IR-sensitive part — most cheap 940 nm
+phototransistors, and a bare CdS cell — would be illuminated by *our own
+850 nm array* and report daylight. That closes a positive feedback loop:
+dark -> illuminator on -> sensor sees IR -> "day" -> illuminator off -> dark.
+The camera would hunt at dusk instead of switching once.
+
+**Vishay TEMT6200FX01** is specified with a near-IR suppression filter and a
+450-610 nm photopic response, which is exactly the requirement. 0805,
+**0.85 mm tall**, inside the 1.00 mm clearance.
+
+Polarity must satisfy the firmware's `ldr_high_is_day = true`, so the reading
+has to *rise* with light: collector to the rail, emitter to the node, **R6 from
+node to ground**, node to J1 pad 3. With ~39 uA of light current, R6 starts
+around 100 kΩ and is trimmed on hardware.
+
+**One measurement finalises it:** the camera reads ~660 counts on `ain0` with
+nothing fitted, so something biases that line at the camera end. Fit the sensor,
+read `ain0` covered and uncovered, and size R6 for the widest swing.
 
 Inductor sizing against the **measured** 5.3 V rail: `D = 1 − 5.3/16 = 0.67`,
 input current `16 × 0.1 / (0.85 × 5.3) = 355 mA`, `ΔI` at 30 % = 107 mA, so
