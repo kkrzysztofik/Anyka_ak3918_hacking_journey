@@ -10,14 +10,17 @@ import uuid, os, sys
 sys.path.insert(0, os.path.dirname(__file__))
 exec(open(os.path.join(os.path.dirname(__file__), "sexp.py")).read())
 
-U = lambda: str(uuid.uuid4())
-ROOT = U()
+# Deterministic UUIDs: the PCB links footprints to symbols by UUID, so random
+# ones would orphan every footprint on each regeneration.
+NS = uuid.UUID("6b1f0c8e-2d4a-4b5e-9c1d-7a3e5f2b8c90")
+def U(key): return str(uuid.uuid5(NS, key))
+ROOT = U("root")
 
 # ---- parts: ref -> (lib_id, value, footprint, LCSC, (x,y)) ----
 FPR = "Resistor_SMD:R_0402_1005Metric"
 PARTS = {
- "J1":  ("Connector_Generic:Conn_01x05", "JST ZH B5B-ZR", "Connector_JST:JST_ZH_B5B-ZR_1x05_P1.50mm_Vertical", "", (30.48, 50.8)),
- "U1":  ("ir-ring:SY7200A", "SY7200A", "Package_TO_SOT_SMD:SOT-23-6_Handsoldering", "C107309", (91.44, 50.8)),
+ "J1":  ("Connector_Generic:Conn_01x05", "PicoBlade/MX1.25 5p R/A THT", "Connector_Molex:Molex_PicoBlade_53048-0510_1x05_P1.25mm_Horizontal", "", (30.48, 50.8)),
+ "U1":  ("ir-ring:SY7200A", "SY7200A", "Package_TO_SOT_SMD:SOT-23-6", "C107309", (91.44, 50.8)),
  "L1":  ("Device:L", "33uH SWPA4030S330MT", "ir-ring:L_Sunlord_SWPA4030S", "C83470", (137.16, 50.8)),
  "D1":  ("Device:D_Schottky", ">=40V 1A", "Diode_SMD:D_SOD-123", "C77343", (172.72, 50.8)),
  "C1":  ("Device:C", "10uF 25V", "Capacitor_SMD:C_0805_2012Metric", "C15850", (208.28, 50.8)),
@@ -37,12 +40,18 @@ for i in range(8):
     PARTS[f"D{i+2}"] = ("Device:LED", "IR 850nm 120deg", "ir-ring:LED_3535_JNJ_EW120", "C22447930", (30.48 + i*33.02, 101.6))
 
 # ---- THE netlist: net -> [(ref, pin)] ----
+# J1 pin numbers are REVERSED relative to the stock board's "+ - LDR IR HB"
+# silkscreen order. J1 is a PicoBlade-class 1.25 mm right-angle THT part with
+# its body on the BACK and its opening facing the board edge. Flipped to the
+# back and facing outward, the footprint's pad 5 lands on the stock "+" pad
+# (front-frame x = -5.52 mm). The cable wire order along the row is unchanged.
+# Measured 2026-09-22; see ir_design/MEASUREMENTS.md "J1".
 NETS = {
- "+5V":   [("J1","1"),("U1","6"),("L1","1"),("C1","1"),("C3","1"),("R7","1")],
- "GND":   [("J1","2"),("U1","2"),("C1","2"),("C3","2"),("C2","2"),("R1a","2"),("Q1","2"),("R2","2"),("R4","2"),("R6","2")],
+ "+5V":   [("J1","5"),("U1","6"),("L1","1"),("C1","1"),("C3","1"),("R7","1")],
+ "GND":   [("J1","4"),("U1","2"),("C1","2"),("C3","2"),("C2","2"),("R1a","2"),("Q1","2"),("R2","2"),("R4","2"),("R6","2")],
  "LDR":   [("J1","3"),("U2","2"),("R6","1")],
- "IL_EN": [("J1","4"),("U1","4"),("R2","1")],
- "WL_EN": [("J1","5"),("R3","1")],
+ "IL_EN": [("J1","2"),("U1","4"),("R2","1")],
+ "WL_EN": [("J1","1"),("R3","1")],
  "SW":    [("U1","1"),("L1","2"),("D1","2")],
  "VOUT":  [("D1","1"),("C2","1"),("U1","5"),("D2","2")],
  "FB":    [("D9","1"),("U1","3"),("R1a","1"),("R1b","1")],
@@ -86,12 +95,12 @@ out = [f'(kicad_sch (version 20250114) (generator "eeschema") (generator_version
        "(lib_symbols"]
 out += [dump(SYMS[l], 1) for l in used]
 out.append(")")
-out.append(f'(text "Label-connected schematic. Every connection is a net label at a pin tip.\\nSource of truth: NETS in 07_schematic.py; 08_verify_netlist.py diffs the exported netlist against it." (exclude_from_sim no) (at 20 20 0) (effects (font (size 1.27 1.27)) (justify left)) (uuid "{U()}"))')
+out.append(f'(text "Label-connected schematic. Every connection is a net label at a pin tip.\\nSource of truth: NETS in 07_schematic.py; 08_verify_netlist.py diffs the exported netlist against it." (exclude_from_sim no) (at 20 20 0) (effects (font (size 1.27 1.27)) (justify left)) (uuid "{U("note")}"))')
 
 for ref, (lid, val, fp, lcsc, (x, y)) in PARTS.items():
-    pl = "".join(f'(pin "{n}" (uuid "{U()}"))' for n in PINS[lid])
+    pl = "".join(f'(pin "{n}" (uuid "{U(f"pin:{ref}:{n}")}"))' for n in PINS[lid])
     out.append(
-      f'(symbol (lib_id "{lid}") (at {x} {y} 0) (unit 1) (exclude_from_sim no) (in_bom yes) (on_board yes) (dnp no) (uuid "{U()}")'
+      f'(symbol (lib_id "{lid}") (at {x} {y} 0) (unit 1) (exclude_from_sim no) (in_bom yes) (on_board yes) (dnp no) (uuid "{U(f"sym:{ref}")}")'
       f'(property "Reference" "{ref}" (at {x+5.08} {y-2.54} 0) (effects (font (size 1.27 1.27)) (justify left)))'
       f'(property "Value" "{val}" (at {x+5.08} {y} 0) (effects (font (size 1.27 1.27)) (justify left)))'
       f'(property "Footprint" "{fp}" (at {x} {y} 0) {FH})'
@@ -103,12 +112,13 @@ for ref, (lid, val, fp, lcsc, (x, y)) in PARTS.items():
         lx, ly = round(x + px, 4), round(y - py, 4)      # symbol Y is up, schematic Y is down
         la = (ang + 180) % 360                           # point the label away from the body
         just = "left" if la in (0, 90) else "right"
-        out.append(f'(label "{seen[(ref,num)]}" (at {lx} {ly} {la}) (effects (font (size 1.27 1.27)) (justify {just} bottom)) (uuid "{U()}"))')
+        out.append(f'(label "{seen[(ref,num)]}" (at {lx} {ly} {la}) (effects (font (size 1.27 1.27)) (justify {just} bottom)) (uuid "{U(f"lbl:{ref}:{num}")}"))')
 
 out.append('(sheet_instances (path "/" (page "1")))')
 out.append("(embedded_fonts no))")
 dst = os.path.join(os.path.dirname(__file__), "..", "kicad", "ir-ring.kicad_sch")
 open(dst, "w").write("\n".join(out))
 import json
+json.dump({k:{"lib_id":v[0],"value":v[1],"footprint":v[2],"lcsc":v[3],"uuid":U(f"sym:{k}")} for k,v in PARTS.items()}, open(os.path.join(os.path.dirname(__file__), "..", "kicad", "parts.json"), "w"), indent=1)
 json.dump(NETS, open(os.path.join(os.path.dirname(__file__), "..", "kicad", "nets.json"), "w"), indent=1)
 print(f"wrote {os.path.normpath(dst)}: {len(PARTS)} parts, {len(NETS)} nets, {len(seen)} pin connections")
