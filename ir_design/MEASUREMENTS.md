@@ -172,14 +172,32 @@ only - no circuit rework.
 guessed from solder fillets - fillet centroids are not pad centres, and that
 method was 13 % low.
 
-Silkscreen reads `+ - IR HB`, **four labels for five positions**, so one pad is
-a no-connect or two share a function. Still to confirm: count the conductors in
-the stock cable and ring out which pad is which.
+**Five conductors** in the stock cable (2026-09-22), so all five positions are
+used against four silkscreen labels. Operator reports `+` and `-` land directly
+on the white emitter string. Exact pad-to-signal mapping still to be rung out —
+see "Outstanding" below. This matters: J1's pin order must match the stock
+cable or the board is unusable without rewiring.
 
 ### Board thickness
 
 **1.05 mm** measured. Order **1.0 mm** FR4 (standard JLCPCB option; 1.05 is the
 measurement including solder mask).
+
+### ⚠ Lens array domes sit directly over the existing emitters
+
+Operator confirms (2026-09-22) the domes are **directly over the current
+diodes**. Two consequences, both binding:
+
+1. **Emitter positions are frozen**, including the uneven spacing measured from
+   the scans — seven gaps of ~40 deg and one of 78.8 deg. The earlier note that
+   the wide gap "can close now there are fewer passives" is **withdrawn**. New
+   emitters must land on the old centres or they sit off-axis under their dome.
+2. The stock array has **4 domes over the former IR positions** and flat
+   windows over the 4 white positions. Going all-IR means four emitters get a
+   focused dome and four get a flat window — a **mixed beam pattern**, narrow
+   throw from four, wide flood from four. Not necessarily bad, but it is a
+   change in beam shape, not just brightness. Confirm the dome count before
+   layout.
 
 ### ⚠ Dome clearance - 1.00 mm, and it constrains the emitter
 
@@ -200,9 +218,8 @@ workable.
 
 | # | Item | Why it matters |
 |---|---|---|
-| 11 | Header pitch + pin count + which pin is which | blocks the J1 footprint |
-| 12 | Board thickness | fab option |
-| 16 | Lens array standoff height, dome positions | dome dia 7 mm known; standoff still needed |
+| 11 | **Which pad is which signal** | blocks the J1 footprint; pitch and count now known |
+| 16 | **Dome count** — 4 or 8? | decides whether the beam pattern is mixed |
 | 4 | Stock board current draw | headroom check against 271 mA |
 | 5 | Per-emitter Vf | resolves whether the originals degraded |
 | 6 | Striped component light/dark resistance | drop it or replicate it |
