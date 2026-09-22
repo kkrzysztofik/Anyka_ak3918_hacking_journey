@@ -447,6 +447,12 @@ design doc's BOM, enumerated   13 singles + D2–D9 (8) + J1  = 22
 
 | Ref | Value | LCSC | Package | JLC | Stock | Datasheet |
 |---|---|---|---|---|---|---|
+> **⚠ STALE (2026-09-22):** this table predates the SY7200A swap, the
+> switched sense resistor, the light sensor and the emitter choice. The
+> **schematic is now the source of truth** for values, footprints and LCSC
+> codes: `ir_design/scripts/07_schematic.py`, `PARTS` dict. This table gets
+> regenerated from it in Task 9.
+
 | **U1** | TPS61165DBVR boost LED driver | `C58756` | SOT-23-6 | **Extended** | 4 722 | [TI SLVS790E](https://www.ti.com/lit/ds/symlink/tps61165.pdf) |
 | **L1** | 22 µH shielded, Isat 1.6 A, 130 mΩ | `C2849503` | SMD 5 × 5 × 4.0 mm | Extended | 1 455 | [LCSC](https://www.lcsc.com/product-detail/C2849503.html) |
 | **D1** | Schottky 60 V 1 A, `Vf` 580 mV @1 A | `C77343` | SOD-123 | Extended | 45 265 | [LCSC](https://www.lcsc.com/product-detail/C77343.html) |

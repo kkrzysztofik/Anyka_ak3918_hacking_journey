@@ -204,6 +204,7 @@ datasheet evidence; this table is the summary.
 | D2–D9 | 850 nm IR, **3535** | 10.8 mm radial room, 7 mm dome. **Height limit lifted 2026-09-22** — the operator will raise the lens array rather than constrain the emitter. Same die family as the 2835 alternative, so ratings are unchanged |
 | U2 | **Vishay TEMT6200FX01** ambient light sensor, 0805 | **populates the stock LDR position.** 2 x 1.25 x **0.85 mm** — fits the 1.00 mm clearance. **Must be IR-filtered, see below** |
 | R6 | ~100 kΩ, start value | LDR divider bottom leg, emitter to GND. Final value set on hardware |
+| R7 | **100 kΩ**, start value | **collector limiter, added 2026-09-22.** Caps the `LDR` node at `5.3 V x R6/(R6+R7)` ≈ 2.65 V, so the 5.3 V rail can never reach the SoC's ADC pin — see below |
 | J1 | **5-position, 1.50 mm pitch** (JST ZH class) | 6.0 mm outer-to-outer measured. Silkscreen `- + IR HB` is four labels for five pads — one is a no-connect or two share a function; ring it out before drawing |
 
 ~~Layout rule: no RC on the CTRL net.~~ **Deleted 2026-09-22 with the move to
@@ -236,9 +237,27 @@ has to *rise* with light: collector to the rail, emitter to the node, **R6 from
 node to ground**, node to J1 pad 3. With ~39 uA of light current, R6 starts
 around 100 kΩ and is trimmed on hardware.
 
-**One measurement finalises it:** the camera reads ~660 counts on `ain0` with
-nothing fitted, so something biases that line at the camera end. Fit the sensor,
-read `ain0` covered and uncovered, and size R6 for the widest swing.
+**R7 protects the SoC.** With the collector tied straight to the 5.3 V rail, a
+phototransistor in daylight saturates and pulls the `LDR` node to ~5 V. That
+node is J1 pin 3, which goes straight to an ADC input on the AK3918. Its
+full-scale voltage is unknown, but it is almost certainly not 5 V. R7 in series
+with the collector turns saturation into a fixed divider: the node can never
+exceed `5.3 x R6/(R6+R7)` ≈ **2.65 V** at equal values, whatever the light.
+One resistor, and it is the safe default at a trust boundary we cannot see
+into.
+
+It is also a calibration knob. The phototransistor saturates at about
+`5.3 V / (R6+R7)` ≈ 26 µA, so bright indoor light and daylight both read as
+"day". The useful range, from dusk to a few lux, falls in the linear region.
+Raise R6 for more dusk sensitivity, and keep R7 >= R6 so the ceiling stays
+under half the rail.
+
+**One measurement finalises both values:** the ADC's full-scale voltage.
+Read `ain0` and measure pin 3 with a meter at the same moment; counts over
+volts gives the scale. The camera already reads ~660 counts with nothing
+fitted, so something biases that line at the camera end. Fit the sensor, read
+`ain0` covered and uncovered, and trim R6/R7 for the widest swing below full
+scale.
 
 Inductor sizing against the **measured** 5.3 V rail: `D = 1 − 5.3/16 = 0.67`,
 input current `16 × 0.1 / (0.85 × 5.3) = 355 mA`, `ΔI` at 30 % = 107 mA, so
