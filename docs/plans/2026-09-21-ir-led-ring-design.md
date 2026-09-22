@@ -201,7 +201,7 @@ datasheet evidence; this table is the summary.
 | Q1 | Logic-level N-MOSFET, 30 V, SOT-23 | source at ground; `Rds(on)` skews R1b, trim if > ~2 % |
 | R3 | **1 kΩ** | Q1 gate, from `HB`. **Not 10 kΩ** — see below |
 | R4 | 100 kΩ | Q1 gate pulldown |
-| D2–D9 | 850 nm IR, **3535 flat-top**, **height ≤ 1.0 mm** | Package resolved 2026-09-22: 10.8 mm of radial room and a 7 mm dome. **Height is a hard limit** — clearance under the lens array is 1.00 mm, and many 3535 parts are ~1.9 mm with an integral dome |
+| D2–D9 | 850 nm IR, **3535** | 10.8 mm radial room, 7 mm dome. **Height limit lifted 2026-09-22** — the operator will raise the lens array rather than constrain the emitter. Same die family as the 2835 alternative, so ratings are unchanged |
 | U2 | **Vishay TEMT6200FX01** ambient light sensor, 0805 | **populates the stock LDR position.** 2 x 1.25 x **0.85 mm** — fits the 1.00 mm clearance. **Must be IR-filtered, see below** |
 | R6 | ~100 kΩ, start value | LDR divider bottom leg, emitter to GND. Final value set on hardware |
 | J1 | **5-position, 1.50 mm pitch** (JST ZH class) | 6.0 mm outer-to-outer measured. Silkscreen `- + IR HB` is four labels for five pads — one is a no-connect or two share a function; ring it out before drawing |
@@ -326,11 +326,17 @@ over whatever package is chosen.
    but the swap to SY7200A removes the mechanism altogether — plain EN, 1.5 V
    rising threshold, driven directly by the measured 3.3 V line. No residual
    layout rule.
-8. **Emitter height.** Clearance under the lens array is **1.00 mm**. The
-   Task 4 shortlist never checked package height, and many 3535 infrared
-   emitters are ~1.9 mm tall with an integral dome. Selection must be
-   restricted to flat-top parts ≤ 1.0 mm. The stock 2835 at ~0.7 mm proves the
-   envelope is workable.
+8. ~~**Emitter height.**~~ **Resolved 2026-09-22 by decision, not by part
+   selection:** stock clearance under the lens array is 1.00 mm and most 3535
+   emitters are 1.4-2.0 mm, so the operator will **raise the dome** instead of
+   restricting the package. 3535 stands.
+
+   Two consequences to carry into mechanical work. Raising the array increases
+   the emitter-to-dome standoff, so a dome that collimated a 0.7 mm-tall part
+   will focus differently on a ~1.9 mm one — **expect a changed beam pattern,
+   probably wider**. And the 9th smaller dome over the light sensor rises with
+   it, which is harmless for a 0.85 mm sensor but should not be allowed to
+   shadow it.
 7. **Emitter junction temperature is now the binding constraint.** With the
    ballast resistors deleted by the topology, the dies are what run hot:
    ~44 °C board-wide rise from 1.1 W plus ~13 °C locally, over ~40 °C internal
