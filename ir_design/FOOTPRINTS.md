@@ -35,24 +35,54 @@ the clear area from measurement 15.
 
 ## Custom — must be drawn
 
-### D2–D9, 3535 IR emitter — BLOCKED
+### D2–D9, 3535 IR emitter — STILL BLOCKED, and the shortlisted part is wrong
 
-Needs the chosen part's recommended pad layout, including the thermal pad.
-Task 4 shortlisted JNJ `C22447934`; its datasheet has not been read. A 3535
-package is 3.45 × 3.45 mm nominal but anode/cathode/thermal pad geometry
-varies between manufacturers and **must not be guessed** — eight wrong
-footprints is a scrapped board.
+`ir_design/C22447934.pdf` was read (JNJ-L-3535AW30-805xx-SL-J2-D3, rev A/2).
+**It is not the part this design needs.** Three deviations, all from the
+datasheet's own Optical Characteristics table:
 
-### J1, 5-position 1.50 mm — BLOCKED
+| | Datasheet | Design needs |
+|---|---|---|
+| Wavelength | **810 nm** | 850 nm |
+| `VF` | **2.5 V typ / 3.2 V max @ 350 mA** | Task 4 recorded ~1.5 V @ 100 mA — not supported by this document |
+| Viewing angle | **30 deg** | wide — the lens array dome does the focusing |
 
-Pitch (1.50 mm) and position count (5) are measured. What is not settled:
+Matching Task 4: Tj 115 °C, 700 mA max continuous, 30 mil chip.
 
-- **Through-hole or SMD**, and **which side the body mounts on.** The back scan
-  shows the white housing with five contacts at the board edge; the front scan
-  shows five solder fillets. That is consistent with either a through-hole part
-  bodied on the back and soldered on the front, *or* an edge-mount SMD part on
-  the back. The scan cannot separate them.
-- Pin 1 orientation relative to the board datum.
+**Why each one matters**
 
-This matters beyond the footprint: our converter cluster also lives on the
-back, so if the connector bodies there, the two must not collide.
+*810 nm is more visible to the eye than 850 nm*, not less. It glows a
+noticeable dull red. The all-IR decision was justified on covertness, and this
+part erodes exactly that. (It is also brighter to the sensor, since silicon QE
+is higher at 810 nm — a real trade, but not the one that was chosen.)
+
+*`VF` drives the whole power budget.* At 2.5 V typ the string is ~17.6 V at
+100 mA and up to ~23 V on a cold high bin, against SY7200A's 28/30/33 V
+open-LED clamp — workable but nothing like the 1.9x headroom Task 4 claimed.
+Rail draw becomes ~390 mA, not 271 mA, and board dissipation ~2.1 W, not
+~1.1 W. The thermal estimate in the design doc is sized on the lower figure.
+
+*30 deg is the wrong beam for this optical stack.* The stock lens array already
+collimates; feeding it a narrow emitter compounds the focusing and gives a hot
+centre with dark edges. The stock 2835 parts are almost certainly wide-angle
+(~120 deg) with the dome doing the work. **Emitter beam angle is a selection
+criterion Task 4 never applied.**
+
+**What is needed:** the 850 nm variant of this family (part code likely
+`...-850xx-...`), or an equivalent 850 nm 3535 with a wide native beam. Its
+own `VF` curve then feeds back into the rail-draw and thermal numbers.
+
+### J1, 5-position 1.50 mm — RESOLVED, use the stock library
+
+Operator confirms the connector is **pass-through (through-hole)**. With a
+1.50 mm pitch and 5 positions that is the **JST ZH** family, and KiCad ships
+the footprint:
+
+`Connector_JST:JST_ZH_B5B-ZR_1x05_P1.50mm_Vertical`
+
+**No custom drawing needed.** Verify pin-1 orientation and the body outline
+against the stock board on the 1:1 print before routing — the *pitch* is
+certain, the *handedness* is not.
+
+Placement note: the body mounts on the back, which is also where the converter
+cluster lives. Keep them apart during Task 8.
