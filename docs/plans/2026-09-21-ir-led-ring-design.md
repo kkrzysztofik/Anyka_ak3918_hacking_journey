@@ -186,26 +186,29 @@ datasheet evidence; this table is the summary.
 
 | Ref | Part | Note |
 |---|---|---|
-| U1 | **TPS61165DBVR**, SOT-23-6 | 1.2 MHz fixed, Vfb 200 mV, ILIM 1.2 A, Vout 38 V with latching OVP. Chosen partly because HT7938A has no obtainable datasheet and no JLCPCB stock |
-| L1 | **22 µH** shielded, Isat ≥ 600 mA | not 33 µH — f is 1.2 MHz, and TI caps the inductor at 22 µH |
-| D1 | Schottky **≥ 40 V**, SOD-123 | TI requires ≥ 40 V; 30 V was wrong |
-| C1 | 10 µF 25 V 0805 | input |
-| C2 | **4.7 µF 50 V** 0805 | output. **50 V** — it sees the ~38 V OVP excursion. 4.7 µF now the inrush limit is gone |
+| U1 | **Silergy SY7200A**, SOT23-6, `C107309` | 1 MHz fixed, Vref 200 mV, ILIM 2 A, open-LED clamp 28/30/33 V, **plain EN** (1.5 V rising). Replaced TPS61165 2026-09-22 |
+| L1 | **33 µH** shielded, Isat ≥ 500 mA | Silergy's formula gives 29 µH at Vout 16 V, 33 µH at the typical 12 V. Required Isat 356 mA. The earlier 22 µH was TI's own cap, not physics |
+| D1 | Schottky **≥ 40 V**, SOD-123 | must exceed the 33 V open-LED clamp |
+| C1 | 10 µF 25 V 0805 | input; datasheet wants ≥ 4.7 µF |
+| C2 | **4.7 µF 50 V** 0805 | output; datasheet wants ≥ 2.2 µF. 50 V covers the 33 V clamp |
 | C3 | 100 nF 0402 | input bypass |
-| C4 | **220 nF** 0402 | **COMP to GND.** SOT-23-6 pin 5 is COMP; TI requires this. Keep it off the switching loop, on quiet analogue ground |
+| R2 | **1 MΩ** 0402 | **EN pulldown.** Silergy layout note 6: required where the driving pin is high-impedance at shutdown — exactly a camera GPIO before its port is initialised. Without it the illuminator can light at boot |
 | R1a | Sense, `Vfb / 0.05 A` ≈ 4.0 Ω 1 % | permanent — sets the half-power default |
 | R1b | Same value, through Q1 | parallels R1a to ~2.0 Ω for full power |
 | Q1 | Logic-level N-MOSFET, 30 V, SOT-23 | source at ground; `Rds(on)` skews R1b, trim if > ~2 % |
 | R3 | **1 kΩ** | Q1 gate, from `HB`. **Not 10 kΩ** — see below |
 | R4 | 100 kΩ | Q1 gate pulldown |
-| D2–D9 | 850 nm IR, 2835 or 3535 | **measurement 14 changes only the footprint** — the shortlisted parts are one die family with identical electricals |
-| J1 | 4-pin header | stock footprint, `- + IR HB`. Pitch pending measurement 11 — do not guess it |
+| D2–D9 | 850 nm IR, **3535 flat-top**, **height ≤ 1.0 mm** | Package resolved 2026-09-22: 10.8 mm of radial room and a 7 mm dome. **Height is a hard limit** — clearance under the lens array is 1.00 mm, and many 3535 parts are ~1.9 mm with an integral dome |
+| J1 | **5-position, 1.50 mm pitch** (JST ZH class) | 6.0 mm outer-to-outer measured. Silkscreen `- + IR HB` is four labels for five pads — one is a no-connect or two share a function; ring it out before drawing |
 
-**Layout rule, not a suggestion: no RC on the CTRL net.** TPS61165's CTRL pin
-carries TI's EasyScale one-wire protocol. Entering it requires a low pulse
-longer than 260 µs within a 1 ms window after a rising edge, which a static
-GPIO cannot produce — but an RC on that net could manufacture one, and the
-result is an illuminator that comes up at some arbitrary dimmed level.
+~~Layout rule: no RC on the CTRL net.~~ **Deleted 2026-09-22 with the move to
+SY7200A**, whose EN is a plain enable (1.5 V rising / 0.4 V falling) with no
+one-wire protocol to fall into. Our measured 3.3 V GPIO drives it directly.
+This is the main reason the part was swapped: the hazard is designed out rather
+than documented around.
+
+**Board: two-layer FR4, 1.0 mm** (1.05 mm measured on the stock board), 2 oz
+copper.
 
 Inductor sizing against the **measured** 5.3 V rail: `D = 1 − 5.3/16 = 0.67`,
 input current `16 × 0.1 / (0.85 × 5.3) = 355 mA`, `ΔI` at 30 % = 107 mA, so
@@ -288,12 +291,16 @@ over whatever package is chosen.
    is a second argument against dropping L1 below 22 µH.
 5. **Single string, single point of failure.** One open emitter kills all
    eight. U1's OVP must shut down cleanly rather than running the output away.
-6. ~~**Driver enable semantics.**~~ **CLOSED 2026-09-22.** TI §9.2.1.2.1:
-   entering EasyScale needs a rising edge, then a low longer than
-   `tes_det` = 260 µs, inside a 1 ms window. A static GPIO never produces that
-   low, so the condition is unreachable and the part defaults to PWM dimming
-   where DC high = full brightness. Survives as the layout rule above: **no RC
-   on the CTRL net.**
+6. ~~**Driver enable semantics.**~~ **CLOSED 2026-09-22, then designed out.**
+   The EasyScale analysis showed a static GPIO could not enter the protocol,
+   but the swap to SY7200A removes the mechanism altogether — plain EN, 1.5 V
+   rising threshold, driven directly by the measured 3.3 V line. No residual
+   layout rule.
+8. **Emitter height.** Clearance under the lens array is **1.00 mm**. The
+   Task 4 shortlist never checked package height, and many 3535 infrared
+   emitters are ~1.9 mm tall with an integral dome. Selection must be
+   restricted to flat-top parts ≤ 1.0 mm. The stock 2835 at ~0.7 mm proves the
+   envelope is workable.
 7. **Emitter junction temperature is now the binding constraint.** With the
    ballast resistors deleted by the topology, the dies are what run hot:
    ~44 °C board-wide rise from 1.1 W plus ~13 °C locally, over ~40 °C internal

@@ -165,17 +165,36 @@ The operator confirms the lens array dome is **7 mm diameter**, which covers a
 the same die family with identical electricals, so this changes the footprint
 only - no circuit rework.
 
-### Header J1 - NOT yet resolved
+### Header J1 - RESOLVED
 
-**Five pad positions**, but the silkscreen reads `+ - IR HB` - **four labels**.
-Either one position is a no-connect or two share a function. Resolve before
-drawing the footprint.
+**Five pad positions**, outer-to-outer **6.0 mm** measured with calipers
+(2026-09-22) = 4 gaps = **1.50 mm pitch**. JST ZH class, not the 1.25 mm GH I
+guessed from solder fillets - fillet centroids are not pad centres, and that
+method was 13 % low.
 
-Pitch measured from solder fillets is **~1.31 mm**, which is not a standard
-value - fillet centroids are not pad centres and this method is not good enough
-here. True pitch is almost certainly **1.25 mm** (JST GH / PicoBlade class).
-**This must be confirmed with calipers**; a wrong pitch means the stock cable
-does not mate.
+Silkscreen reads `+ - IR HB`, **four labels for five positions**, so one pad is
+a no-connect or two share a function. Still to confirm: count the conductors in
+the stock cable and ring out which pad is which.
+
+### Board thickness
+
+**1.05 mm** measured. Order **1.0 mm** FR4 (standard JLCPCB option; 1.05 is the
+measurement including solder mask).
+
+### ⚠ Dome clearance - 1.00 mm, and it constrains the emitter
+
+Clearance between the board face and the underside of the lens array is
+**1.0 mm**. All converter parts are on the back, so this binds on one thing
+only: **the emitters must be no taller than ~1.0 mm including any integral
+lens.**
+
+This was *not* a criterion in the Task 4 emitter shortlist and must be applied
+retroactively. Many 3535 infrared emitters are ~1.9 mm tall with an integral
+dome and **will not fit**; flat-top 3535 parts run ~0.6-0.8 mm and will. The
+stock 2835 is ~0.7 mm, which is the existence proof that the envelope is
+workable.
+
+**Hard selection criterion: emitter height <= 1.0 mm, flat-top package.**
 
 ## Still outstanding
 

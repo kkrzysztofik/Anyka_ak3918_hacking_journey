@@ -20,7 +20,47 @@ treated as evidence — they were wrong about this part family more than once.
 
 ---
 
-## ⚠ U1 IS BEING RE-OPENED — survey incomplete (2026-09-22)
+## DECISION: U1 = Silergy SY7200A (`C107309`) — 2026-09-22
+
+Datasheet obtained (`ir_design/sy7200a.pdf`, Rev 1.0) and every number below is
+read from it. **SY7200A replaces TPS61165.**
+
+| Parameter | Verified value | vs TPS61165 |
+|---|---|---|
+| `VIN` | **2.8-30 V** | 3-18 V |
+| `VREF` | **200 mV** (196/200/204) | 200 mV — *identical, so R1a/R1b do not change* |
+| Switch limit | **2 / 2.6 / 3.5 A** | 1.2 A |
+| Open-LED clamp `VOCL` | **28 / 30 / 33 V** | 38 V |
+| `FSW` | **1 MHz fixed** | 1.2 MHz |
+| EN | **plain enable, rising 1.5 V / falling 0.4 V** | CTRL shared with EasyScale |
+| Package | SOT23-6, `SY7200AABC` | SOT-23-6 |
+| Stock / price | 86 130 @ $0.11 | Extended, 4 722 @ ~$1 |
+
+**Decisive reasons**, in order: a plain EN pin at a 1.5 V threshold takes our
+measured 3.3 V GPIO directly and **deletes the EasyScale timing hazard and its
+no-RC-on-CTRL layout rule entirely**; `VIN` 2.8-30 V gives real margin where TI
+gave 3-18; and the 200 mV reference means the sense resistors are unchanged, so
+the swap costs no rework.
+
+### Knock-on changes from the swap
+
+- **C4 (220 nF COMP) is DELETED.** SY7200A has no COMP pin — pins are LX, GND,
+  FB, EN/PWM, OVP, IN. Loop compensation is internal.
+- **L1 returns to 33 uH.** The 22 uH figure was TI's own cap, not physics.
+  Silergy's formula `L = VIN^2 (VOUT-VIN) / (VOUT^2 * FSW * IOUT * 40%)` gives
+  29 uH at VOUT 16 V and 33 uH at the typical 12 V. `ISAT` needed is 356 mA.
+- **Add R2 = 1 M pulldown on EN.** Datasheet layout note 6 recommends it where
+  the driving pin may be high-impedance at shutdown — which is exactly a camera
+  GPIO before its port is initialised. Without it the illuminator can come up
+  at boot.
+- **OVP is a pin (5), not internal.** It must be wired per the typical
+  application circuit; confirm from the datasheet figure before schematic.
+- Unchanged: R1a/R1b 4.02 R, D1 >=40 V, C1 10 uF (>=4.7 required), C2 4.7 uF
+  50 V (>=2.2 required).
+
+### Superseded survey notes
+
+
 
 The decision below stands **provisionally**, but it was not a real selection:
 of three candidates, one was eliminated on a hard number and one was
@@ -74,7 +114,7 @@ suffixes across SOT23-6 and DFN), and lifecycle status.
 - **LGS63030B6** (Legend-Si, `C5123976`) — quoted 3–60 V, 1.2 MHz, boost with
   UVP/OVP/OCP/OTP. Not yet evaluated.
 
-### Provisional decision (unchanged until the above resolves)
+### Previous provisional decision — SUPERSEDED
 
 **Texas Instruments TPS61165, SOT-23-6, LCSC/JLCPCB `C58756`, Extended part.**
 It clears every requirement with verified margin, and its one known hazard —
