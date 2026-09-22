@@ -96,7 +96,60 @@ LED dissipation ~1.2 W. **These are within a few percent of the 271 mA and
 are also running at **10 % of the part's 1 A rating**, so junction temperature
 has enormous margin.
 
-Footprint still to be drawn from the datasheet's recommended pad layout.
+**Footprint drawn 2026-09-22:** `ir-ring:LED_3535_JNJ_EW120`
+(`ir_design/kicad/ir-ring.pretty/`), from the vendor's recommended pad
+drawing, datasheet rev A page 3. Dimensions read against the drawing's own
+labels (1.0 mm centre pad = 80 px, 3.3 mm height = 263 px, consistent to
+0.3 %):
+
+| Pad | Net | Size | Position |
+|---|---|---|---|
+| 1 | cathode | 0.6 x 3.3 mm, plus 0.3 x 0.6 outward tab | x = -1.30 |
+| 2 | anode, thermal | 1.0 x 3.3 mm | x = 0 |
+| 2 | anode | 0.6 x 3.3 mm, plus 0.3 x 0.6 outward tab | x = +1.30 |
+
+Package pins 2 and 3 are common inside the part, so every anode pad is
+numbered `2` and a plain two-pin LED symbol works. Loads cleanly in
+pcbnew 9.0.8.
+
+**Added beyond the vendor drawing:** three 0.3 mm thermal vias in the anode
+pad, at 1.0 mm pitch. They are the thermal design on a board with no metal
+core. They are separate pads with no paste layer, so they do not starve the
+joint.
+
+#### ⚠ Verify pin-1 handedness before ordering — a mirror shorts the LED
+
+The datasheet's top view and bottom view **both** put pin 1 on the left.
+Both cannot be true. Most likely the "bottom" view is drawn see-through from
+the top, which is common in these datasheets, and the footprint follows the
+top view (pin 1 left, looking down on the board). That is a reading of the
+drawing, not a certainty.
+
+**The failure is not benign.** If the footprint is mirrored, the anode net
+lands on the cathode pad and on the anode centre pad at the same time, which
+shorts every emitter in the string. Check before ordering:
+
+- against JLCPCB's own library footprint for `C22447930` (EasyEDA view), or
+- by putting a meter in diode mode across a physical part, or
+- by the corner chamfer: the top view puts it at the pin-2 (anode) corner.
+
+A pin-1 dot is on the silkscreen, so the assembled orientation can be
+inspected.
+
+#### ⚠ The thermal pad IS the anode — layout consequence for Task 8
+
+On this part the big centre pad is not electrically isolated. It is the
+anode. In a series string every emitter's anode sits at a **different
+potential**, from ~1.4 V up to ~13 V. So:
+
+- **each emitter's back-side thermal copper must be its own island**, sized
+  as large as the space allows, and
+- those islands **cannot join the ground pour** or each other.
+
+This limits heat spreading per emitter to its own island. At 100 mA, 10 % of
+the part's rating, that is acceptable, but it rules out the "one big back pour
+for heat" picture the substrate section assumed. The ground pour lives under
+the converter only.
 `ir_design/C22447934.pdf` is the same family and its part-number scheme now
 decodes cleanly — `3535{series}{angle}-{wavelength}{chip}{bin}` — so
 `3535EW120-85035D` reads as 120 deg, 850 nm, 35 mil.
