@@ -104,9 +104,9 @@ labels (1.0 mm centre pad = 80 px, 3.3 mm height = 263 px, consistent to
 
 | Pad | Net | Size | Position |
 |---|---|---|---|
-| 1 | cathode | 0.6 x 3.3 mm, plus 0.3 x 0.6 outward tab | x = -1.30 |
+| 1 | cathode | 0.6 x 3.3 mm, plus 0.3 x 0.6 outward tab | x = **+1.30** |
 | 2 | anode, thermal | 1.0 x 3.3 mm | x = 0 |
-| 2 | anode | 0.6 x 3.3 mm, plus 0.3 x 0.6 outward tab | x = +1.30 |
+| 2 | anode | 0.6 x 3.3 mm, plus 0.3 x 0.6 outward tab | x = **-1.30** |
 
 Package pins 2 and 3 are common inside the part, so every anode pad is
 numbered `2` and a plain two-pin LED symbol works. Loads cleanly in
@@ -117,24 +117,17 @@ pad, at 1.0 mm pitch. They are the thermal design on a board with no metal
 core. They are separate pads with no paste layer, so they do not starve the
 joint.
 
-#### ⚠ Verify pin-1 handedness before ordering — a mirror shorts the LED
+#### Pin-1 handedness: RESOLVED
 
-The datasheet's top view and bottom view **both** put pin 1 on the left.
-Both cannot be true. Most likely the "bottom" view is drawn see-through from
-the top, which is common in these datasheets, and the footprint follows the
-top view (pin 1 left, looking down on the board). That is a reading of the
-drawing, not a certainty.
+The datasheet has **one** pad view, and it is a bottom view, with pin 1 on
+the left. The drawing on the same page labelled like a top view shows the
+lens face, not the pads, so the two do not conflict. My first revision drew
+pin 1 on the left and was mirrored. Fixed on 2026-09-22: looking down on the
+board, **pin 1 (cathode) is on the right**. The pin-1 dot on the silkscreen
+moved with it.
 
-**The failure is not benign.** If the footprint is mirrored, the anode net
-lands on the cathode pad and on the anode centre pad at the same time, which
-shorts every emitter in the string. Check before ordering:
-
-- against JLCPCB's own library footprint for `C22447930` (EasyEDA view), or
-- by putting a meter in diode mode across a physical part, or
-- by the corner chamfer: the top view puts it at the pin-2 (anode) corner.
-
-A pin-1 dot is on the silkscreen, so the assembled orientation can be
-inspected.
+Seen from the component side, the part's corner chamfer should sit on the
+anode (left) side. That gives a visual check at incoming inspection.
 
 #### ⚠ The thermal pad IS the anode — layout consequence for Task 8
 
