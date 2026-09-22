@@ -214,15 +214,71 @@ workable.
 
 **Hard selection criterion: emitter height <= 1.0 mm, flat-top package.**
 
+## Stock circuit, traced 2026-09-22
+
+### J1 pinout (5 positions, 1.50 mm pitch)
+
+| Pad | Function | Goes to |
+|---|---|---|
+| 1 | `+` rail | anodes of all 4 white emitters **and** the 2 "bottom" IR emitters |
+| 2 | `-` return | emitters of Q2 and Q3 |
+| 3 | **light-sensor return** | unpopulated R6 and the unpopulated top position |
+| 4 | IR enable | Q2 base via a resistor beside R5 |
+| 5 | white enable | Q3 base via R5 |
+
+Q2 sinks the cathodes of the 2 "top" IR emitters; Q3 sinks the white string.
+
+### The IR channel is 2S2P — SPEC.md was right
+
+`+` reaches only 2 of the 4 IR emitters, and Q2 sinks the other 2. So the IR
+array is **two series pairs in parallel**: `+` -> bottom IR -> top IR ->
+ballast -> Q2 -> `-`. That is exactly the topology `SPEC.md` described, now
+confirmed by continuity rather than inferred.
+
+The whites are separate: all 4 anodes on `+`, cathodes sunk by Q3.
+
+### SPEC.md open item 2 — RESOLVED: the emitters are healthy
+
+Diode-mode forward voltages, all eight:
+
+| | Vf (meter test current) |
+|---|---|
+| IR (x4) | **1.23-1.24 V** |
+| White (x4) | **2.54 V** |
+
+Tightly matched within each group and consistent with healthy parts — 1.23 V at
+~1 mA is normal for an 850 nm AlGaAs die. **No emitter is degraded.** The dark
+night image is not a failed array; it is an undersized one, which is what
+`[[white-led-is-the-usable-night-illuminator]]` concluded from luma
+measurements. Two independent lines now agree.
+
+### SPEC.md open item 3 — RESOLVED: it is an unpopulated light sensor
+
+The "striped component near the top-centre pads" is an **unpopulated
+footprint**, not a fitted part. Its divider partner R6 is also unpopulated, and
+R1 in that section is a **0 ohm link**. Pad 3 of J1 is the return path back to
+the camera.
+
+So the stock board *supports* a light sensor and this variant does not fit one.
+Nothing to replicate — but see the design question this raises.
+
+### Lens array — 8 domes, plus a 9th
+
+**8 domes, one per emitter, plus 1 smaller dome** over the unpopulated
+light-sensor position.
+
+This **withdraws the mixed-beam concern** recorded above: every emitter gets a
+dome, so an all-IR board keeps a uniform beam pattern. It also confirms the
+array was designed for a populated light sensor.
+
+Emitter positions remain frozen to the existing centres.
+
 ## Still outstanding
 
 | # | Item | Why it matters |
 |---|---|---|
-| 11 | **Which pad is which signal** | blocks the J1 footprint; pitch and count now known |
-| 16 | **Dome count** — 4 or 8? | decides whether the beam pattern is mixed |
-| 4 | Stock board current draw | headroom check against 271 mA |
-| 5 | Per-emitter Vf | resolves whether the originals degraded |
-| 6 | Striped component light/dark resistance | drop it or replicate it |
+| 4 | Stock board current draw | **not measurable with available tools.** Estimable from the ballast resistor values instead — read the codes off R2/R13 and compute. Informational only |
+| — | Whether J1 pad 3 reaches the SoC ADC (`ain0`) | decides whether to populate a light sensor — see below |
 
 ## Mechanical (calipers — superseded by the scans above)
 
