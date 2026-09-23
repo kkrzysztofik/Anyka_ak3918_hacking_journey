@@ -83,7 +83,11 @@ export function ConfigPickerDialog({
               No compatible configurations available.
             </div>
           ) : (
-            <div className="space-y-2" role="radiogroup">
+            <div
+              className="space-y-2"
+              role="radiogroup"
+              aria-label={`Available ${title} configurations`}
+            >
               {candidates.map((token) => (
                 <label
                   key={token}

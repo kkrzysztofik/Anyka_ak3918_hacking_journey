@@ -1,7 +1,7 @@
 # Profile management stops at "Coming Soon"
 
 Date: 2026-09-21
-Status: design approved, implementation not started
+Status: implemented (PR #120) — WebUI picker flow and the six ONVIF media operations shipped
 
 Branch: `design/profile-management`, worktree `.worktrees/profile-management`,
 based on `origin/main` at 32b5cea4.

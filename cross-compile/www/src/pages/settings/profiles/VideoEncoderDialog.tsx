@@ -49,9 +49,13 @@ export function VideoEncoderDialog({
           getVideoEncoderConfigurationOptions(encoderToken),
         ]);
         if (controller.signal.aborted) return;
-        if (encoderConfig) {
-          setConfig(encoderConfig);
+        if (!encoderConfig) {
+          // The configuration vanished (e.g. deleted while open) — nothing to edit.
+          toast.error('Video encoder configuration not found');
+          onCloseRef.current();
+          return;
         }
+        setConfig(encoderConfig);
         setOptions(encoderOptions);
       } catch (error) {
         if (controller.signal.aborted) return;

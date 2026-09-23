@@ -58,7 +58,7 @@ Read these once. Each one will cost you an hour if you meet it cold.
 
 **1. There are two different `MetadataConfiguration` structs.** `types/common.rs:2070` and `types/media.rs:1441`. `Profile.metadata_configuration` (`common.rs:2056`) uses the **common** one; `GetMetadataConfigurationsResponse.configurations` (`media.rs:1436`) uses the **media** one. They differ: common has `PTZFilter`, media has `PtzFilter` and a `multicast` field. Task 2 consolidates onto the common one and deletes the media duplicate — the repo policy is no tech debt and no compatibility shims, and two same-named types in one domain is exactly the thing that produces a confident wrong fix later.
 
-**2. PTZ configuration ignores the stored token on reload.** `profile_manager.rs:1434-1448` re-attaches the default PTZ configuration to *every* profile whenever `ptz.enabled` is true, explicitly disregarding `stored.ptz_config`. The comment explains why: a `profiles.toml` seeded while PTZ was off would otherwise strand every profile without PTZ forever. This means `RemovePTZConfiguration` cannot persist under the current model — it would silently come back on the next boot. Task 5 fixes this with a `schema_version` field, see that task for the reasoning.
+**2. PTZ configuration ignores the stored token on reload.** `profile_manager.rs:1434-1448` re-attaches the default PTZ configuration to *every* profile whenever `ptz.enabled` is true, explicitly disregarding `stored.ptz_config`. The comment explains why: a `profiles.toml` seeded while PTZ was off would otherwise strand every profile without PTZ forever. This means `RemovePTZConfiguration` cannot persist under the current model — it would silently come back on the next boot. Task 5 fixes this with a per-profile `ptz_detached` flag, see that task for the reasoning.
 
 **3. `persist_all()` is called inside every mutator, after the write lock is released.** Copy that shape exactly (`profile_manager.rs:837-857` is the template). Calling it while holding `self.profiles.write()` deadlocks, because `to_stored_snapshot()` takes read locks on the same maps.
 
@@ -452,6 +452,14 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 ---
 
 ## Task 5: Make PTZ detachment survive a reload
+
+> **Implementation deviation (PR #120):** Shipped with a per-profile
+> `StoredProfile.ptz_detached: bool` flag instead of the global `schema_version`
+> migration sketched below. The flag distinguishes "PTZ explicitly removed"
+> (`true`) from "file predates the field" (`false`, legacy default) — the same
+> distinction `schema_version` was meant to provide, with less machinery. The
+> tests in the code target `ptz_detached`; the `schema_version` sections below
+> are superseded by it.
 
 Read trap 2 before starting. Today `stored_to_profile` re-attaches the default PTZ configuration to every profile when `ptz.enabled`, ignoring `stored.ptz_config`, so a `RemovePTZConfiguration` would come back on the next boot. The existing behaviour is deliberate and must be preserved for files written by older builds, which is why this needs a version marker rather than simply honouring the token.
 

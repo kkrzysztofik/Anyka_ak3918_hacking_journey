@@ -147,11 +147,15 @@ fn test_get_compatible_ptz_and_metadata() {
             profile_token: "Profile_Test".into(),
         })
         .unwrap();
-    assert!(
+    // Assert the exact seeded token (not merely "non-empty") so a store reset to a
+    // different default is caught, matching the PTZ assertion above.
+    assert_eq!(
         metadata
             .configurations
             .iter()
-            .any(|c| c.token == "MetadataConfig_0"),
+            .map(|c| c.token.as_str())
+            .collect::<Vec<_>>(),
+        vec!["MetadataConfig_0"],
         "the seeded metadata configuration must be offered as compatible"
     );
 }

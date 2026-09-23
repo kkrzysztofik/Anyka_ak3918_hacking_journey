@@ -1092,6 +1092,16 @@ impl ProfileManager {
         if *config_token != expected {
             return Err(no_config_error(config_token));
         }
+        // When PTZ is disabled there is no attachable PTZ configuration, so
+        // reject the attach rather than re-enabling a disabled feature.
+        let ptz_enabled = self
+            .config
+            .as_ref()
+            .map(|c| c.read().ptz.enabled)
+            .unwrap_or(true);
+        if !ptz_enabled {
+            return Err(no_config_error(config_token));
+        }
         let config = Self::create_default_ptz_configuration();
         {
             let mut profiles = self.profiles.write();
@@ -1282,6 +1292,20 @@ impl ProfileManager {
                     aec.insert(stored.token.clone(), cfg);
                 }
             }
+        }
+        {
+            let mut mdc = self.metadata_configs.write();
+            for stored in &data.metadata_configs {
+                mdc.insert(
+                    stored.token.clone(),
+                    Self::stored_to_metadata_config(stored),
+                );
+            }
+            // A persisted file may predate metadata configs; ensure the default
+            // exists so Get/SetMetadataConfiguration still work after a reload.
+            let default_token = format!("{}0", METADATA_CONFIG_PREFIX);
+            mdc.entry(default_token)
+                .or_insert_with(defaults::create_default_metadata_configuration);
         }
 
         // Load profiles last (they reference configs)
@@ -2125,6 +2149,11 @@ mod tests {
             first.add_metadata_configuration(&profile, &meta).unwrap();
             first.remove_ptz_configuration(&profile).unwrap();
             first.add_ptz_configuration(&profile, &ptz).unwrap();
+            // Modify the metadata config so the reload proves it restores the
+            // persisted value, not a freshly-seeded default.
+            let mut meta_config = first.get_metadata_configuration(&meta).unwrap();
+            meta_config.name = "RenamedMetadata".into();
+            first.set_metadata_configuration(meta_config).unwrap();
             storage.save().unwrap();
         }
 
@@ -2149,6 +2178,14 @@ mod tests {
                 .map(|c| c.token.as_str()),
             Some("MetadataConfig_0"),
             "metadata configuration must survive a restart"
+        );
+        // The metadata config STORE (backing GetMetadataConfiguration) must be
+        // repopulated from disk with the persisted, modified value.
+        let restored_meta = restarted.get_metadata_configuration(&meta).unwrap();
+        assert_eq!(
+            restored_meta.name.as_str(),
+            "RenamedMetadata",
+            "a modified metadata configuration must survive a restart"
         );
     }
 

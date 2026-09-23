@@ -445,7 +445,7 @@ export async function addConfiguration(
 ): Promise<void> {
   const body = `<trt:Add${configType}Configuration>
     <trt:ProfileToken>${escapeXml(profileToken)}</trt:ProfileToken>
-    <trt:${configType}Configuration ref="${escapeXml(configToken)}" />
+    <trt:ConfigurationToken>${escapeXml(configToken)}</trt:ConfigurationToken>
   </trt:Add${configType}Configuration>`;
   await soapRequest(ENDPOINTS.media, body, `Add${configType}ConfigurationResponse`);
 }

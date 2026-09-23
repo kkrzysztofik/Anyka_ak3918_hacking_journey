@@ -101,7 +101,7 @@ describe('profile configuration attach/detach/compatible', () => {
         const body = vi.mocked(apiClient.post).mock.calls[0][1] as string;
         expect(body).toContain(`<trt:Add${family.type}Configuration>`);
         expect(body).toContain('<trt:ProfileToken>P_1</trt:ProfileToken>');
-        expect(body).toContain(`<trt:${family.type}Configuration ref="C_9" />`);
+        expect(body).toContain('<trt:ConfigurationToken>C_9</trt:ConfigurationToken>');
       });
 
       it(`remove emits Remove${family.type}Configuration with the profile ref`, async () => {
