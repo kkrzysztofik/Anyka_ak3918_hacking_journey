@@ -28,12 +28,16 @@ with zipfile.ZipFile(os.path.join(FAB, "ir-ring-gerbers.zip"), "w", zipfile.ZIP_
 jlc = {r: p for r, p in parts.items() if p["lcsc"]}
 hand = sorted(r for r, p in parts.items() if not p["lcsc"] and not p["footprint"].startswith("TestPoint:"))
 groups = {}
+no_mpn = sorted(r for r, p in jlc.items() if not (p.get("mpn") and p.get("manufacturer")))
+if no_mpn: sys.exit(f"placed parts without MPN/manufacturer: {', '.join(no_mpn)} - add them to MFR in 07_schematic.py")
 for r, p in jlc.items(): groups.setdefault((p["value"], p["footprint"].split(":")[1], p["lcsc"]), []).append(r)
 nat = lambda r: (re.sub(r"\d+.*", "", r), int(re.search(r"\d+", r).group()), r)
+# JLCPCB's four columns first (its importer auto-maps them), then what LCSC's BOM tool and other distributors match on
 with open(os.path.join(FAB, "bom_jlcpcb.csv"), "w", newline="") as f:
-    w = csv.writer(f); w.writerow(["Comment", "Designator", "Footprint", "LCSC Part #"])
+    w = csv.writer(f); w.writerow(["Comment", "Designator", "Footprint", "LCSC Part #", "Quantity", "Manufacturer", "Manufacturer Part #", "Description"])
     for (val, fp, lcsc), refs in sorted(groups.items(), key=lambda kv: nat(min(kv[1], key=nat))):
-        w.writerow([val, ",".join(sorted(refs, key=nat)), fp, lcsc])
+        p = parts[refs[0]]
+        w.writerow([val, ",".join(sorted(refs, key=nat)), fp, lcsc, len(refs), p["manufacturer"], p["mpn"], p["description"]])
 
 # CPL: KiCad's placement file, renamed to JLCPCB's columns, only for the parts JLCPCB places.
 # Same absolute origin as the gerbers, so the two line up without any offset.

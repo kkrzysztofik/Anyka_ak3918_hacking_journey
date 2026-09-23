@@ -43,6 +43,27 @@ PARTS = {
 for i in range(8):
     PARTS[f"D{i+2}"] = ("Device:LED", "IR 850nm 120deg", "ir-ring:LED_3535_JNJ_EW120", "C22447930")
 
+# LCSC number -> (manufacturer, MPN, description), from LCSC's product JSON
+# (wmsc.lcsc.com/ftps/wm/product/detail?productCode=C...) on 2026-09-23. C83470 is
+# missing there, so it comes from JLCPCB's parts search. Keyed by LCSC so it cannot disagree.
+MFR = {
+ "C588276":   ("MOLEX", "530480510", "CONN HEADER TH R/A 5POS 1.25mm"),
+ "C107309":   ("Silergy", "SY7200AABC", "30V High Current Boost LED Driver"),
+ "C83470":    ("Sunlord", "SWPA4030S330MT", "Power inductor 33uH 20% 1.1A 429mOhm 4x4mm"),
+ "C8598":     ("JSCJ", "B5819W SL", "DIODE SCHOTTKY 40V SOD-123"),
+ "C15850":    ("Samsung Electro-Mechanics", "CL21A106KAYNNNE", "CAP CER 10uF 25V X5R 0805"),
+ "C49678":    ("YAGEO", "CC0805KRX7R9BB104", "CAP CER 100nF 50V X7R 0805"),
+ "C29823":    ("FH", "1206B475K500NT", "CAP CER 4.7uF 50V X7R 1206"),
+ "C367870":   ("Walsin", "WR08W4R02FTL", "RES 4.02 Ohm 1% 125mW 0805"),
+ "C20917":    ("AOS", "AO3400A", "MOSFET N-CH 30V SOT-23"),
+ "C17514":    ("UNI-ROYAL", "0805W8F1004T5E", "RES 1M 1% 125mW 0805"),
+ "C17513":    ("UNI-ROYAL", "0805W8F1001T5E", "RES 1k 1% 125mW 0805"),
+ "C149504":   ("UNI-ROYAL", "0805W8F1003T5E", "RES 100k 1% 125mW 0805"),
+ "C143695":   ("VISHAY", "TEMT6200FX01", "Ambient Light Sensor in 0805 Package"),
+ "C22447930": ("JNJOPTO", "JNJ-L-3535EW120-85035D-SL-J2", "EMITTER IR 850nm 1000mA SMD3535"),
+}
+assert {p[3] for p in PARTS.values() if p[3]} == set(MFR), "MFR must cover exactly the LCSC numbers in PARTS"
+
 # ---- THE netlist: net -> [(ref, pin)] ----
 # J1 pin numbers are REVERSED relative to the stock board's "+ - LDR IR HB"
 # silkscreen order. J1 is a PicoBlade-class 1.25 mm right-angle THT part with
@@ -240,6 +261,7 @@ for i, (t, x, y) in enumerate(BLOCKS):
 
 for ref, (lid, val, fp, lcsc) in PARTS.items():
     x, y, a, m, rxy, vxy, just = L[ref]
+    mfr, mpn, desc = MFR.get(lcsc, ("", "", ""))
     mir = f" (mirror {m})" if m else ""
     pl = "".join(f'(pin "{n}" (uuid "{U(f"pin:{ref}:{n}")}"))' for n in PINS[lid])
     out.append(
@@ -248,8 +270,10 @@ for ref, (lid, val, fp, lcsc) in PARTS.items():
       f'(property "Value" "{val}" (at {vxy[0]} {vxy[1]} 0) {eff(just)})'
       f'(property "Footprint" "{fp}" (at {x} {y} 0) {eff(hide=True)})'
       f'(property "Datasheet" "~" (at {x} {y} 0) {eff(hide=True)})'
-      f'(property "Description" "" (at {x} {y} 0) {eff(hide=True)})'
+      f'(property "Description" "{desc}" (at {x} {y} 0) {eff(hide=True)})'
       f'(property "LCSC" "{lcsc}" (at {x} {y} 0) {eff(hide=True)})'
+      f'(property "Manufacturer" "{mfr}" (at {x} {y} 0) {eff(hide=True)})'
+      f'(property "MPN" "{mpn}" (at {x} {y} 0) {eff(hide=True)})'
       f'{pl}(instances (project "ir-ring" (path "/{ROOT}" (reference "{ref}") (unit 1)))))')
 
 pwr_n = {"power:+5V": 0, "power:GND": 0, "power:PWR_FLAG": 0}
@@ -280,7 +304,8 @@ out.append('(sheet_instances (path "/" (page "1")))')
 out.append("(embedded_fonts no))")
 KD = os.path.join(HERE, "..", "kicad")
 open(os.path.join(KD, "ir-ring.kicad_sch"), "w").write("\n".join(out))
-json.dump({k: {"lib_id": v[0], "value": v[1], "footprint": v[2], "lcsc": v[3], "uuid": U(f"sym:{k}")} for k, v in PARTS.items()},
+json.dump({k: {"lib_id": v[0], "value": v[1], "footprint": v[2], "lcsc": v[3], "uuid": U(f"sym:{k}"),
+               **dict(zip(("manufacturer", "mpn", "description"), MFR.get(v[3], ("", "", ""))))} for k, v in PARTS.items()},
           open(os.path.join(KD, "parts.json"), "w"), indent=1)
 json.dump(NETS, open(os.path.join(KD, "nets.json"), "w"), indent=1)
 json.dump(KNAME, open(os.path.join(KD, "net_names.json"), "w"), indent=1)
