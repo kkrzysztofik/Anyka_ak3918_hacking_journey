@@ -724,6 +724,8 @@ impl MediaService {
             "GetCompatiblePTZConfigurations for profile: {}",
             request.profile_token
         );
+        // Verify the profile exists (fault on an unknown profile token).
+        self.profile_manager.get_profile(&request.profile_token)?;
         let configurations = self
             .profile_manager
             .get_compatible_ptz_configurations(&request.profile_token);
@@ -768,6 +770,8 @@ impl MediaService {
             "GetCompatibleMetadataConfigurations for profile: {}",
             request.profile_token
         );
+        // Verify the profile exists (fault on an unknown profile token).
+        self.profile_manager.get_profile(&request.profile_token)?;
         let configurations = self
             .profile_manager
             .get_compatible_metadata_configurations(&request.profile_token);

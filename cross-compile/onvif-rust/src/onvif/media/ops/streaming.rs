@@ -355,7 +355,7 @@ mod tests {
     }
 
     #[test]
-    fn test_stream_uri_is_not_fooled_by_a_renamed_profile() {
+    fn test_get_stream_uri_renamed_profile_routes_by_attached_encoder() {
         // Regression guard: routing must read the profile's encoder, not its
         // token. A profile named to contain neither MainStream nor SubStream
         // still routes by whichever encoder is attached.

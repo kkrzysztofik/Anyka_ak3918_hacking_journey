@@ -248,7 +248,7 @@ mod tests {
     }
 
     #[test]
-    fn add_ptz_configuration_attaches_to_profile() {
+    fn test_add_ptz_configuration_attaches_to_profile() {
         let pm = create_test_pm();
         let result = add_ptz_configuration(
             &pm,
@@ -263,7 +263,7 @@ mod tests {
     }
 
     #[test]
-    fn add_ptz_configuration_rejects_unknown_profile() {
+    fn test_add_ptz_configuration_rejects_unknown_profile() {
         let pm = create_test_pm();
         let result = add_ptz_configuration(
             &pm,
@@ -279,7 +279,7 @@ mod tests {
     }
 
     #[test]
-    fn add_ptz_configuration_rejects_non_default_token() {
+    fn test_add_ptz_configuration_rejects_non_default_token() {
         let pm = create_test_pm();
         let result = add_ptz_configuration(
             &pm,
@@ -292,7 +292,7 @@ mod tests {
     }
 
     #[test]
-    fn remove_ptz_configuration_detaches_from_profile() {
+    fn test_remove_ptz_configuration_detaches_from_profile() {
         let pm = create_test_pm();
         let result = remove_ptz_configuration(
             &pm,
@@ -306,7 +306,7 @@ mod tests {
     }
 
     #[test]
-    fn remove_ptz_configuration_rejects_unknown_profile() {
+    fn test_remove_ptz_configuration_rejects_unknown_profile() {
         let pm = create_test_pm();
         let result = remove_ptz_configuration(
             &pm,
@@ -318,7 +318,7 @@ mod tests {
     }
 
     #[test]
-    fn get_compatible_ptz_configurations_lists_default_when_enabled() {
+    fn test_get_compatible_ptz_configurations_lists_default_when_enabled() {
         let pm = create_test_pm();
         let result = get_compatible_ptz_configurations(
             &pm,
@@ -331,7 +331,7 @@ mod tests {
     }
 
     #[test]
-    fn get_compatible_ptz_configurations_empty_when_ptz_disabled() {
+    fn test_get_compatible_ptz_configurations_empty_when_ptz_disabled() {
         let pm = create_test_pm_with_ptz_disabled();
         let result = get_compatible_ptz_configurations(
             &pm,
@@ -344,7 +344,7 @@ mod tests {
     }
 
     #[test]
-    fn get_compatible_ptz_configurations_rejects_unknown_profile() {
+    fn test_get_compatible_ptz_configurations_rejects_unknown_profile() {
         let pm = create_test_pm();
         let result = get_compatible_ptz_configurations(
             &pm,
@@ -356,7 +356,7 @@ mod tests {
     }
 
     #[test]
-    fn add_metadata_configuration_attaches_to_profile() {
+    fn test_add_metadata_configuration_attaches_to_profile() {
         let pm = create_test_pm();
         let result = add_metadata_configuration(
             &pm,
@@ -371,7 +371,7 @@ mod tests {
     }
 
     #[test]
-    fn add_metadata_configuration_rejects_unknown_profile() {
+    fn test_add_metadata_configuration_rejects_unknown_profile() {
         let pm = create_test_pm();
         let result = add_metadata_configuration(
             &pm,
@@ -384,7 +384,7 @@ mod tests {
     }
 
     #[test]
-    fn remove_metadata_configuration_detaches_from_profile() {
+    fn test_remove_metadata_configuration_detaches_from_profile() {
         let pm = create_test_pm();
         pm.add_metadata_configuration(
             &"Profile_MainStream".to_string(),
@@ -403,7 +403,7 @@ mod tests {
     }
 
     #[test]
-    fn remove_metadata_configuration_rejects_unknown_profile() {
+    fn test_remove_metadata_configuration_rejects_unknown_profile() {
         let pm = create_test_pm();
         let result = remove_metadata_configuration(
             &pm,
@@ -415,7 +415,7 @@ mod tests {
     }
 
     #[test]
-    fn get_compatible_metadata_configurations_lists_all() {
+    fn test_get_compatible_metadata_configurations_lists_all() {
         let pm = create_test_pm();
         let result = get_compatible_metadata_configurations(
             &pm,
@@ -428,7 +428,7 @@ mod tests {
     }
 
     #[test]
-    fn get_compatible_metadata_configurations_rejects_unknown_profile() {
+    fn test_get_compatible_metadata_configurations_rejects_unknown_profile() {
         let pm = create_test_pm();
         let result = get_compatible_metadata_configurations(
             &pm,
@@ -440,7 +440,7 @@ mod tests {
     }
 
     #[test]
-    fn get_metadata_configuration_returns_default() {
+    fn test_get_metadata_configuration_returns_default() {
         let pm = create_test_pm();
         let result = get_metadata_configuration(
             &pm,
@@ -452,7 +452,7 @@ mod tests {
     }
 
     #[test]
-    fn get_metadata_configuration_rejects_unknown_token() {
+    fn test_get_metadata_configuration_rejects_unknown_token() {
         let pm = create_test_pm();
         let result = get_metadata_configuration(
             &pm,
