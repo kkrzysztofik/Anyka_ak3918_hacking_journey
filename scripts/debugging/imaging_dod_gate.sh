@@ -38,7 +38,7 @@ def call(body, action):
         return str(e.code), e.read().decode(errors="replace")
 
 def set_img(brightness=None, contrast=None, saturation=None, sharpness=None,
-            wdr=None, blc=None):
+            wdr=None, blc=None, check="200"):
     parts = []
     if brightness is not None: parts.append(f'<tt:Brightness>{brightness}</tt:Brightness>')
     if contrast is not None: parts.append(f'<tt:Contrast>{contrast}</tt:Contrast>')
@@ -51,7 +51,8 @@ def set_img(brightness=None, contrast=None, saturation=None, sharpness=None,
             + ''.join(parts) + '</tt:ImagingSettings></timg:SetImagingSettings>')
     st, out = call(body, "set")
     print(f"  set({parts}) -> HTTP {st}")
-    assert st == "200", out[:300]
+    if check:
+        assert st == check, out[:300]
     return st, out
 
 def frame_raw(n=3):
@@ -112,13 +113,25 @@ delta = abs(y100 - y0)
 results["brightness_luma_delta"] = (y0, y100, delta)
 print(f"  luma: 0->{y0:.1f}  100->{y100:.1f}  delta={delta:.1f}")
 
-# --- 4. WDR and BLC visible
-set_img(wdr="OFF"); time.sleep(4)
-b_off = banding(frame_raw()); l_off = luma(frame_raw())
-set_img(wdr="ON"); time.sleep(4)
-b_on = banding(frame_raw()); l_on = luma(frame_raw())
-results["wdr_visible"] = (l_off, l_on, b_off, b_on)
-print(f"  WDR off: luma={l_off:.1f} banding={b_off:.3f}  on: luma={l_on:.1f} banding={b_on:.3f}")
+# --- 4a. WDR is marked UNAVAILABLE on this sensor. The closed libplat links
+# AK_ISP_set_wdr_attr but the GC1084 driver rejects it at runtime, so the set
+# path would fault. DoD bar is "accepted and visible OR marked as unavailable":
+# GetOptions must not advertise it, and a raw set (ON or OFF) must be a clean
+# 400 — never the 500 HardwareFailure the SDK path used to return.
+set_img(wdr="ON", check=None)
+wdr_on_st, _ = set_img(wdr="ON", check=None)
+wdr_off_st, _ = set_img(wdr="OFF", check=None)
+opt_st, opt_out = call('<timg:GetOptions><timg:VideoSourceToken>VideoSource_1</timg:VideoSourceToken></timg:GetOptions>', "options")
+wdr_advertised = "<tt:WideDynamicRange" in opt_out
+results["wdr_marked_unavailable"] = (
+    opt_st == "200"
+    and not wdr_advertised
+    and wdr_on_st == "400"
+    and wdr_off_st == "400"
+)
+print(f"  WDR: GetOptions advertise={wdr_advertised} setON={wdr_on_st} setOFF={wdr_off_st} -> marked_unavailable={results['wdr_marked_unavailable']}")
+
+# --- 4b. BLC is accepted and visible (the low-level ISP BLC path works).
 set_img(blc="OFF"); time.sleep(4)
 l_b0 = luma(frame_raw())
 set_img(blc="ON"); time.sleep(4)
@@ -167,6 +180,7 @@ print(json.dumps(results, indent=1, default=str))
 ok = (
     all(results[f"set_{k}_sweep"] for k in ("brightness", "contrast", "saturation", "sharpness"))
     and results["brightness_luma_delta"][2] > 5
+    and results["wdr_marked_unavailable"]
     and results["exposure_mode_only"]
     and results["anti_flicker"][0] == "200"
     and results["anti_flicker"][1] == "200"

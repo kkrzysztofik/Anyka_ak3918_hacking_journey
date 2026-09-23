@@ -425,6 +425,17 @@ impl ImagingSettingsStore {
             });
         }
 
+        // Capability gate, not a range check: the sensor's ISP decides whether
+        // WDR exists at all (platform `wdr_supported`). This GC1084 build links
+        // AK_ISP_set_wdr_attr but the driver rejects it at runtime, so the set
+        // path would fault. A client that ignores GetOptions and sends WDR must
+        // get a clean 400 here, never the 500 HardwareFailure the SDK path gives.
+        if settings.wide_dynamic_range.is_some() && options.wide_dynamic_range.is_none() {
+            return Err(ImagingSettingsError::ValidationFailed(
+                "WideDynamicRange is not supported on this device".to_string(),
+            ));
+        }
+
         Ok(())
     }
 
@@ -1482,6 +1493,40 @@ mod tests {
         };
         let result = store.validate_settings("VideoSource_1", &settings).await;
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_validate_settings_wdr_unsupported_is_rejected() {
+        use crate::onvif::types::common::WideDynamicMode;
+        use crate::onvif::types::common::WideDynamicRange20;
+        use crate::platform::Platform;
+        use crate::platform::stub::StubPlatformBuilder;
+
+        // The stub (like this GC1084 build) reports wdr_supported=false, so
+        // GetOptions does not advertise WDR. A raw client that sends WDR anyway
+        // must get a clean ValidationFailed (400) — never the 500 HardwareFailure
+        // the SDK set path returns when the driver rejects AK_ISP_set_wdr_attr.
+        let platform: Arc<dyn Platform> =
+            Arc::new(StubPlatformBuilder::new().imaging_supported(true).build());
+        let control = platform
+            .imaging_control()
+            .expect("stub platform exposes an imaging control");
+        let store = ImagingSettingsStore::with_platform(control);
+
+        let settings = ImagingSettings20 {
+            wide_dynamic_range: Some(WideDynamicRange20 {
+                mode: WideDynamicMode::ON,
+                level: None,
+            }),
+            ..Default::default()
+        };
+
+        match store.validate_settings("VideoSource_1", &settings).await {
+            Err(ImagingSettingsError::ValidationFailed(msg)) => {
+                assert!(msg.contains("not supported"), "unexpected: {msg}");
+            }
+            other => panic!("expected ValidationFailed, got {other:?}"),
+        }
     }
 
     #[tokio::test]

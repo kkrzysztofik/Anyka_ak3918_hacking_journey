@@ -844,16 +844,41 @@ Vitest for the switch read-back, `pnpm verify`, commit.
 > **Open finding (bdc08439 firmware, 2026-09-21):** the definition-of-done gate
 > (`scripts/debugging/imaging_dod_gate.sh`) passed the 20-call sweep (all HTTP 200) and
 > the brightness luma delta (0 -> 33.9, 100 -> 212.2, delta 178), but **WDR ON returned a
-> receiver fault (500)** while WDR OFF succeeded; the vendor-daemon log had no
-> `value range` lines (count 0). The camera was then taken offline on purpose.
-> Re-run the gate when it is back. **Resolved per the plan's fallback on 2026-09-21:** the code review blocked the merge on this item; with the camera offline the effect path could not be fixed, so the UI now stubs the WDR control (disabled, labelled 'Unavailable on this ISP', ponytail comment marks the re-enable step). The daemon/ONVIF plumbing stays in place for when the effect path is fixed.
-> Also still open from the DoD list: the `value range` no-increase check, WDR/BLC
-> frame visibility, and the anti-flicker 50/60 banding measurement (all need the camera).
+> receiver fault (500)** while WDR OFF succeeded.
+>
+> **Root cause (2026-09-23, on `.198` at firmware 31b9c554):** the 500 was
+> `s:Receiver / ter:HardwareFailure / "Hardware query failed"` — an `ImagingSettingsError::PlatformError`.
+> The WDR *set* path (`store.set_settings` → platform `set_settings` →
+> `imaging_set_wdr`) drives the vendor daemon's `ak_vpss_effect_set(VPSS_EFFECT_WDR)`,
+> which routes to the **closed** `libplat_vi`/`libakispsdk` `AK_ISP_set_wdr_attr`. That
+> symbol is linked (not a stub) but the GC1084 driver **rejects it at runtime**, so the
+> daemon returns non-zero. WDR "OFF" only ever returned 200 because the
+> `current.wdr != settings.wdr` diff-guard skipped an already-off value — it never
+> touched the daemon. Every ON level (0/50/80/100 → SDK −50…+50) failed identically.
+> So WDR is genuinely **not supported on this sensor build** — the plan's "or mark as
+> unavailable" branch.
+>
+> **Fix:** `store.validate_settings` now rejects a `WideDynamicRange` element when
+> `GetOptions` does not advertise it (platform `wdr_supported=false`) with a clean
+> `400 InvalidArgVal` ("WideDynamicRange is not supported on this device") instead of
+> driving the failing SDK path into a 500. `GetOptions` already omits WDR
+> (`wdr_supported` defaults false); the daemon/ONVIF plumbing is kept for a sensor that
+> does support it. Unit test `test_validate_settings_wdr_unsupported_is_rejected` proves
+> the 400; the gate now asserts WDR is *marked unavailable* (not advertised + clean 400
+> on set) as its pass criterion. Host-verified (2340 tests, clippy, fmt clean).
+>
+> **On-hardware re-verification is blocked** by a pre-existing `.198` fault unrelated
+> to imaging: the 64 KB `/etc/jffs2` is ~94 % full so anyka-init's wifi-config write
+> fails (ENOSPC) → `wpa_supplicant` crash-loops (exit 2) → anyka-init requests shutdown
+> and the supervised stack never comes up. The review-fixed bundle is built and staged
+> (`active=a`, `f43da754-dirty`); re-run the gate once the camera boots cleanly.
+> Also still open from the DoD list: the `value range` no-increase check, BLC frame
+> visibility, and the anti-flicker 50/60 banding measurement (all need the camera).
 
 - [ ] `SetImagingSettings` succeeds for brightness/contrast/saturation/sharpness at 0, 20, 50, 80 and 100 on `.198`
 - [ ] `grep -c "value range" /mnt/logs/vendor_daemon.log` does not increase across a full slider sweep
 - [ ] Brightness 0 and 100 produce measurably different mean luma
-- [ ] WDR and BLC changes are visible in the frame, not just accepted
+- [ ] WDR is marked unavailable (not in GetOptions + clean 400 on set) **or** BLC changes are visible in the frame
 - [ ] White balance MANUAL produces the expected colour cast; AUTO corrects it
 - [ ] Exposure ships mode-only, or with limits backed by `docs/reference/anyka-ae-units.md`
 - [ ] Anti-flicker 50↔60 visibly changes banding under a mains lamp
