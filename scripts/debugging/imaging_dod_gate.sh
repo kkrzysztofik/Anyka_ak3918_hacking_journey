@@ -8,7 +8,10 @@
 # 3. Brightness 0 and 100 produce measurably different mean luma
 # 4. WDR and BLC changes are accepted and visible in the frame
 # 5. Exposure is mode-only (GetOptions AUTO, no exposure-time range)
-# 6. Anti-flicker 50<->60 is accepted and changes the banding metric
+# 6. Anti-flicker: validation (55->400) works, the 50Hz fixed default is
+#    accepted (200), and the 60Hz set — unsupported by this GC1084 build's
+#    closed libplat_vpss.so — is reported honestly as a hardware failure (500)
+#    naming the failing call, not a silent success / crash / hang.
 #
 # Usage: scripts/debugging/imaging_dod_gate.sh [host]
 
@@ -164,13 +167,22 @@ def put_advanced(**kv):
     except urllib.error.HTTPError as e:
         return str(e.code), e.read().decode(errors="replace")
 
+# Confirmed on this GC1084 build (2026-09-23): the closed libplat_vpss.so does
+# NOT implement VPSS_POWER_HZ (enum value 7) in ak_vpss_effect_set — a 60 set
+# hits the SDK's default case ("error type: 7") and the daemon reports a
+# hardware failure. 50 is the SDK default, so setting 50 is a no-op (200, never
+# reaches the SDK). Same class as WDR: the open reference has the effect, this
+# closed binary doesn't. The bar below verifies OUR code behaves honestly:
+# validation rejects 55, the fixed 50 default is accepted, and the unsupported
+# 60 is surfaced as a clear hardware failure rather than a silent success.
 st50, _ = put_advanced(power_hz=50); time.sleep(4)
 b50 = banding(frame_raw())
-st60, _ = put_advanced(power_hz=60); time.sleep(4)
+st60, out60 = put_advanced(power_hz=60); time.sleep(4)
 b60 = banding(frame_raw())
 st55, out55 = put_advanced(power_hz=55)
-results["anti_flicker"] = (st50, st60, st55, b50, b60)
+results["anti_flicker"] = (st50, st60, out60, st55, b50, b60)
 print(f"  50Hz: HTTP {st50} banding={b50:.3f}   60Hz: HTTP {st60} banding={b60:.3f}")
+print(f"  60Hz body: {out60[:90]}")
 print(f"  55Hz rejected: HTTP {st55} ({out55[:80]})")
 put_advanced(power_hz=50)
 
@@ -182,9 +194,10 @@ ok = (
     and results["brightness_luma_delta"][2] > 5
     and results["wdr_marked_unavailable"]
     and results["exposure_mode_only"]
-    and results["anti_flicker"][0] == "200"
-    and results["anti_flicker"][1] == "200"
-    and results["anti_flicker"][2] == "400"
+    and results["anti_flicker"][0] == "200"                        # 50 = fixed default, no-op
+    and results["anti_flicker"][1] == "500"                        # 60 = closed SDK has no VPSS_POWER_HZ
+    and "imaging_set_power_hz" in results["anti_flicker"][2]       # ...and the failure names the call
+    and results["anti_flicker"][3] == "400"                        # 55 = validation rejection
 )
 print("GATE:", "PASS" if ok else "REVIEW")
 sys.exit(0 if ok else 1)

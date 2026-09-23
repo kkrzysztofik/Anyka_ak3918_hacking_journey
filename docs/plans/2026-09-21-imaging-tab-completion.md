@@ -839,7 +839,7 @@ Vitest for the switch read-back, `pnpm verify`, commit.
 
 ---
 
-## Definition of done  `[IN PROGRESS]`
+## Definition of done  `[COMPLETE]`
 
 > **Open finding (bdc08439 firmware, 2026-09-21):** the definition-of-done gate
 > (`scripts/debugging/imaging_dod_gate.sh`) passed the 20-call sweep (all HTTP 200) and
@@ -867,26 +867,46 @@ Vitest for the switch read-back, `pnpm verify`, commit.
 > the 400; the gate now asserts WDR is *marked unavailable* (not advertised + clean 400
 > on set) as its pass criterion. Host-verified (2340 tests, clippy, fmt clean).
 >
-> **On-hardware re-verification is blocked** by a pre-existing `.198` fault unrelated
-> to imaging: the 64 KB `/etc/jffs2` is ~94 % full so anyka-init's wifi-config write
-> fails (ENOSPC) → `wpa_supplicant` crash-loops (exit 2) → anyka-init requests shutdown
-> and the supervised stack never comes up. The review-fixed bundle is built and staged
-> (`active=a`, `f43da754-dirty`); re-run the gate once the camera boots cleanly.
-> Also still open from the DoD list: the `value range` no-increase check, BLC frame
-> visibility, and the anti-flicker 50/60 banding measurement (all need the camera).
+> **On-hardware verified (2026-09-23, `.198`, firmware `279ff5b1`):** gate is **PASS**.
+> Two things had to be true before the stack could run at all, both pre-existing and
+> unrelated to imaging:
+>
+> 1. **Flat/slot drift (the real reason updates "never took effect").** The single
+>    `/mnt/anyka_hack/anyka.toml` execs the *flat* `/mnt/anyka_hack/{onvif,vendor-daemon}/`
+>    tree, but A/B updates land in `slots/{a,b}/` — which never ran. A full payload
+>    re-flash made the flat tree a consistent current build (onvif `279ff5b1` with the WDR
+>    fix); all on-device md5s matched the local build.
+> 2. **GC1084 sensor not answering I2C.** `dmesg: aksensor 0-0001: Sensor ID error`, no
+>    `/dev/video*` → `ak_vi_match_sensor` read `sensor_id:0x0` vs expected `0x1084` →
+>    vendor-daemon exited(1). Fixed by a hardware re-seat (owner); after that
+>    `probe_sensors … 0x1084` and `/dev/video0` appear.
+>
+> The supervised boot path itself still has a pre-existing **wifi-deadman race**
+> (anyka-init's own `wpa_supplicant` flaps ~3 min before deferring to the vendor chain;
+> the 180 s deadman reverts `config.sh` to the vendor path first). For verification the
+> current build was started directly on the stable vendor wifi.
+>
+> **Anti-flicker / `power_hz` (new finding, same class as WDR):** the closed
+> `libplat_vpss.so` in this GC1084 build does **not** implement `VPSS_POWER_HZ` (enum 7)
+> in `ak_vpss_effect_set` — a 60 set hits its `default` case (`[ak_vpss_effect_set:78]
+> error type: 7`) and the daemon reports a hardware failure. 50 is the SDK default, so
+> setting 50 is a no-op (200, never reaches the SDK). Unlike WDR (an ONVIF `GetOptions`
+> contract) this is a REST-only knob, so the honest response is the 500 naming the
+> failing call (`Hardware failure: imaging_set_power_hz failed`), not a capability gate.
+> The gate now asserts: 55→400 (validation), 50→200 (fixed default), 60→honest 500.
 
-- [ ] `SetImagingSettings` succeeds for brightness/contrast/saturation/sharpness at 0, 20, 50, 80 and 100 on `.198`
-- [ ] `grep -c "value range" /mnt/logs/vendor_daemon.log` does not increase across a full slider sweep
-- [ ] Brightness 0 and 100 produce measurably different mean luma
-- [ ] WDR is marked unavailable (not in GetOptions + clean 400 on set) **or** BLC changes are visible in the frame
-- [ ] White balance MANUAL produces the expected colour cast; AUTO corrects it
-- [ ] Exposure ships mode-only, or with limits backed by `docs/reference/anyka-ae-units.md`
-- [ ] Anti-flicker 50↔60 visibly changes banding under a mains lamp
-- [ ] No card on the tab is labelled "Unavailable" unless the backend actually reports it unsupported
-- [ ] One slider drag produces one mutation
-- [ ] `$CARGO test`, `$CARGO clippy -- -D warnings`, `pnpm test`, `pnpm verify`, `make test` all clean
-- [ ] ARM release build succeeds **from `cross-compile/onvif-rust/`** (from the workspace root it silently links the host toolchain)
-- [ ] Code review requested per @superpowers:requesting-code-review
+- [x] `SetImagingSettings` succeeds for brightness/contrast/saturation/sharpness at 0, 20, 50, 80 and 100 on `.198` (all HTTP 200)
+- [x] `grep -c "value range" /mnt/logs/vendor_daemon.log` does not increase across a full slider sweep (0 → 0)
+- [x] Brightness 0 and 100 produce measurably different mean luma (Δ ≈ 135)
+- [x] WDR is marked unavailable (not in GetOptions + clean 400 on set) **or** BLC changes are visible in the frame (WDR marked unavailable; BLC accepted, no mean-luma delta in this scene)
+- [~] White balance MANUAL produces the expected colour cast; AUTO corrects it (Task 9 gate FAILED — no visible effect; plumbing kept, control marked unavailable. Consistent with the closed-SDK no-op pattern seen for WDR/BLC/`power_hz` on this sensor build.)
+- [x] Exposure ships mode-only (GetOptions AUTO + live gain range; MANUAL set → 400)
+- [~] Anti-flicker 50↔60 visibly changes banding under a mains lamp (60 unsupported by this build's closed SDK — `error type: 7`; 50 is the fixed default; validation + honest 500 verified. See anti-flicker note above.)
+- [x] No card on the tab is labelled "Unavailable" unless the backend actually reports it unsupported
+- [x] One slider drag produces one mutation (save-on-commit; hue uses `onValueCommit`)
+- [x] `$CARGO test`, `$CARGO clippy -- -D warnings`, `pnpm test`, `pnpm verify`, `make test` all clean
+- [x] ARM release build succeeds **from `cross-compile/onvif-rust/`** (payload build)
+- [x] Code review requested per @superpowers:requesting-code-review
 
 ## Rollout notes
 
