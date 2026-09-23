@@ -46,7 +46,10 @@ measured, and it is why the 1:1 print check is not optional.
 /usr/bin/python3 ir_design/scripts/10_fill.py ir_design/kicad/ir-ring.kicad_pcb
 kicad-cli pcb drc ir_design/kicad/ir-ring.kicad_pcb --schematic-parity \
     --severity-error --exit-code-violations -o /tmp/drc.rpt           # must exit 0
+/usr/bin/python3 ir_design/scripts/11_fab.py                         # fab/: gerbers zip, JLCPCB BOM + CPL
 ```
+
+The DRC rules are JLCPCB's **2 oz** limits, not KiCad's defaults. Track and clearance are 0.16 mm (set in `09_place.py`) and the PTH ring is 0.254 mm (`kicad/ir-ring.kicad_dru`). A clean DRC therefore means the 2 oz order is legal as drawn.
 
 `ir-ring.ses` is committed because Freerouting's output varies run to run. It is
 the routing. The `--ses` rebuild is deterministic, so it matches the DSN it was

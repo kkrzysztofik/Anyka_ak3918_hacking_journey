@@ -20,7 +20,7 @@ ROOT = U("root")
 FPR = "Resistor_SMD:R_0805_2012Metric"          # 0805 throughout: hand-reworkable (R6/R7 await the ADC measurement)
 FPT = "TestPoint:TestPoint_Pad_D1.5mm"            # bring-up pads, on the back; no part, not in the BOM
 PARTS = {
- "J1":  ("Connector_Generic:Conn_01x05", "PicoBlade/MX1.25 5p R/A THT", "Connector_Molex:Molex_PicoBlade_53048-0510_1x05_P1.25mm_Horizontal", ""),
+ "J1":  ("Connector_Generic:Conn_01x05", "PicoBlade/MX1.25 5p R/A THT", "ir-ring:Molex_PicoBlade_53048-0510_1x05_P1.25mm_Horizontal_Ring0.275", ""),   # hand-soldered: no LCSC listing found
  "U1":  ("ir-ring:SY7200A", "SY7200A", "Package_TO_SOT_SMD:SOT-23-6", "C107309"),
  "L1":  ("Device:L", "33uH SWPA4030S330MT", "ir-ring:L_Sunlord_SWPA4030S", "C83470"),
  "D1":  ("Device:D_Schottky", ">=40V 1A", "Diode_SMD:D_SOD-123", "C77343"),

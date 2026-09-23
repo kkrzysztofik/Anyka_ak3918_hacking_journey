@@ -44,7 +44,8 @@ for h in geo["mounting_holes"]: circ(tuple(h["xy_mm"]), h["dia_mm"], pcbnew.Edge
 
 ds = B.GetDesignSettings()
 ds.SetBoardThickness(mm(1.0))
-for attr, val in [("m_TrackMinWidth", 0.15), ("m_MinClearance", 0.15), ("m_ViasMinSize", 0.6),
+# 0.16/0.16 is JLCPCB's floor for 2 oz outer copper (1 oz allows 0.10); the fab order is 2 oz
+for attr, val in [("m_TrackMinWidth", 0.16), ("m_MinClearance", 0.16), ("m_ViasMinSize", 0.6),
                   ("m_MinThroughDrill", 0.3), ("m_CopperEdgeClearance", 0.3), ("m_HoleToHoleMin", 0.25)]:
     assert hasattr(ds, attr), attr
     setattr(ds, attr, mm(val))
@@ -54,11 +55,11 @@ ns = ds.m_NetSettings
 def netclass(name, track, clear):
     nc = pcbnew.NETCLASS(name); nc.SetTrackWidth(mm(track)); nc.SetClearance(mm(clear))
     nc.SetViaDiameter(mm(0.6)); nc.SetViaDrill(mm(0.3)); return nc
-dflt = ns.GetDefaultNetclass(); dflt.SetTrackWidth(mm(0.2)); dflt.SetClearance(mm(0.15))
+dflt = ns.GetDefaultNetclass(); dflt.SetTrackWidth(mm(0.2)); dflt.SetClearance(mm(0.16))
 dflt.SetViaDiameter(mm(0.6)); dflt.SetViaDrill(mm(0.3))
-ns.SetNetclass("Power", netclass("Power", 0.5, 0.15))      # width for ~0.5 A peak; 0.15 mm clearance is
+ns.SetNetclass("Power", netclass("Power", 0.5, 0.16))      # width for ~0.5 A peak; 0.16 mm clearance is
                                                            # ample at <=16 V running / 33 V clamp (IPC-2221 ~0.1 mm to 50 V)
-ns.SetNetclass("LED", netclass("LED", 0.3, 0.15))          # 100 mA string current
+ns.SetNetclass("LED", netclass("LED", 0.3, 0.16))          # 100 mA string current
 for pat in ["+5V", "GND", "/SW", "/VOUT"]: ns.SetNetclassPatternAssignment(pat, "Power")
 for pat in ["/STR*", "/FB", "/R1B_Q"]: ns.SetNetclassPatternAssignment(pat, "LED")
 
@@ -248,7 +249,7 @@ def via(xy, net):
 # is added with the pre-routes below. OVP (no current) taps VOUT under the U1 body via OVP_X.
 pp = lambda ref, n: ppos(FP[ref], n)
 d1c = (tomm(FP["D1"].GetPosition().x), tomm(FP["D1"].GetPosition().y))
-VOUT_X, OVP_X = L(0.8, -2.75), L(-1.38, -0.44)
+VOUT_X, OVP_X = L(0.8, -2.85), L(-1.38, -0.44)     # VOUT_X: 0.25 mm below U1's 1.33 mm-long LX pad
 lx, l2 = loc(pp("U1", "1")), loc(pp("L1", "2"))
 PRE = [(pcbnew.B_Cu, [pp("C2", "1"), pp("D1", "1"), d1c, VOUT_X], "VOUT", 0.5),
        (pcbnew.B_Cu, [pp("U1", "5"), L(loc(pp("U1", "5"))[0], -0.44), OVP_X], "VOUT", 0.3),
@@ -448,15 +449,15 @@ SES = sys.argv[sys.argv.index("--ses") + 1] if "--ses" in sys.argv else None
 if SES:
     ok = pcbnew.ImportSpecctraSES(B, SES)
     check(ok, f"imported routes from {SES}: {len(B.GetTracks())} track/via items")
-    thin = [t for t in B.GetTracks() if t.GetClass() == "PCB_TRACK" and t.GetWidth() < mm(0.15)]
-    for t in thin: t.SetWidth(mm(0.15))
-    check(True, f"widened {len(thin)} autorouter neck-downs below the 0.15 mm board minimum")
+    thin = [t for t in B.GetTracks() if t.GetClass() == "PCB_TRACK" and t.GetWidth() < mm(0.16)]
+    for t in thin: t.SetWidth(mm(0.16))
+    check(True, f"widened {len(thin)} autorouter neck-downs below the 0.16 mm board minimum")
 pass  # zones filled by 10_fill.py (ZONE_FILLER segfaults on a CreateEmptyBoard board)
 pcbnew.SaveBoard(PCB, B)
 DSN = os.path.join(KD, "ir-ring.dsn")
 if not SES:
     check(pcbnew.ExportSpecctraDSN(B, DSN), f"exported {os.path.normpath(DSN)} for Freerouting")
-    # Freerouting undershoots clearance by ~1 um (0.1488 vs 0.15 in DRC); give it 10 um of margin
+    # Freerouting undershoots clearance by ~1 um (0.1488 vs 0.15 seen in DRC); give it 10 um of margin
     import re
     txt = open(DSN).read()
     txt = re.sub(r"\(clearance (\d+(?:\.\d+)?)", lambda m: f"(clearance {float(m.group(1)) + 10:g}", txt)
