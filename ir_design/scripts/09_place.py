@@ -86,6 +86,7 @@ def make(ref):
     fp.SetReference(ref); fp.SetValue(parts[ref]["value"])
     if parts[ref]["lcsc"]:
         fp.SetField("LCSC", parts[ref]["lcsc"])
+        fp.GetFieldByName("LCSC").SetVisible(False)   # new fields default to visible silk: the BOM wants it, the board does not
     fp.SetPath(pcbnew.KIID_PATH("/" + parts[ref]["uuid"]))
     for p in fp.Pads():
         if p.GetNumber() and (ref, p.GetNumber()) in pin_net:
@@ -123,8 +124,8 @@ for i, e in enumerate(em):
 # ---- FRONT: light sensor on the stock LDR position (r 15.0 @ 280.2 deg, under the 9th dome) ----
 LDR_XY, LDR_TH = (2.67, -14.78), 280.2
 place("U2", LDR_XY, "2", "1", tangent(LDR_TH))
-place("R7", polar(15.2, 290.7), "2", "1", tangent(LDR_TH))    # beside U2 (courtyards need >= 9.9 deg at r 15.2)
-place("R6", polar(15.2, 269.7), "2", "1", tangent(LDR_TH))
+place("R7", polar(15.2, 295.0), "2", "1", tangent(LDR_TH))    # beside U2; 0805 at r 15.2 spans 13 deg
+place("R6", polar(15.2, 265.5), "2", "1", tangent(LDR_TH))
 
 # ---- BACK: converter in the top gap. Local frame: tv tangential (+ = increasing angle), tu radial ----
 PHI, R0 = 280.0, 14.0
@@ -133,24 +134,33 @@ def L(tv, tu):
     return (ox + tv * -math.sin(t) + tu * math.cos(t), oy + tv * math.cos(t) + tu * math.sin(t))
 V = tangent(PHI); U_ = PHI                          # board directions of +tv and +tu
 Vm, Um = (V + 180) % 360, (U_ + 180) % 360
-# U1 pin1->pin3 toward -tv puts the LX/GND/FB column on the INNER side (checked in the
-# render). Everything is built around that: L1 beside LX, D1 under it, C2 on D1's cathode
-# with its ground next to U1 GND, so the LX -> D1 -> C2 -> GND hot loop stays tiny. The
-# feedback group sits left, toward D9 (the FB end of the string); J1's nets arrive from below.
-# Local extents from the real courtyards (SOT-23-6 standard pads, not hand-solder).
-# U1 pin1->pin3 = -tv puts LX/GND/FB on the INNER column, LX at +tv (right), FB left.
-place("U1", L(0.0, -0.6), "1", "3", Vm, back=True)        # box tv[-1.73,1.73] tu[-2.68,1.48]
-place("L1", L(4.25, -0.3), "1", "2", Vm, back=True)       # pad2 = SW on the left, 1.8 mm from LX
-place("D1", L(0.6, -3.96), "2", "1", Vm, back=True)       # under U1: A(SW) right, K(VOUT) left
-place("C2", L(-3.61, -3.96), "1", "2", Vm, back=True)     # butts D1's cathode; GND via to plane
-place("R1a", L(-3.54, -1.74), "1", "2", Vm, back=True)    # FB right -> GND left
-place("R1b", L(-3.54, 0.35), "1", "2", Vm, back=True)     # FB right -> R1B_Q left
-place("Q1", L(-7.4, 1.8), "1", "2", U_, back=True)        # above the D9 thermal island
-place("R4", L(-8.3, 4.3), "1", "2", Vm, back=True)        # Q1_G -> GND
-place("R3", L(-6.1, 4.3), "2", "1", Vm, back=True)        # beside R4: at tu 5.4 it sat 0.12 mm from the edge
-place("C3", L(0.95, 2.52), "1", "2", U_, back=True)       # right over IN
-place("R2", L(-0.95, 2.52), "1", "2", U_, back=True)      # right over EN
-place("C1", L(7.8, 1.0), "1", "2", U_, back=True)         # past L1's +5V end, where +5V arrives
+# U1 pin1->pin3 toward -tv puts the LX/GND/FB column on the INNER side. Only the switching
+# loop is kept tight: L1 beside LX, D1 under it, C2 standing on D1's cathode with its ground
+# end beside U1 GND, so LX -> D1 -> C2 -> GND stays small. Everything that carries only DC
+# is moved out to where the board has room. Courtyard gaps >= 0.3 mm in the loop, more
+# elsewhere, and nothing on a thermal island (asserted below). The free region between the
+# D9 and D2 islands is a "T": a +-5..8 mm stem down to the bore, a +-13 mm bar above tu 0.5.
+place("U1", L(0.0, -0.5), "1", "3", Vm, back=True)
+place("D1", L(0.8, -4.1), "2", "1", Vm, back=True)        # under U1: A(SW) right, K(VOUT) left
+place("C2", L(-3.6, -3.0), "1", "2", U_, back=True)       # 1206 upright: VOUT at D1's cathode, GND up by U1 GND
+place("L1", L(4.6, 1.3), "1", "2", Vm, back=True)        # pad2 = SW on the left, facing LX
+place("C3", L(0.7, 3.7), "1", "2", U_, back=True)        # right over IN
+place("R2", L(-1.9, 3.7), "1", "2", U_, back=True)       # right over EN
+place("C1", L(3.9, 5.1), "1", "2", Vm, back=True)        # over L1, +5V end toward L1 pad 1. NOT past L1: there it
+                                                         # closes the r~16 channel +5V takes round the 0-deg side from J1
+place("R1a", L(-4.6, 2.0), "1", "2", U_, back=True)      # sense pair, FB at the bottom, toward D9's cathode
+place("R1b", L(-7.4, 2.0), "1", "2", U_, back=True)
+# the half-power switch is DC: it lives in the D7-D8 gap (no hole there), on J1's side of the ring.
+# Only R1B_Q runs back to R1b; ~50 mOhm of trace in R1b's branch moves full current by ~0.6 %.
+place("Q1", polar(15.6, 183.5), "1", "2", tangent(183.5), back=True)
+place("R3", polar(17.3, 167.0), "1", "2", tangent(167.0), back=True)    # WL_EN in from the J1 side
+place("R4", polar(17.3, 199.5), "1", "2", tangent(199.5), back=True)
+# bring-up pads. TP1 sits ON D2's thermal island, which is VOUT copper: the zone connects it, so
+# no stub crosses the +5V channel. Outer corner nearest the gap, clear of the thermal vias.
+_th = math.radians(em[0]["angle_deg"]); _c = em[0]["xy_mm"]
+place("TP1", (_c[0] + 1.25 * (math.cos(_th) + math.sin(_th)), _c[1] + 1.25 * (math.sin(_th) - math.cos(_th))), "1", "1", 0, back=True)
+place("TP2", polar(18.6, 230.0), "1", "1", 0, back=True)
+place("TP3", L(-11.0, 1.6), "1", "1", 0, back=True)
 
 # ---- BACK: J1 on the measured contacts. Stock "+" pad is at the left end = footprint pad 5 ----
 j = json.load(open(os.path.join(HERE, "..", "j1_contacts.json")))
@@ -204,7 +214,7 @@ zone(outline_pts, [pcbnew.F_Cu], net=NET["GND"], priority=0, name="gnd_front")
 
 # GND stitching vias round the outer band: without them the front and back GND pours
 # are not joined anywhere. Clear of J1 (~92-109 deg), the mounting holes and the converter.
-STITCH = [5, 30, 80, 125, 150, 175, 195, 235, 325, 350]
+STITCH = [5, 30, 80, 125, 150, 175, 208, 237, 325, 350]     # 208/237 dodge R4 and TP2/TP3
 outline_r = {round(a): r for a, r in geo["outline_polar_front"]}
 for a in STITCH:
     r_st = min(18.2, outline_r[round(a)] - 1.2)            # the outline pulls in to ~18.7 mm near 30/150 deg
@@ -216,7 +226,39 @@ for a in STITCH:
 
 # converter GND pads -> F.Cu plane directly above: one via beside each, the hot-loop return path
 isl = [z for z in B.Zones() if z.GetZoneName().startswith("thermal_")]
-placed_vias = []
+def loc(xy):                            # board -> converter-local (tv, tu)
+    ox, oy = polar(R0, PHI); t = math.radians(PHI); dx, dy = xy[0] - ox, xy[1] - oy
+    return (dx * -math.sin(t) + dy * math.cos(t), dx * math.cos(t) + dy * math.sin(t))
+def psd(p, a, b):                       # point-to-segment distance
+    dx, dy = b[0] - a[0], b[1] - a[1]; L2 = dx * dx + dy * dy
+    t = max(0, min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / L2)) if L2 else 0
+    return math.hypot(p[0] - a[0] - t * dx, p[1] - a[1] - t * dy)
+def track(pts, layer, net, w):
+    for a, b in zip(pts, pts[1:]):
+        t = pcbnew.PCB_TRACK(B); t.SetStart(pcbnew.VECTOR2I(mm(a[0]), mm(a[1]))); t.SetEnd(pcbnew.VECTOR2I(mm(b[0]), mm(b[1])))
+        t.SetLayer(layer); t.SetWidth(mm(w)); t.SetNet(net); B.Add(t)
+def via(xy, net):
+    v = pcbnew.PCB_VIA(B); v.SetViaType(pcbnew.VIATYPE_THROUGH); v.SetPosition(pcbnew.VECTOR2I(mm(xy[0]), mm(xy[1])))
+    v.SetWidth(mm(0.6)); v.SetDrill(mm(0.3)); v.SetNet(net); B.Add(v)
+# The power stage is routed here, not by Freerouting: it re-solves this loop differently every
+# run, and it is the one part of a boost converter a person routes by hand. Everything closes
+# on B.Cu: LX -> D1 -> C2 -> GND -> U1 GND, with the GND return running between C2's own pads.
+# VOUT has to cross the SW node to reach D2 (D1's cathode faces away from it): under the diode
+# body between its pads, up into the U1-D1 gap, through VOUT_X; the F.Cu leg to D2's island via
+# is added with the pre-routes below. OVP (no current) taps VOUT under the U1 body via OVP_X.
+pp = lambda ref, n: ppos(FP[ref], n)
+d1c = (tomm(FP["D1"].GetPosition().x), tomm(FP["D1"].GetPosition().y))
+VOUT_X, OVP_X = L(0.8, -2.75), L(-1.38, -0.44)
+lx, l2 = loc(pp("U1", "1")), loc(pp("L1", "2"))
+PRE = [(pcbnew.B_Cu, [pp("C2", "1"), pp("D1", "1"), d1c, VOUT_X], "VOUT", 0.5),
+       (pcbnew.B_Cu, [pp("U1", "5"), L(loc(pp("U1", "5"))[0], -0.44), OVP_X], "VOUT", 0.3),
+       (pcbnew.F_Cu, [OVP_X, VOUT_X], "VOUT", 0.3),
+       (pcbnew.B_Cu, [pp("C2", "2"), L(loc(pp("C2", "2"))[0], -2.8), L(loc(pp("U1", "2"))[0], -2.8), pp("U1", "2")], "GND", 0.5),
+       (pcbnew.B_Cu, [pp("U1", "1"), L(1.6, -2.3), pp("D1", "2")], "SW", 0.5),
+       (pcbnew.B_Cu, [pp("U1", "1"), L(l2[0], lx[1]), pp("L1", "2")], "SW", 0.5)]
+for layer, pts, n, w in PRE: track(pts, layer, NET[n], w)
+via(VOUT_X, NET["VOUT"]); via(OVP_X, NET["VOUT"])
+placed_vias = [VOUT_X, OVP_X]
 def via_free(x, y, rv=0.3, clr=0.2):
     if math.hypot(x, y) < geo["bore_dia_mm"] / 2 + 0.4 + rv + 0.1: return False
     for h in geo["mounting_holes"]:
@@ -224,6 +266,7 @@ def via_free(x, y, rv=0.3, clr=0.2):
     pt = pcbnew.VECTOR2I(mm(x), mm(y))
     if any(z.Outline().Contains(pt) for z in isl): return False
     if any(math.dist((x, y), v) < 2 * rv + clr for v in placed_vias): return False
+    if any(psd((x, y), a, b) < rv + w / 2 + clr for _, pts, _, w in PRE for a, b in zip(pts, pts[1:])): return False
     for f in FP.values():
         for q in f.Pads():
             if q.GetNetname() == "GND": continue
@@ -233,7 +276,8 @@ def via_free(x, y, rv=0.3, clr=0.2):
             if x0 < x < x1 and y0 < y < y1: return False
     return True
 hot = []
-for ref, num in [("C2", "2"), ("U1", "2"), ("C1", "2"), ("C3", "2"), ("R1a", "2"), ("Q1", "2"), ("R2", "2"), ("R4", "2")]:
+# no U1.2: its pre-routed B.Cu return to C2.2 boxes it in, and C2.2 carries the via to the plane
+for ref, num in [("C2", "2"), ("C1", "2"), ("C3", "2"), ("R1a", "2"), ("Q1", "2"), ("R2", "2"), ("R4", "2")]:
     x, y = ppos(FP[ref], num); q = pad(FP[ref], num)
     base = max(tomm(q.GetBoundingBox().GetWidth()), tomm(q.GetBoundingBox().GetHeight())) / 2
     spot = next(((x + d * math.cos(math.radians(a)), y + d * math.sin(math.radians(a)))
@@ -251,10 +295,6 @@ def nearest_pad(ref, num, target):
     return min((q for q in FP[ref].Pads() if q.GetNumber() == num and q.GetDrillSize().x == 0),
                key=lambda q: math.dist((tomm(q.GetPosition().x), tomm(q.GetPosition().y)), target))
 def qpos(q): return (tomm(q.GetPosition().x), tomm(q.GetPosition().y))
-def track(pts, layer, net, w):
-    for a, b in zip(pts, pts[1:]):
-        t = pcbnew.PCB_TRACK(B); t.SetStart(pcbnew.VECTOR2I(mm(a[0]), mm(a[1]))); t.SetEnd(pcbnew.VECTOR2I(mm(b[0]), mm(b[1])))
-        t.SetLayer(layer); t.SetWidth(mm(w)); t.SetNet(net); B.Add(t)
 d9c = tuple(FP["D9"].GetPosition()); d9c = (tomm(d9c[0]), tomm(d9c[1]))
 d8c = (tomm(FP["D8"].GetPosition().x), tomm(FP["D8"].GetPosition().y))
 k8 = qpos(nearest_pad("D8", "1", d9c)); a9 = qpos(nearest_pad("D9", "2", d8c))
@@ -273,6 +313,7 @@ vv = (c2[0] - 2.05 * tan2[0] - 1.2 * rad2[0], c2[1] - 2.05 * tan2[1] - 1.2 * rad
 v = pcbnew.PCB_VIA(B); v.SetViaType(pcbnew.VIATYPE_THROUGH); v.SetPosition(pcbnew.VECTOR2I(mm(vv[0]), mm(vv[1])))
 v.SetWidth(mm(0.6)); v.SetDrill(mm(0.3)); v.SetNet(NET["VOUT"]); B.Add(v)
 track([vv, qpos(nearest_pad("D2", "2", vv))], pcbnew.F_Cu, NET["VOUT"], 0.5)   # via -> D2 anode on F.Cu
+track([VOUT_X, vv], pcbnew.F_Cu, NET["VOUT"], 0.5)                                 # across under the SW node to D2's island
 in_island = [z for z in B.Zones() if z.GetZoneName() == "thermal_D2"][0].Outline().Contains(pcbnew.VECTOR2I(mm(vv[0]), mm(vv[1])))
 
 # Each emitter's anode is two copper pads (centre/thermal + outer) joined only INSIDE the
@@ -302,13 +343,39 @@ check(math.hypot(bcx, bcy) > math.hypot(*j["centre"]), f"J1 body faces outward (
 def d(a, b):
     (r1, p1), (r2, p2) = a, b; (x1, y1), (x2, y2) = ppos(FP[r1], p1), ppos(FP[r2], p2)
     return math.hypot(x1 - x2, y1 - y2)
-for a, b, lim, what in [(("U1","1"),("D1","2"),3.5,"SW: U1 LX - D1 anode"), (("U1","1"),("L1","2"),3.5,"SW: U1 LX - L1"),
-                        (("D1","1"),("C2","1"),2.5,"VOUT: D1 - C2"), (("C2","2"),("U1","2"),5.5,"hot-loop return: C2 GND - U1 GND (closes through the F.Cu plane above)"),
-                        (("U1","6"),("C3","1"),2.5,"IN decoupling: U1 IN - C3"), (("U1","3"),("R1a","1"),2.0,"FB: U1 - R1a"), (("Q1","3"),("R1b","2"),3.0,"R1B_Q: Q1 drain - R1b")]:
+for a, b, lim, what in [(("U1","1"),("D1","2"),3.5,"SW: U1 LX - D1 anode"), (("U1","1"),("L1","2"),3.8,"SW: U1 LX - L1"),
+                        (("D1","1"),("C2","1"),3.0,"VOUT: D1 - C2"), (("C2","2"),("U1","2"),5.5,"hot-loop return: C2 GND - U1 GND (closes through the F.Cu plane above)"),
+                        (("U1","6"),("C3","1"),2.5,"IN decoupling: U1 IN - C3"), (("U1","3"),("R1a","1"),5.0,"FB: U1 - R1a")]:
     v = d(a, b); check(v < lim, f"{what}: {v:.2f} mm (< {lim})")
 for e_ref in [f"D{i+2}" for i in range(7)]:
     nxt = f"D{int(e_ref[1:])+1}"
     v = d((e_ref, "1"), (nxt, "2")); check(v < 12.0, f"string {e_ref}.K -> {nxt}.A: {v:.2f} mm")
+check(pad(FP["TP1"], "1").GetNetname() == "/VOUT" and
+      [z for z in isl if z.GetZoneName() == "thermal_D2"][0].Outline().Contains(pad(FP["TP1"], "1").GetPosition()),
+      "TP1 (VOUT) sits inside D2's VOUT thermal island")
+# courtyards: back parts stay off the thermal islands and the screw heads, and keep a gap
+def cyd(f):
+    f.BuildCourtyardCaches(); o = f.GetCourtyard(pcbnew.B_CrtYd if f.IsFlipped() else pcbnew.F_CrtYd).Outline(0)
+    return [(tomm(o.CPoint(i).x), tomm(o.CPoint(i).y)) for i in range(o.PointCount())]
+def inpoly(p, P):
+    x, y = p; ins = False
+    for (x1, y1), (x2, y2) in zip(P, P[1:] + P[:1]):
+        if (y1 > y) != (y2 > y) and x < x1 + (y - y1) * (x2 - x1) / (y2 - y1): ins = not ins
+    return ins
+def pdist(A, B):
+    if any(inpoly(p, B) for p in A) or any(inpoly(p, A) for p in B): return 0.0
+    E = lambda P: list(zip(P, P[1:] + P[:1]))
+    return min(min(psd(p, a, b) for p in A for a, b in E(B)), min(psd(p, a, b) for p in B for a, b in E(A)))
+zpts = lambda z: [(tomm(z.Outline().COutline(0).CPoint(i).x), tomm(z.Outline().COutline(0).CPoint(i).y)) for i in range(z.Outline().COutline(0).PointCount())]
+BK = {r: cyd(f) for r, f in FP.items() if f.IsFlipped() and r != "J1"}
+onisl = [f"{r}~{z.GetZoneName()}" for r, c in BK.items() for z in isl if pdist(c, zpts(z)) < 0.2
+         and not (r == "TP1" and z.GetZoneName() == "thermal_D2")]           # TP1 is on its island by design
+check(not onisl, f"back parts clear the thermal islands by 0.2 mm: {onisl or 'all clear'}")
+onhole = [r for r, c in BK.items() for h in geo["mounting_holes"]
+          if inpoly(tuple(h["xy_mm"]), c) or min(psd(tuple(h["xy_mm"]), a, b) for a, b in zip(c, c[1:] + c[:1])) < 1.9]
+check(not onhole, f"back parts clear the screw-head keepouts: {onhole or 'all clear'}")
+ks = sorted(BK); tight = sorted((round(pdist(BK[a], BK[b]), 2), a, b) for i, a in enumerate(ks) for b in ks[i + 1:])
+check(tight[0][0] >= 0.29, f"closest back courtyards {tight[0][1]}-{tight[0][2]}: {tight[0][0]} mm (>= 0.3)")
 # ---- render both sides for eyeballing (/tmp/place_front.png, /tmp/place_back.png) ----
 def render(side, path, S=26):
     from PIL import Image, ImageDraw
@@ -362,12 +429,9 @@ for num, label in [("5", "5V"), ("4", "GND"), ("3", "LDR"), ("2", "IL"), ("1", "
     t.SetPosition(pcbnew.VECTOR2I(mm(x + inward[0] * 1.9), mm(y + inward[1] * 1.9)))
     t.SetTextAngleDegrees((kang(*inward) ) % 360); t.SetMirrored(True); B.Add(t)
 
-# the hot loop returns through the F.Cu GND plane directly above it: nothing on the front may sit there
-def local(xy):
-    ox, oy = polar(R0, PHI); t = math.radians(PHI); dx, dy = xy[0] - ox, xy[1] - oy
-    return (dx * -math.sin(t) + dy * math.cos(t), dx * math.cos(t) + dy * math.sin(t))
+# the F.Cu GND plane over the hot loop is its image plane: nothing on the front may sit there
 intr = [f"{r}.{p.GetNumber()}" for r, f in FP.items() if not f.IsFlipped() for p in f.Pads()
-        if p.GetDrillSize().x == 0 and -5.5 < local(ppos(f, p.GetNumber()))[1] < -1.0 and -5.5 < local(ppos(f, p.GetNumber()))[0] < 3.5]
+        if p.GetDrillSize().x == 0 and -5.5 < loc(ppos(f, p.GetNumber()))[1] < -1.0 and -5.5 < loc(ppos(f, p.GetNumber()))[0] < 3.5]
 check(gap_hole > 0.1, f"pre-routed STR7 D8->D9 arc at r {r_link:.2f} clears the hole keepout by {gap_hole:.2f} mm")
 check(in_island, "VOUT target via sits inside D2's thermal island")
 check(all("no room" not in h for h in hot), f"GND stitching via beside converter GND pads: {hot}")

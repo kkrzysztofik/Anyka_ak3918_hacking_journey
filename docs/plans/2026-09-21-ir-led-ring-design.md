@@ -193,9 +193,9 @@ datasheet evidence; this table is the summary.
 | L1 | **Sunlord SWPA4030S330MT**, `C83470`, 33 µH shielded 4x4x3 | Isat 1.10 A, Irms 0.84 A, DCR 0.33/0.43 Ω — ~3x margin on both currents. Custom footprint from Sunlord Table 4-1 |
 | D1 | Schottky **≥ 40 V**, SOD-123 | must exceed the 33 V open-LED clamp |
 | C1 | 10 µF 25 V 0805 | input; datasheet wants ≥ 4.7 µF |
-| C2 | **4.7 µF 50 V** 0805 | output; datasheet wants ≥ 2.2 µF. 50 V covers the 33 V clamp |
-| C3 | 100 nF 0402 | input bypass |
-| R2 | **1 MΩ** 0402 | **EN pulldown.** Silergy layout note 6: required where the driving pin is high-impedance at shutdown — exactly a camera GPIO before its port is initialised. Without it the illuminator can light at boot |
+| C2 | **4.7 µF 50 V X7R 1206**, `C29823` | output; datasheet wants ≥ 2.2 µF. 50 V covers the 33 V clamp. **1206 since 2026-09-23**: an 0805 was estimated at only ~2–2.8 µF left at 12–16 V, too close to the floor |
+| C3 | 100 nF 0805 | input bypass |
+| R2 | **1 MΩ** 0805 | **EN pulldown.** Silergy layout note 6: required where the driving pin is high-impedance at shutdown — exactly a camera GPIO before its port is initialised. Without it the illuminator can light at boot |
 | R1a | Sense, `Vfb / 0.05 A` ≈ 4.0 Ω 1 % | permanent — sets the half-power default |
 | R1b | Same value, through Q1 | parallels R1a to ~2.0 Ω for full power |
 | Q1 | Logic-level N-MOSFET, 30 V, SOT-23 | source at ground; `Rds(on)` skews R1b, trim if > ~2 % |
@@ -205,7 +205,17 @@ datasheet evidence; this table is the summary.
 | U2 | **Vishay TEMT6200FX01** `C143695`, custom 0805 footprint with collector marked | **populates the stock LDR position.** 2 x 1.25 x **0.85 mm** — fits the 1.00 mm clearance. **Must be IR-filtered, see below** |
 | R6 | ~100 kΩ, start value | LDR divider bottom leg, emitter to GND. Final value set on hardware |
 | R7 | **100 kΩ**, start value | **collector limiter, added 2026-09-22.** Caps the `LDR` node at `5.3 V x R6/(R6+R7)` ≈ 2.65 V, so the 5.3 V rail can never reach the SoC's ADC pin — see below |
+| TP1–TP3 | Test pads, 1.5 mm, back | **added 2026-09-23.** TP1 = VOUT, sitting on D2's thermal island (VOUT copper); TP2 = FB and TP3 = GND beside D9. Not in the BOM |
 | J1 | **Molex PicoBlade 1.25 mm, 5-pos, right-angle THT**, body on the back | Pitch measured 1.246 mm from the scan (the 6.0 mm caliper figure was edge to edge). **Pad 5 = 5V ... pad 1 = WL_EN**, reversed against the stock `+ - LDR IR HB` order by the back-side flip. Net names on the back silk |
+
+**Back-side layout, revised 2026-09-23.** All small passives are 0805 now (0402 before), for hand
+rework. Only the switching loop (U1, D1, C2, L1, C3, R2, C1) stays in the top gap, with
+courtyard gaps of at least 0.3 mm (they were 0.03–0.1 mm, and L1, C1 and C2 cut into
+the D2/D9 thermal islands). R1a/R1b sit beside it. The half-power switch (Q1, R3, R4) carries
+only DC, so it moved to the D7–D8 gap. R6/R7 stay on the front beside U2. The power stage is pre-routed, not left
+to the autorouter: the loop closes on B.Cu, the GND return runs between C2's pads, and VOUT
+crosses the SW node under D1's body, then through a via to D2's island. `09_place.py`
+asserts island, screw-head and courtyard clearances.
 
 ~~Layout rule: no RC on the CTRL net.~~ **Deleted 2026-09-22 with the move to
 SY7200A**, whose EN is a plain enable (1.5 V rising / 0.4 V falling) with no

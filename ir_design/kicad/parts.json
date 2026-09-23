@@ -37,15 +37,15 @@
  "C3": {
   "lib_id": "Device:C",
   "value": "100nF",
-  "footprint": "Capacitor_SMD:C_0402_1005Metric",
-  "lcsc": "C307331",
+  "footprint": "Capacitor_SMD:C_0805_2012Metric",
+  "lcsc": "C49678",
   "uuid": "19740b69-7694-5427-8ec8-68e9ac1ba920"
  },
  "C2": {
   "lib_id": "Device:C",
-  "value": "4.7uF 50V",
-  "footprint": "Capacitor_SMD:C_0805_2012Metric",
-  "lcsc": "C98192",
+  "value": "4.7uF 50V X7R",
+  "footprint": "Capacitor_SMD:C_1206_3216Metric",
+  "lcsc": "C29823",
   "uuid": "470a1f48-a3c1-50c9-a472-a9925d5aca8c"
  },
  "R1a": {
@@ -72,22 +72,22 @@
  "R2": {
   "lib_id": "Device:R",
   "value": "1M",
-  "footprint": "Resistor_SMD:R_0402_1005Metric",
-  "lcsc": "",
+  "footprint": "Resistor_SMD:R_0805_2012Metric",
+  "lcsc": "C17514",
   "uuid": "7a249512-34dd-519a-9462-bdaca11e49cd"
  },
  "R3": {
   "lib_id": "Device:R",
   "value": "1k",
-  "footprint": "Resistor_SMD:R_0402_1005Metric",
-  "lcsc": "C11702",
+  "footprint": "Resistor_SMD:R_0805_2012Metric",
+  "lcsc": "C17513",
   "uuid": "e8ae5306-9b3f-555a-bb0f-5552068f8e3c"
  },
  "R4": {
   "lib_id": "Device:R",
   "value": "100k",
-  "footprint": "Resistor_SMD:R_0402_1005Metric",
-  "lcsc": "C25741",
+  "footprint": "Resistor_SMD:R_0805_2012Metric",
+  "lcsc": "C149504",
   "uuid": "dd4acb86-37ed-55e4-99ac-b8e765c2a763"
  },
  "U2": {
@@ -100,16 +100,37 @@
  "R7": {
   "lib_id": "Device:R",
   "value": "100k",
-  "footprint": "Resistor_SMD:R_0402_1005Metric",
-  "lcsc": "C25741",
+  "footprint": "Resistor_SMD:R_0805_2012Metric",
+  "lcsc": "C149504",
   "uuid": "8449d4e2-01ed-5179-b62f-7fa8c4c63534"
  },
  "R6": {
   "lib_id": "Device:R",
   "value": "100k",
-  "footprint": "Resistor_SMD:R_0402_1005Metric",
-  "lcsc": "C25741",
+  "footprint": "Resistor_SMD:R_0805_2012Metric",
+  "lcsc": "C149504",
   "uuid": "03982de6-798d-57d9-af4c-025b2b53c61c"
+ },
+ "TP1": {
+  "lib_id": "Connector:TestPoint",
+  "value": "VOUT",
+  "footprint": "TestPoint:TestPoint_Pad_D1.5mm",
+  "lcsc": "",
+  "uuid": "9d364ff1-2677-58bb-892a-a89bede9a003"
+ },
+ "TP2": {
+  "lib_id": "Connector:TestPoint",
+  "value": "FB",
+  "footprint": "TestPoint:TestPoint_Pad_D1.5mm",
+  "lcsc": "",
+  "uuid": "445e21a6-93af-51a7-892f-3da6172b9164"
+ },
+ "TP3": {
+  "lib_id": "Connector:TestPoint",
+  "value": "GND",
+  "footprint": "TestPoint:TestPoint_Pad_D1.5mm",
+  "lcsc": "",
+  "uuid": "82308720-0877-58de-81db-379fb4c942c6"
  },
  "D2": {
   "lib_id": "Device:LED",

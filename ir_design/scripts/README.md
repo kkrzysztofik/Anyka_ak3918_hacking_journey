@@ -53,6 +53,12 @@ the routing. The `--ses` rebuild is deterministic, so it matches the DSN it was
 routed on. Freerouting 2.4.1, jar sha256 `251101c3...c6aa9`, checked against the
 GitHub release digest.
 
+Freerouting's summary always lists ~17 "unrouted" connections, and none of them are real.
+They are the duplicate anode pads inside each emitter (joined by the island zone and an
+F.Cu stub), TP1 (joined by D2's island), and every link `09_place.py` pre-routes (the
+power stage, STR7, the VOUT via). Freerouting does not count protected wires as
+connections. The DRC `unconnected pads` count is the one to trust.
+
 ## KiCad 9.0.8 scripting traps met here
 
 - **`pcbnew.LoadBoard()` corrupts the SWIG type table.** After it,

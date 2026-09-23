@@ -17,28 +17,29 @@ NS = uuid.UUID("6b1f0c8e-2d4a-4b5e-9c1d-7a3e5f2b8c90")
 def U(key): return str(uuid.uuid5(NS, key))
 ROOT = U("root")
 
-FPR = "Resistor_SMD:R_0402_1005Metric"
+FPR = "Resistor_SMD:R_0805_2012Metric"          # 0805 throughout: hand-reworkable (R6/R7 await the ADC measurement)
+FPT = "TestPoint:TestPoint_Pad_D1.5mm"            # bring-up pads, on the back; no part, not in the BOM
 PARTS = {
  "J1":  ("Connector_Generic:Conn_01x05", "PicoBlade/MX1.25 5p R/A THT", "Connector_Molex:Molex_PicoBlade_53048-0510_1x05_P1.25mm_Horizontal", ""),
  "U1":  ("ir-ring:SY7200A", "SY7200A", "Package_TO_SOT_SMD:SOT-23-6", "C107309"),
  "L1":  ("Device:L", "33uH SWPA4030S330MT", "ir-ring:L_Sunlord_SWPA4030S", "C83470"),
  "D1":  ("Device:D_Schottky", ">=40V 1A", "Diode_SMD:D_SOD-123", "C77343"),
  "C1":  ("Device:C", "10uF 25V", "Capacitor_SMD:C_0805_2012Metric", "C15850"),
- "C3":  ("Device:C", "100nF", "Capacitor_SMD:C_0402_1005Metric", "C307331"),
- "C2":  ("Device:C", "4.7uF 50V", "Capacitor_SMD:C_0805_2012Metric", "C98192"),
+ "C3":  ("Device:C", "100nF", "Capacitor_SMD:C_0805_2012Metric", "C49678"),
+ "C2":  ("Device:C", "4.7uF 50V X7R", "Capacitor_SMD:C_1206_3216Metric", "C29823"),
  "R1a": ("Device:R", "4.02R 1%", "Resistor_SMD:R_0805_2012Metric", "C367870"),
  "R1b": ("Device:R", "4.02R 1%", "Resistor_SMD:R_0805_2012Metric", "C367870"),
  "Q1":  ("Transistor_FET:Q_NMOS_GSD", "AO3400A", "Package_TO_SOT_SMD:SOT-23", "C20917"),
- "R2":  ("Device:R", "1M", FPR, ""),
- "R3":  ("Device:R", "1k", FPR, "C11702"),
- "R4":  ("Device:R", "100k", FPR, "C25741"),
+ "R2":  ("Device:R", "1M", FPR, "C17514"),
+ "R3":  ("Device:R", "1k", FPR, "C17513"),
+ "R4":  ("Device:R", "100k", FPR, "C149504"),
  "U2":  ("Device:Q_Photo_NPN", "TEMT6200FX01", "ir-ring:TEMT6200_0805", "C143695"),
- "R7":  ("Device:R", "100k", FPR, "C25741"),
- "R6":  ("Device:R", "100k", FPR, "C25741"),
+ "R7":  ("Device:R", "100k", FPR, "C149504"),
+ "R6":  ("Device:R", "100k", FPR, "C149504"),
+ "TP1": ("Connector:TestPoint", "VOUT", FPT, ""),
+ "TP2": ("Connector:TestPoint", "FB", FPT, ""),
+ "TP3": ("Connector:TestPoint", "GND", FPT, ""),
 }
-for i in range(8):
-    PARTS[f"D{i+2}"] = ("Device:LED", "IR 850nm 120deg", "ir-ring:LED_3535_JNJ_EW120", "C22447930", (30.48 + i*33.02, 101.6))
-
 for i in range(8):
     PARTS[f"D{i+2}"] = ("Device:LED", "IR 850nm 120deg", "ir-ring:LED_3535_JNJ_EW120", "C22447930")
 
@@ -51,13 +52,13 @@ for i in range(8):
 # Measured 2026-09-22; see ir_design/MEASUREMENTS.md "J1".
 NETS = {
  "+5V":   [("J1","5"),("U1","6"),("L1","1"),("C1","1"),("C3","1"),("R7","1")],
- "GND":   [("J1","4"),("U1","2"),("C1","2"),("C3","2"),("C2","2"),("R1a","2"),("Q1","2"),("R2","2"),("R4","2"),("R6","2")],
+ "GND":   [("J1","4"),("U1","2"),("C1","2"),("C3","2"),("C2","2"),("R1a","2"),("Q1","2"),("R2","2"),("R4","2"),("R6","2"),("TP3","1")],
  "LDR":   [("J1","3"),("U2","2"),("R6","1")],
  "IL_EN": [("J1","2"),("U1","4"),("R2","1")],
  "WL_EN": [("J1","1"),("R3","1")],
  "SW":    [("U1","1"),("L1","2"),("D1","2")],
- "VOUT":  [("D1","1"),("C2","1"),("U1","5"),("D2","2")],
- "FB":    [("D9","1"),("U1","3"),("R1a","1"),("R1b","1")],
+ "VOUT":  [("D1","1"),("C2","1"),("U1","5"),("D2","2"),("TP1","1")],
+ "FB":    [("D9","1"),("U1","3"),("R1a","1"),("R1b","1"),("TP2","1")],
  "R1B_Q": [("R1b","2"),("Q1","3")],
  "Q1_G":  [("R3","2"),("Q1","1"),("R4","1")],
  "U2_C":  [("R7","2"),("U2","1")],
@@ -104,6 +105,9 @@ put("R4", 170.18, 120.65)
 put("R7", 292.1, 68.58)
 put("U2", 289.56, 81.28, 0, None, ((295.91, 80.01), (295.91, 82.55), "left"))
 put("R6", 292.1, 96.52)
+# test pads: symbol origin is the pin, the graphic sits above it
+for i, r in enumerate(("TP1", "TP2", "TP3")):
+    put(r, 231.14 + 12.7 * i, 111.76, 0, None, ((233.68 + 12.7 * i, 106.68), (233.68 + 12.7 * i, 109.22), "left"))
 # LED string: one chain, anode left
 for n in range(2, 10):
     x = 55.88 + 25.4 * (n - 2)
@@ -173,6 +177,10 @@ W(P("R7", "2"), P("U2", "1")); LB("U2_C", (P("U2", "1")[0], 74.93))
 LN = (P("U2", "2")[0], 88.9)
 W(P("U2", "2"), LN, P("R6", "1")); PS("GND", P("R6", "2"))
 W(LN, (302.26, LN[1])); LB("LDR", (302.26, LN[1]))
+# test pads
+for r, net in (("TP1", "VOUT"), ("TP2", "FB")):
+    W(P(r, "1"), (P(r, "1")[0], 116.84)); LB(net, (P(r, "1")[0], 116.84), 270)
+W(P("TP3", "1"), (P("TP3", "1")[0], 114.3)); PS("GND", (P("TP3", "1")[0], 114.3))
 # LED string
 W((45.72, 160.02), P("D2", "2")); LB("VOUT", (45.72, 160.02), 180)
 for n in range(2, 9):
@@ -225,7 +233,8 @@ out.append(f'(text "IR ring replacement - SY7200A boost, 8 x 850 nm in series, 5
 BLOCKS = [("INPUT - camera cable (PicoBlade 1.25)", 30.48, 72.39),
           ("BOOST CONVERTER - SY7200A", 96.52, 58.42), ("HALF / FULL POWER - HB switches R1b in", 147.32, 132.08),
           ("LIGHT SENSOR - populates the stock LDR position", 276.86, 53.34),
-          ("LED STRING - 8 x JNJ 3535 850 nm, in series", 43.18, 147.32)]
+          ("LED STRING - 8 x JNJ 3535 850 nm, in series", 43.18, 147.32),
+          ("TEST PADS - bring-up, back side", 226.06, 99.06)]
 for i, (t, x, y) in enumerate(BLOCKS):
     out.append(f'(text "{t}" (exclude_from_sim no) (at {x} {y} 0) (effects (font (size 1.524 1.524) (bold yes)) (justify left)) (uuid "{U(f"blk{i}")}"))')
 
@@ -234,7 +243,7 @@ for ref, (lid, val, fp, lcsc) in PARTS.items():
     mir = f" (mirror {m})" if m else ""
     pl = "".join(f'(pin "{n}" (uuid "{U(f"pin:{ref}:{n}")}"))' for n in PINS[lid])
     out.append(
-      f'(symbol (lib_id "{lid}") (at {x} {y} {a}){mir} (unit 1) (exclude_from_sim no) (in_bom yes) (on_board yes) (dnp no) (uuid "{U(f"sym:{ref}")}")'
+      f'(symbol (lib_id "{lid}") (at {x} {y} {a}){mir} (unit 1) (exclude_from_sim no) (in_bom {"no" if fp == FPT else "yes"}) (on_board yes) (dnp no) (uuid "{U(f"sym:{ref}")}")'
       f'(property "Reference" "{ref}" (at {rxy[0]} {rxy[1]} 0) {eff(just)})'
       f'(property "Value" "{val}" (at {vxy[0]} {vxy[1]} 0) {eff(just)})'
       f'(property "Footprint" "{fp}" (at {x} {y} 0) {eff(hide=True)})'

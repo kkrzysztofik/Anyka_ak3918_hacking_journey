@@ -10,13 +10,14 @@ Library survey run against KiCad 9.0.8 stock libraries (`/usr/share/kicad/footpr
 | Q1 | AO3400A, SOT-23 | `Package_TO_SOT_SMD:SOT-23` |
 | D1 | Schottky ≥40 V, SOD-123 | `Diode_SMD:D_SOD-123` |
 | C1 | 10 µF 25 V | `Capacitor_SMD:C_0805_2012Metric` |
-| C2 | 4.7 µF 50 V | `Capacitor_SMD:C_0805_2012Metric` |
-| C3 | 100 nF | `Capacitor_SMD:C_0402_1005Metric` |
+| C2 | 4.7 µF 50 V X7R | `Capacitor_SMD:C_1206_3216Metric` (1206 since 2026-09-23: keeps more capacitance under DC bias) |
+| C3 | 100 nF | `Capacitor_SMD:C_0805_2012Metric` |
 | R1a, R1b | 4.02 Ω 1 % | `Resistor_SMD:R_0805_2012Metric` |
-| R2 | 1 MΩ EN pulldown | `Resistor_SMD:R_0402_1005Metric` |
-| R3 | 1 kΩ | `Resistor_SMD:R_0402_1005Metric` |
-| R4 | 100 kΩ | `Resistor_SMD:R_0402_1005Metric` |
-| R6 | ~100 kΩ sensor divider | `Resistor_SMD:R_0402_1005Metric` |
+| R2 | 1 MΩ EN pulldown | `Resistor_SMD:R_0805_2012Metric` |
+| R3 | 1 kΩ | `Resistor_SMD:R_0805_2012Metric` |
+| R4 | 100 kΩ | `Resistor_SMD:R_0805_2012Metric` |
+| R6, R7 | ~100 kΩ sensor divider | `Resistor_SMD:R_0805_2012Metric` (0402 until 2026-09-23; 0805 so the divider can be retuned by hand) |
+| TP1–TP3 | VOUT, FB, GND bring-up pads | `TestPoint:TestPoint_Pad_D1.5mm`, back side, not in the BOM |
 | U2 | TEMT6200FX01 ambient light sensor, `C143695` | **custom `ir-ring:TEMT6200_0805`** — see below |
 
 `_Handsoldering` variants chosen for U1 and the passives where available: this
