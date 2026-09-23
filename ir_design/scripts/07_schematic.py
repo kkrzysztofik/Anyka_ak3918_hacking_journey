@@ -41,7 +41,7 @@ PARTS = {
  "TP3": ("Connector:TestPoint", "GND", FPT, ""),
 }
 for i in range(8):
-    PARTS[f"D{i+2}"] = ("Device:LED", "IR 850nm 120deg", "ir-ring:LED_3535_JNJ_EW120", "C22447930")
+    PARTS[f"D{i+2}"] = ("Device:LED", "IR 850nm 125deg", "ir-ring:LED_2835_JNJ_CW", "C22447924")   # flat-top 2835: the domed 3535 C22447930 drew JLCPCB manual-assembly fees
 
 # LCSC number -> (manufacturer, MPN, description), from LCSC's product JSON
 # (wmsc.lcsc.com/ftps/wm/product/detail?productCode=C...) on 2026-09-23. C83470 is
@@ -60,7 +60,7 @@ MFR = {
  "C17513":    ("UNI-ROYAL", "0805W8F1001T5E", "RES 1k 1% 125mW 0805"),
  "C149504":   ("UNI-ROYAL", "0805W8F1003T5E", "RES 100k 1% 125mW 0805"),
  "C143695":   ("VISHAY", "TEMT6200FX01", "Ambient Light Sensor in 0805 Package"),
- "C22447930": ("JNJOPTO", "JNJ-L-3535EW120-85035D-SL-J2", "EMITTER IR 850nm 1000mA SMD3535"),
+ "C22447924": ("JNJOPTO", "JNJ-L-2835CW-85020D-S-Q2", "EMITTER IR 850nm 350mA SMD2835"),
 }
 assert {p[3] for p in PARTS.values() if p[3]} == set(MFR), "MFR must cover exactly the LCSC numbers in PARTS"
 
@@ -254,7 +254,7 @@ out.append(f'(text "IR ring replacement - SY7200A boost, 8 x 850 nm in series, 5
 BLOCKS = [("INPUT - camera cable (PicoBlade 1.25)", 30.48, 72.39),
           ("BOOST CONVERTER - SY7200A", 96.52, 58.42), ("HALF / FULL POWER - HB switches R1b in", 147.32, 132.08),
           ("LIGHT SENSOR - populates the stock LDR position", 276.86, 53.34),
-          ("LED STRING - 8 x JNJ 3535 850 nm, in series", 43.18, 147.32),
+          ("LED STRING - 8 x JNJ 2835 850 nm, in series", 43.18, 147.32),
           ("TEST PADS - bring-up, back side", 226.06, 99.06)]
 for i, (t, x, y) in enumerate(BLOCKS):
     out.append(f'(text "{t}" (exclude_from_sim no) (at {x} {y} 0) (effects (font (size 1.524 1.524) (bold yes)) (justify left)) (uuid "{U(f"blk{i}")}"))')

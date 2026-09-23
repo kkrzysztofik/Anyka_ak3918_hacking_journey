@@ -317,17 +317,6 @@ track([vv, qpos(nearest_pad("D2", "2", vv))], pcbnew.F_Cu, NET["VOUT"], 0.5)   #
 track([VOUT_X, vv], pcbnew.F_Cu, NET["VOUT"], 0.5)                                 # across under the SW node to D2's island
 in_island = [z for z in B.Zones() if z.GetZoneName() == "thermal_D2"][0].Outline().Contains(pcbnew.VECTOR2I(mm(vv[0]), mm(vv[1])))
 
-# Each emitter's anode is two copper pads (centre/thermal + outer) joined only INSIDE the
-# package (pins 2+3). KiCad 9.0.8 has no "duplicate pads are jumpers" footprint flag, so join
-# them with a short F.Cu track across the 0.5 mm gap: same net, and the bare board then has
-# real continuity from the string link to the thermal pad.
-for i in range(8):
-    ref = f"D{i+2}"
-    anodes = [q for q in FP[ref].Pads() if q.GetNumber() == "2" and q.GetDrillSize().x == 0]
-    centre = max(anodes, key=lambda q: q.GetSize().x)                    # the 1.0 mm-wide pad
-    outer = min((q for q in anodes if q is not centre), key=lambda q: -q.GetSize().y)   # 0.6 x 3.3, not the tab
-    track([qpos(outer), qpos(centre)], pcbnew.F_Cu, NET[pin_net[(ref, "2")]], 0.3)
-
 
 # ---- checks ----
 bad = 0

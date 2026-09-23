@@ -20,7 +20,7 @@ change the design and re-run the pipeline (see `ir_design/scripts/README.md`).
 | Thickness | **1.0 mm** | stock board measures 1.05 mm |
 | Outer copper | **2 oz** | The pours are the emitters' heat path. The board rules are set to JLCPCB's 2 oz limits (0.16/0.16 mm track and space, 0.254 mm PTH ring), so the 2 oz order is legal as drawn. |
 | Soldermask | **White** | For reflectivity behind the lens array. JLCPCB uses one colour for both sides. |
-| Surface finish | ENIG recommended | The 3535 thermal pads want a flat finish. Lead-free HASL works but is lumpier. |
+| Surface finish | ENIG recommended | The 2835 anode pads carry thermal vias and want a flat finish. Lead-free HASL works but is lumpier. |
 | Board outline | as drawn | The bore and the three mounting holes are milled cutouts on Edge.Cuts, not drill hits. |
 
 ## Assembly
@@ -34,7 +34,8 @@ change the design and re-run the pipeline (see `ir_design/scripts/README.md`).
 
 The rotation of a custom footprint is not in JLCPCB's database, so their preview often shows these parts turned:
 
-- **D2–D9 (emitters, `LED_3535_JNJ_EW120`)**: pin 1 is the **cathode**, in JLCPCB's library and in ours, so the preview's pin-1 dot must sit on our cathode pad, next to our silk dot. Each emitter's cathode faces the next emitter round the ring. **This is the one that matters:** the centre pad is the anode, so an emitter turned 180° is a short, and eight of them burn R1a on first power-up. Do not accept a preview where they are turned.
+- **D2–D9 (emitters, `C22447924`, `LED_2835_JNJ_CW`)**: pin 1 is the **cathode**, the small pad, in JLCPCB's library and in ours. The preview's pin-1 dot must sit on the small pad, next to our silk dot, and the body's corner notch on the large (anode) pad. Each emitter's cathode faces the next emitter round the ring. A turned emitter is reversed, not shorted, so the string stays dark and nothing burns. Still reject a turned preview.
+- **Emitter fees:** the earlier domed 3535 (`C22447930`) made JLCPCB add hand-soldering and manual-assembly fees. This flat-top 2835 should not. If the quote still shows them, the emitters are not the reason.
 - **U2 (TEMT6200, custom 0805)**: our pad 1 is the collector, marked "C", but **JLCPCB's library numbers the emitter as pin 1**. The two footprints agree on geometry, so in the preview JLCPCB's pin-1 dot sits at the end **away from** the "C". That is correct: do not rotate it.
 - **L1 (custom)**: not polarised, but the body should sit square on its pads.
 - **Back side, polarised parts: U1, D1, Q1.** Confirm pin 1 against the board render. A mirrored rotation is the usual failure on the bottom side.

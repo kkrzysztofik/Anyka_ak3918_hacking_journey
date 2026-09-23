@@ -57,7 +57,43 @@ running this sensor from any higher rail.
 
 ## Custom — must be drawn
 
-### D2–D9 — RESOLVED: JNJ-L-3535EW120-85035D-SL-J2 (`C22447930`)
+### D2–D9 — JNJ-L-2835CW-85020D-S-Q2 (`C22447924`), flat-top 2835 (2026-09-24)
+
+**Replaces the 3535 below.** JLCPCB added a hand-soldering fee and a manual-assembly
+fee for `C22447930`: the soft silicone dome cannot take a pick-up nozzle. The same
+fees appeared on a top-side-only quote. Every 3535 IR emitter JLCPCB stocks is domed,
+including NationStar's NPD3535I1 (2.1 mm). Flat-top parts are PLCC.
+
+| | 3535 (was) | **2835 (now)** |
+|---|---|---|
+| Height | 1.67 mm, silicone dome | **~0.93 mm** (0.68 body + 0.25), flat — fits the 1.00 mm lens clearance, no lift |
+| Rating / our 100 mA | 1 A / 10 % | 350 mA / **29 %** |
+| Vf | 1.4 typ @350 mA | 1.3 typ / 2.1 max @250 mA — 8S string unchanged in practice |
+| Radiant power | 200 mW @350 mA | 160 mW @250, 220 @350 mA — about the same per mA |
+| Beam | 120° | 125° |
+| Pads | 3 (centre = anode) | 2, **large pad = anode** |
+| Wrong way round | **short** (burns R1a) | reversed diode, string dark, harmless |
+| Stock | 1 000 | 13 679 |
+
+Datasheet: `https://wmsc.lcsc.com/wmsc/upload/file/pdf/v2/lcsc/2410121440_JNJ-OPTOELECTRONICS-JNJ-L-2835CW-85020D-S-Q2_C22447924.pdf`.
+
+`ir-ring:LED_2835_JNJ_CW` follows the vendor land pattern (p.3), centred on the
+body: cathode `1` 1.0 x 2.0 mm at x = −1.3, anode `2` 1.8 x 2.0 mm at x = +0.9.
+Top view has the cathode on the left, as do the datasheet and JLCPCB's library part.
+With unequal pads the part cannot seat mirrored, so the 3535's handedness
+question below does not arise.
+
+Three thermal vias (0.3 mm drill) sit in the anode pad at (0.55, ±0.4) and
+(1.25, +0.4). The fourth corner (1.25, −0.4) is left empty: the +5V back-side
+route runs under it on D2. They sit ≥ 0.4 mm inside the pad edge, which the
+0.254 mm annular rule needs, because KiCad measures the ring to the merged SMD copper.
+
+The footprint origin is the body centre, so the emitters stay on the stock dome
+centres. The anode is still the thermal pad, so the per-emitter B.Cu islands on
+the anode nets carry over unchanged. The committed routes (`ir-ring.ses`) import
+onto the new pads with DRC, parity and dangling-track checks clean. No re-route.
+
+### D2–D9, superseded — JNJ-L-3535EW120-85035D-SL-J2 (`C22447930`)
 
 **Correction first.** An earlier revision of this file attributed
 `C22447934` to Task 4. That was wrong — I picked that code out of a search

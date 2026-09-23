@@ -20,7 +20,7 @@ d.ellipse([P(-br,-br),P(br,br)], outline="blue", width=3)
 for h in g["mounting_holes"]:
     x,y=h["xy_mm"]; r=h["dia_mm"]/2
     d.ellipse([P(x-r,y-r),P(x+r,y+r)], outline="green", width=3)
-# emitters 3535 bodies
+# emitters, drawn as 3535 boxes (the fitted part is now a 2835)
 for e in g["emitters"]:
     x,y=e["xy_mm"]
     d.rectangle([P(x-1.75,y-1.75),P(x+1.75,y+1.75)], outline="magenta", width=2)

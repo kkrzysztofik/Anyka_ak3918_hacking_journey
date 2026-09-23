@@ -201,7 +201,7 @@ datasheet evidence; this table is the summary.
 | Q1 | Logic-level N-MOSFET, 30 V, SOT-23 | source at ground; `Rds(on)` skews R1b, trim if > ~2 % |
 | R3 | **1 kΩ** | Q1 gate, from `HB`. **Not 10 kΩ** — see below |
 | R4 | 100 kΩ | Q1 gate pulldown |
-| D2–D9 | 850 nm IR, **3535** | 10.8 mm radial room, 7 mm dome. **Height limit lifted 2026-09-22** — the operator will raise the lens array rather than constrain the emitter. Same die family as the 2835 alternative, so ratings are unchanged |
+| D2–D9 | 850 nm IR, **2835 flat-top**, JNJ-L-2835CW-85020D-S-Q2 `C22447924` | **Changed 2026-09-24 from the domed 3535** `C22447930`, whose soft silicone dome made JLCPCB charge hand-soldering and manual-assembly fees. 3.5 x 2.8 x ~0.93 mm fits the stock 1.00 mm lens clearance, so the lens array no longer has to be raised. 350 mA rating (100 mA is 29 %), 125°, Vf 1.3 typ / 2.1 max at 250 mA. The large pad is the anode, the same as the 3535's thermal pad, so the per-emitter anode islands are unchanged. A part placed backwards is a reversed diode, not a short |
 | U2 | **Vishay TEMT6200FX01** `C143695`, custom 0805 footprint with collector marked | **populates the stock LDR position.** 2 x 1.25 x **0.85 mm** — fits the 1.00 mm clearance. **Must be IR-filtered, see below** |
 | R6 | ~100 kΩ, start value | LDR divider bottom leg, emitter to GND. Final value set on hardware |
 | R7 | **100 kΩ**, start value | **collector limiter, added 2026-09-22.** Caps the `LDR` node at `5.3 V x R6/(R6+R7)` ≈ 2.65 V, so the 5.3 V rail can never reach the SoC's ADC pin — see below |

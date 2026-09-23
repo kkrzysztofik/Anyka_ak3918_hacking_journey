@@ -156,6 +156,10 @@ degrees.
 
 ### Emitter package decision: 3535 - RESOLVED
 
+> **Superseded 2026-09-24: the fitted emitter is a flat-top 2835** (`C22447924`, ~0.93 mm).
+> The domed 3535 made JLCPCB charge manual-assembly fees. The 2835 also fits the 1.00 mm
+> dome clearance below, so the lens array no longer needs raising. See `FOOTPRINTS.md`.
+
 Radial room from bore edge (8.24 mm) to the nearest outer edge (~19 mm) is
 **~10.8 mm**, well past the ~8 mm threshold `SPEC.md` set for choosing 3535.
 The operator confirms the lens array dome is **7 mm diameter**, which covers a

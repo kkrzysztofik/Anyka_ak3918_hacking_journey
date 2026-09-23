@@ -191,82 +191,82 @@
  },
  "D2": {
   "lib_id": "Device:LED",
-  "value": "IR 850nm 120deg",
-  "footprint": "ir-ring:LED_3535_JNJ_EW120",
-  "lcsc": "C22447930",
+  "value": "IR 850nm 125deg",
+  "footprint": "ir-ring:LED_2835_JNJ_CW",
+  "lcsc": "C22447924",
   "uuid": "7a280644-b365-5690-ab24-c29fcb87a3ee",
   "manufacturer": "JNJOPTO",
-  "mpn": "JNJ-L-3535EW120-85035D-SL-J2",
-  "description": "EMITTER IR 850nm 1000mA SMD3535"
+  "mpn": "JNJ-L-2835CW-85020D-S-Q2",
+  "description": "EMITTER IR 850nm 350mA SMD2835"
  },
  "D3": {
   "lib_id": "Device:LED",
-  "value": "IR 850nm 120deg",
-  "footprint": "ir-ring:LED_3535_JNJ_EW120",
-  "lcsc": "C22447930",
+  "value": "IR 850nm 125deg",
+  "footprint": "ir-ring:LED_2835_JNJ_CW",
+  "lcsc": "C22447924",
   "uuid": "33a7574b-e0f8-5442-9031-f8c20d15e022",
   "manufacturer": "JNJOPTO",
-  "mpn": "JNJ-L-3535EW120-85035D-SL-J2",
-  "description": "EMITTER IR 850nm 1000mA SMD3535"
+  "mpn": "JNJ-L-2835CW-85020D-S-Q2",
+  "description": "EMITTER IR 850nm 350mA SMD2835"
  },
  "D4": {
   "lib_id": "Device:LED",
-  "value": "IR 850nm 120deg",
-  "footprint": "ir-ring:LED_3535_JNJ_EW120",
-  "lcsc": "C22447930",
+  "value": "IR 850nm 125deg",
+  "footprint": "ir-ring:LED_2835_JNJ_CW",
+  "lcsc": "C22447924",
   "uuid": "4a52e5cd-46a9-538b-954f-6d95ca563042",
   "manufacturer": "JNJOPTO",
-  "mpn": "JNJ-L-3535EW120-85035D-SL-J2",
-  "description": "EMITTER IR 850nm 1000mA SMD3535"
+  "mpn": "JNJ-L-2835CW-85020D-S-Q2",
+  "description": "EMITTER IR 850nm 350mA SMD2835"
  },
  "D5": {
   "lib_id": "Device:LED",
-  "value": "IR 850nm 120deg",
-  "footprint": "ir-ring:LED_3535_JNJ_EW120",
-  "lcsc": "C22447930",
+  "value": "IR 850nm 125deg",
+  "footprint": "ir-ring:LED_2835_JNJ_CW",
+  "lcsc": "C22447924",
   "uuid": "e066966f-77db-5cae-aec1-fa352b4d7921",
   "manufacturer": "JNJOPTO",
-  "mpn": "JNJ-L-3535EW120-85035D-SL-J2",
-  "description": "EMITTER IR 850nm 1000mA SMD3535"
+  "mpn": "JNJ-L-2835CW-85020D-S-Q2",
+  "description": "EMITTER IR 850nm 350mA SMD2835"
  },
  "D6": {
   "lib_id": "Device:LED",
-  "value": "IR 850nm 120deg",
-  "footprint": "ir-ring:LED_3535_JNJ_EW120",
-  "lcsc": "C22447930",
+  "value": "IR 850nm 125deg",
+  "footprint": "ir-ring:LED_2835_JNJ_CW",
+  "lcsc": "C22447924",
   "uuid": "9e147576-436c-5b2f-b339-70f05beb379c",
   "manufacturer": "JNJOPTO",
-  "mpn": "JNJ-L-3535EW120-85035D-SL-J2",
-  "description": "EMITTER IR 850nm 1000mA SMD3535"
+  "mpn": "JNJ-L-2835CW-85020D-S-Q2",
+  "description": "EMITTER IR 850nm 350mA SMD2835"
  },
  "D7": {
   "lib_id": "Device:LED",
-  "value": "IR 850nm 120deg",
-  "footprint": "ir-ring:LED_3535_JNJ_EW120",
-  "lcsc": "C22447930",
+  "value": "IR 850nm 125deg",
+  "footprint": "ir-ring:LED_2835_JNJ_CW",
+  "lcsc": "C22447924",
   "uuid": "9ef84ceb-f390-5ab9-9a03-2b49c916007f",
   "manufacturer": "JNJOPTO",
-  "mpn": "JNJ-L-3535EW120-85035D-SL-J2",
-  "description": "EMITTER IR 850nm 1000mA SMD3535"
+  "mpn": "JNJ-L-2835CW-85020D-S-Q2",
+  "description": "EMITTER IR 850nm 350mA SMD2835"
  },
  "D8": {
   "lib_id": "Device:LED",
-  "value": "IR 850nm 120deg",
-  "footprint": "ir-ring:LED_3535_JNJ_EW120",
-  "lcsc": "C22447930",
+  "value": "IR 850nm 125deg",
+  "footprint": "ir-ring:LED_2835_JNJ_CW",
+  "lcsc": "C22447924",
   "uuid": "12dfca7f-d7e4-5e94-9ea9-24095aad86a8",
   "manufacturer": "JNJOPTO",
-  "mpn": "JNJ-L-3535EW120-85035D-SL-J2",
-  "description": "EMITTER IR 850nm 1000mA SMD3535"
+  "mpn": "JNJ-L-2835CW-85020D-S-Q2",
+  "description": "EMITTER IR 850nm 350mA SMD2835"
  },
  "D9": {
   "lib_id": "Device:LED",
-  "value": "IR 850nm 120deg",
-  "footprint": "ir-ring:LED_3535_JNJ_EW120",
-  "lcsc": "C22447930",
+  "value": "IR 850nm 125deg",
+  "footprint": "ir-ring:LED_2835_JNJ_CW",
+  "lcsc": "C22447924",
   "uuid": "102fbb18-b84e-508c-be01-e408f3374dec",
   "manufacturer": "JNJOPTO",
-  "mpn": "JNJ-L-3535EW120-85035D-SL-J2",
-  "description": "EMITTER IR 850nm 1000mA SMD3535"
+  "mpn": "JNJ-L-2835CW-85020D-S-Q2",
+  "description": "EMITTER IR 850nm 350mA SMD2835"
  }
 }
