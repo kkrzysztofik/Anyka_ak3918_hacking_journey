@@ -34,7 +34,7 @@ change the design and re-run the pipeline (see `ir_design/scripts/README.md`).
 
 The rotation of a custom footprint is not in JLCPCB's database, so their preview often shows these parts turned:
 
-- **D2–D9 (emitters, `LED_3535_JNJ_EW120`)**: pin 1 is the **cathode**. Each emitter's cathode faces the next emitter round the ring.
-- **U2 (TEMT6200, custom 0805)**: pin 1 is the **collector**, marked "C" on the footprint.
+- **D2–D9 (emitters, `LED_3535_JNJ_EW120`)**: pin 1 is the **cathode**, in JLCPCB's library and in ours, so the preview's pin-1 dot must sit on our cathode pad, next to our silk dot. Each emitter's cathode faces the next emitter round the ring. **This is the one that matters:** the centre pad is the anode, so an emitter turned 180° is a short, and eight of them burn R1a on first power-up. Do not accept a preview where they are turned.
+- **U2 (TEMT6200, custom 0805)**: our pad 1 is the collector, marked "C", but **JLCPCB's library numbers the emitter as pin 1**. The two footprints agree on geometry, so in the preview JLCPCB's pin-1 dot sits at the end **away from** the "C". That is correct: do not rotate it.
 - **L1 (custom)**: not polarised, but the body should sit square on its pads.
 - **Back side, polarised parts: U1, D1, Q1.** Confirm pin 1 against the board render. A mirrored rotation is the usual failure on the bottom side.

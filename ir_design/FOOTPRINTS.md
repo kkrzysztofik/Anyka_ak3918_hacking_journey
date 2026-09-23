@@ -126,9 +126,9 @@ labels (1.0 mm centre pad = 80 px, 3.3 mm height = 263 px, consistent to
 
 | Pad | Net | Size | Position |
 |---|---|---|---|
-| 1 | cathode | 0.6 x 3.3 mm, plus 0.3 x 0.6 outward tab | x = **+1.30** |
+| 1 | cathode | 0.6 x 3.3 mm, plus 0.3 x 0.6 outward tab | x = **-1.30** |
 | 2 | anode, thermal | 1.0 x 3.3 mm | x = 0 |
-| 2 | anode | 0.6 x 3.3 mm, plus 0.3 x 0.6 outward tab | x = **-1.30** |
+| 2 | anode | 0.6 x 3.3 mm, plus 0.3 x 0.6 outward tab | x = **+1.30** |
 
 Package pins 2 and 3 are common inside the part, so every anode pad is
 numbered `2` and a plain two-pin LED symbol works. Loads cleanly in
@@ -139,17 +139,37 @@ pad, at 1.0 mm pitch. They are the thermal design on a board with no metal
 core. They are separate pads with no paste layer, so they do not starve the
 joint.
 
-#### Pin-1 handedness: RESOLVED
+#### Pin-1 handedness: cathode on the LEFT (reverted 2026-09-23)
 
-The datasheet has **one** pad view, and it is a bottom view, with pin 1 on
-the left. The drawing on the same page labelled like a top view shows the
-lens face, not the pads, so the two do not conflict. My first revision drew
-pin 1 on the left and was mirrored. Fixed on 2026-09-22: looking down on the
-board, **pin 1 (cathode) is on the right**. The pin-1 dot on the silkscreen
-moved with it.
+Looking down on the board, **pin 1 (cathode) is on the left** and the anode
+outer pad on the right.
 
-Seen from the component side, the part's corner chamfer should sit on the
-anode (left) side. That gives a visual check at incoming inspection.
+The 2026-09-22 revision mirrored this to cathode-right, on the reading that the
+p.3 pad view is a bottom view. The evidence was against it:
+
+- the datasheet's top view on the same page labels ① on the left, with the
+  corner chamfer at the ② (anode) corner;
+- **JLCPCB's own library part for `C22447930`** (EasyEDA
+  `LED-SMD_3P-L3.5-W3.5_...`, fetched 2026-09-23) has pin 1 = K on the left
+  with "−" silk and pin 2 = A on the right with "+" silk. JLCPCB places the
+  part from *its* footprint at *our* CPL rotation, so disagreeing with it
+  decides the physical orientation, whatever the drawing means.
+
+**Why it matters:** the centre pad is internally the anode, so a part sitting
+the wrong way round is a short, not a reversed diode. All eight shorted puts
+the 5 V rail through L1 and D1 straight into R1a (4.02 Ω), even with the
+converter disabled: ~1.1 A, ~5 W in an 0805, and FB at ~4.8 V against its
+4 V absolute maximum.
+
+The revert moved no copper. `09_place.py` orients each emitter by its
+anode→cathode pad vector, so every emitter turned 180° and its pads landed
+exactly where they were: all pads, nets and all 245 tracks are identical
+before and after. Only the CPL rotations of D2–D9 (+180°) and the silk dot
+changed. The placements in `ir-ring.ses` were turned by the same 180°, because
+KiCad's SES import applies them.
+
+A meter on a loose part is still the final word: the outer pad that reads
+as a short to the centre pad is the anode.
 
 #### ⚠ The thermal pad IS the anode — layout consequence for Task 8
 
