@@ -23,7 +23,7 @@ PARTS = {
  "J1":  ("Connector_Generic:Conn_01x05", "PicoBlade/MX1.25 5p R/A THT", "ir-ring:Molex_PicoBlade_53048-0510_1x05_P1.25mm_Horizontal_Ring0.275", "C588276"),   # genuine Molex 530480510
  "U1":  ("ir-ring:SY7200A", "SY7200A", "Package_TO_SOT_SMD:SOT-23-6", "C107309"),
  "L1":  ("Device:L", "33uH SWPA4030S330MT", "ir-ring:L_Sunlord_SWPA4030S", "C83470"),
- "D1":  ("Device:D_Schottky", ">=40V 1A", "Diode_SMD:D_SOD-123", "C77343"),
+ "D1":  ("Device:D_Schottky", "B5819W 40V 1A", "Diode_SMD:D_SOD-123", "C8598"),   # JLCPCB Basic; was RB160M-60 C77343 (Extended)
  "C1":  ("Device:C", "10uF 25V", "Capacitor_SMD:C_0805_2012Metric", "C15850"),
  "C3":  ("Device:C", "100nF", "Capacitor_SMD:C_0805_2012Metric", "C49678"),
  "C2":  ("Device:C", "4.7uF 50V X7R", "Capacitor_SMD:C_1206_3216Metric", "C29823"),

@@ -22,9 +22,9 @@
  },
  "D1": {
   "lib_id": "Device:D_Schottky",
-  "value": ">=40V 1A",
+  "value": "B5819W 40V 1A",
   "footprint": "Diode_SMD:D_SOD-123",
-  "lcsc": "C77343",
+  "lcsc": "C8598",
   "uuid": "3faee59e-884b-5415-a17f-ac7bd8cef295"
  },
  "C1": {

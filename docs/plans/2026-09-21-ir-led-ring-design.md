@@ -191,7 +191,7 @@ datasheet evidence; this table is the summary.
 |---|---|---|
 | U1 | **Silergy SY7200A**, SOT23-6, `C107309` | 1 MHz fixed, Vref 200 mV, ILIM 2 A, open-LED clamp 28/30/33 V, **plain EN** (1.5 V rising). Replaced TPS61165 2026-09-22 |
 | L1 | **Sunlord SWPA4030S330MT**, `C83470`, 33 µH shielded 4x4x3 | Isat 1.10 A, Irms 0.84 A, DCR 0.33/0.43 Ω — ~3x margin on both currents. Custom footprint from Sunlord Table 4-1 |
-| D1 | Schottky **≥ 40 V**, SOD-123 | must exceed the 33 V open-LED clamp |
+| D1 | Schottky **≥ 40 V**, SOD-123: **B5819W SL `C8598`** (JLCPCB Basic) | must exceed the 33 V open-LED clamp. It replaced the 60 V RB160M-60 (`C77343`, Extended) on 2026-09-23, so the margin over the clamp is now 7 V, where it was 27 V |
 | C1 | 10 µF 25 V 0805 | input; datasheet wants ≥ 4.7 µF |
 | C2 | **4.7 µF 50 V X7R 1206**, `C29823` | output; datasheet wants ≥ 2.2 µF. 50 V covers the 33 V clamp. **1206 since 2026-09-23**: an 0805 was estimated at only ~2–2.8 µF left at 12–16 V, too close to the floor |
 | C3 | 100 nF 0805 | input bypass |
