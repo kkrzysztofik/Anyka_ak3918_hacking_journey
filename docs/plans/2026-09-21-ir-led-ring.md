@@ -543,7 +543,7 @@ rtk git commit -m "feat(ir): two-layer FR4 layout, emitters front, converter bac
 Deviations from the steps below:
 - **Board rules raised to JLCPCB's 2 oz limits:** 0.16/0.16 mm track and space, and a 0.254 mm PTH ring in `kicad/ir-ring.kicad_dru`. The board was drawn to 0.15 mm, which is legal only at 1 oz.
 - **J1 got a custom footprint** (`..._Ring0.275`). KiCad's stock PicoBlade pads leave a 0.15 mm ring on the 0.5 mm hole. That is under JLCPCB's floor even for 1 oz (0.18 mm).
-- **J1 is hand-soldered.** No LCSC listing was found for 53048-0510.
+- **J1 is `C588276`** (genuine Molex 530480510, found by the operator). It is assembled by JLCPCB as a THT part.
 - **BOM from `parts.json`, not `sch export bom`:** JLCPCB wants grouped rows with its own column names. The CPL is KiCad's placement file with the columns renamed.
 - **gerbview is GUI-only.** The script cross-checks the drill hits against the board instead. The visual check happens in JLCPCB's upload preview (see `fab/ORDER.md`).
 

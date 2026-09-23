@@ -1,2 +1,2 @@
 Not placed by JLCPCB (no LCSC number) - solder by hand:
-  J1: PicoBlade/MX1.25 5p R/A THT  (ir-ring:Molex_PicoBlade_53048-0510_1x05_P1.25mm_Horizontal_Ring0.275)
+  none - JLCPCB places every part

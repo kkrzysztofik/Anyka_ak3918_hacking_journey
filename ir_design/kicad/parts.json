@@ -3,7 +3,7 @@
   "lib_id": "Connector_Generic:Conn_01x05",
   "value": "PicoBlade/MX1.25 5p R/A THT",
   "footprint": "ir-ring:Molex_PicoBlade_53048-0510_1x05_P1.25mm_Horizontal_Ring0.275",
-  "lcsc": "",
+  "lcsc": "C588276",
   "uuid": "0cc1203d-c724-5cb5-a472-34a977fabb29"
  },
  "U1": {

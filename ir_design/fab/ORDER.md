@@ -26,7 +26,7 @@ change the design and re-run the pipeline (see `ir_design/scripts/README.md`).
 ## Assembly
 
 - **Standard PCBA, both sides.** The converter (12 parts) is on the back and the emitters and U2 are on the front. Economic PCBA is single-sided, so it will not do.
-- **J1 is soldered by hand** (`hand_assembly.txt`). It is a Molex PicoBlade 53048-0510, 5-pin right-angle THT, with its body on the back. No LCSC listing was found for it. If you find one, add the C-number to `PARTS["J1"]` in `07_schematic.py` and re-run.
+- **J1 is through-hole**: Molex PicoBlade 530480510, `C588276`, with its body on the **back** and its pins soldered on the front. JLCPCB places it as a THT part at extra cost. Its CPL row says `Bottom` because that is where the body sits. Check in the preview that the opening faces the board edge.
 - **TP1–TP3 are bare pads**, with no part and not in the BOM.
 - **Stock to watch:** R1a/R1b `C367870` (4.02 Ω) had only 900 in stock on 2026-09-23. That is plenty for a prototype run but not for a big one.
 

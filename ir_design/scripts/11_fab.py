@@ -65,5 +65,6 @@ check(len([g for g in gbr if g[-4:] not in (".drl", "rjob")]) == len(LAYERS.spli
 with open(os.path.join(FAB, "hand_assembly.txt"), "w") as f:
     f.write("Not placed by JLCPCB (no LCSC number) - solder by hand:\n")
     for r in hand: f.write(f"  {r}: {parts[r]['value']}  ({parts[r]['footprint']})\n")
+    if not hand: f.write("  none - JLCPCB places every part\n")
 print(f"fab package -> {os.path.normpath(FAB)}: {len(groups)} BOM lines, {len(jlc)} placed parts, hand-solder: {', '.join(hand) or 'none'}")
 sys.exit(1 if bad else 0)
