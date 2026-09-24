@@ -325,7 +325,7 @@ pub(crate) fn create_default_ptz_configuration() -> PTZConfiguration {
     }
 }
 
-fn default_multicast_configuration() -> MulticastConfiguration {
+pub(crate) fn default_multicast_configuration() -> MulticastConfiguration {
     MulticastConfiguration {
         address: IpAddress {
             address_type: IpType::IPv4,

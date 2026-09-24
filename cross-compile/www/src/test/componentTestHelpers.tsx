@@ -206,6 +206,23 @@ export const MOCK_DATA = {
       },
     },
   },
+  audioEncoder: {
+    configuration: {
+      token: 'AudioEncoderConfig_0',
+      name: 'Audio Encoder',
+      useCount: 1,
+      encoding: 'G711',
+      bitrate: 0,
+      sampleRate: 8,
+      sessionTimeout: 'PT60S',
+    },
+    options: {
+      options: [
+        { encoding: 'G711', bitrates: [0, 32], sampleRates: [8] },
+        { encoding: 'G726', bitrates: [16], sampleRates: [16] },
+      ],
+    },
+  },
   users: [
     {
       username: 'admin',

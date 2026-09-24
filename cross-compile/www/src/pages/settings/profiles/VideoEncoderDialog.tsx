@@ -89,12 +89,6 @@ export function VideoEncoderDialog({
     },
   });
 
-  const handleSave = () => {
-    if (config) {
-      updateMutation.mutate(config);
-    }
-  };
-
   if (isLoading || !config || !options) {
     return (
       <Dialog open onOpenChange={onClose}>
@@ -312,7 +306,7 @@ export function VideoEncoderDialog({
           </Button>
           <Button
             type="button"
-            onClick={handleSave}
+            onClick={() => updateMutation.mutate(config)}
             disabled={updateMutation.isPending}
             className="bg-[#0a84ff] text-white hover:bg-[#0077ed]"
             data-testid="video-encoder-edit-dialog-save"

@@ -6,17 +6,22 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  type AudioEncoderConfiguration,
+  type AudioEncoderConfigurationOptions,
   type MediaProfile,
   type VideoEncoderConfiguration,
   type VideoEncoderConfigurationOptions,
   addConfiguration,
   createProfile,
   deleteProfile,
+  getAudioEncoderConfiguration,
+  getAudioEncoderConfigurationOptions,
   getCompatibleConfigurations,
   getProfiles,
   getVideoEncoderConfiguration,
   getVideoEncoderConfigurationOptions,
   removeConfiguration,
+  setAudioEncoderConfiguration,
   setVideoEncoderConfiguration,
 } from '@/services/profileService';
 import {
@@ -39,6 +44,9 @@ vi.mock('@/services/profileService', () => ({
   getVideoEncoderConfiguration: vi.fn(),
   getVideoEncoderConfigurationOptions: vi.fn(),
   setVideoEncoderConfiguration: vi.fn(),
+  getAudioEncoderConfiguration: vi.fn(),
+  getAudioEncoderConfigurationOptions: vi.fn(),
+  setAudioEncoderConfiguration: vi.fn(),
   getCompatibleConfigurations: vi.fn(),
   addConfiguration: vi.fn(),
   removeConfiguration: vi.fn(),
@@ -584,5 +592,54 @@ describe('ProfilesPage config tiles (attach/detach)', () => {
     await waitFor(() =>
       expect(removeConfiguration).toHaveBeenCalledWith('ProfileEnc', 'VideoEncoder'),
     );
+  });
+
+  const openAudioEncoderDialog = async (
+    user: ReturnType<typeof userEvent.setup>,
+    token = 'ProfileAudioEnc',
+  ) => {
+    vi.mocked(getProfiles).mockResolvedValue([
+      {
+        token,
+        name: 'AudioEnc',
+        fixed: false,
+        audioEncoderConfiguration: { token: 'AudioEncoderConfig_0', name: 'G711' },
+      } as MediaProfile,
+    ]);
+    vi.mocked(getAudioEncoderConfiguration).mockResolvedValue(
+      MOCK_DATA.audioEncoder.configuration as unknown as AudioEncoderConfiguration,
+    );
+    vi.mocked(getAudioEncoderConfigurationOptions).mockResolvedValue(
+      MOCK_DATA.audioEncoder.options as unknown as AudioEncoderConfigurationOptions,
+    );
+
+    await expandProfileCard(user, token);
+    await user.click(await screen.findByTestId(`audio-encoder-config-${token}-edit-button`));
+  };
+
+  it('edits the audio encoder from its tile', async () => {
+    vi.mocked(setAudioEncoderConfiguration).mockResolvedValue(undefined);
+
+    const user = userEvent.setup();
+    await openAudioEncoderDialog(user);
+
+    // A different encoding lands on the bitrate/sample rate it advertises.
+    await user.selectOptions(await screen.findByTestId('audio-encoder-encoding-select'), 'G726');
+    await user.click(screen.getByTestId('audio-encoder-edit-dialog-save'));
+
+    await waitFor(() =>
+      expect(setAudioEncoderConfiguration).toHaveBeenCalledWith(
+        expect.objectContaining({ encoding: 'G726', bitrate: 16, sampleRate: 16 }),
+      ),
+    );
+  });
+
+  it('associates every audio encoder control with its label', async () => {
+    const user = userEvent.setup();
+    await openAudioEncoderDialog(user);
+
+    for (const label of ['Encoding', 'Bitrate', 'Sample Rate']) {
+      expect(await screen.findByLabelText(label)).toBeInTheDocument();
+    }
   });
 });

@@ -60,6 +60,7 @@ import {
   removeConfiguration,
 } from '@/services/profileService';
 
+import { AudioEncoderDialog } from './AudioEncoderDialog';
 import { ConfigPickerDialog } from './ConfigPickerDialog';
 import { ConfigSection } from './ConfigSection';
 import { VideoEncoderDialog } from './VideoEncoderDialog';
@@ -87,10 +88,8 @@ export default function ProfilesPage() {
   const queryClient = useQueryClient();
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [profileToDelete, setProfileToDelete] = useState<MediaProfile | null>(null);
-  const [editingEncoder, setEditingEncoder] = useState<{
-    profileToken: string;
-    encoderToken: string;
-  } | null>(null);
+  const [editingEncoder, setEditingEncoder] = useState<string | null>(null);
+  const [editingAudioEncoder, setEditingAudioEncoder] = useState<string | null>(null);
   const [picker, setPicker] = useState<{
     profileToken: string;
     family: ConfigFamily;
@@ -333,10 +332,7 @@ export default function ProfilesPage() {
                         onEdit={
                           profile.videoEncoderConfiguration
                             ? () =>
-                                setEditingEncoder({
-                                  profileToken: profile.token,
-                                  encoderToken: profile.videoEncoderConfiguration?.token ?? '',
-                                })
+                                setEditingEncoder(profile.videoEncoderConfiguration?.token ?? '')
                             : undefined
                         }
                         onAdd={() =>
@@ -377,6 +373,14 @@ export default function ProfilesPage() {
                         active={!!profile.audioEncoderConfiguration}
                         token={profile.audioEncoderConfiguration?.token}
                         details={profile.audioEncoderConfiguration?.name}
+                        onEdit={
+                          profile.audioEncoderConfiguration
+                            ? () =>
+                                setEditingAudioEncoder(
+                                  profile.audioEncoderConfiguration?.token ?? '',
+                                )
+                            : undefined
+                        }
                         onAdd={() =>
                           setPicker({ profileToken: profile.token, family: 'AudioEncoder' })
                         }
@@ -529,11 +533,17 @@ export default function ProfilesPage() {
           </AlertDialogContent>
         </AlertDialog>
 
-        {/* Video Encoder Edit Dialog */}
+        {/* Encoder edit dialogs */}
         {editingEncoder && (
           <VideoEncoderDialog
-            encoderToken={editingEncoder.encoderToken}
+            encoderToken={editingEncoder}
             onClose={() => setEditingEncoder(null)}
+          />
+        )}
+        {editingAudioEncoder && (
+          <AudioEncoderDialog
+            encoderToken={editingAudioEncoder}
+            onClose={() => setEditingAudioEncoder(null)}
           />
         )}
 

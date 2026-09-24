@@ -428,7 +428,15 @@ mod tests {
                 sample_rate: Some(8000),
                 session_timeout: Some("PT60S".to_string()),
             }],
-            metadata_configs: vec![],
+            metadata_configs: vec![StoredMetadataConfig {
+                token: "MetadataConfig_0".to_string(),
+                name: "MetadataConfig".to_string(),
+                use_count: 1,
+                ptz_status: true,
+                ptz_position: true,
+                analytics: false,
+                session_timeout: Some("PT60S".to_string()),
+            }],
         };
 
         let storage = ProfileStorage::new(&path);
@@ -458,6 +466,10 @@ mod tests {
             loaded.audio_encoder_configs.len(),
             original.audio_encoder_configs.len()
         );
+        assert_eq!(
+            loaded.metadata_configs.len(),
+            original.metadata_configs.len()
+        );
 
         // Verify detailed fields
         assert_eq!(loaded.video_sources[0].framerate, 25.0);
@@ -468,6 +480,8 @@ mod tests {
             Some("Main".to_string())
         );
         assert_eq!(loaded.audio_encoder_configs[0].bitrate, Some(64));
+        assert_eq!(loaded.metadata_configs[0].token, "MetadataConfig_0");
+        assert!(loaded.metadata_configs[0].ptz_position);
     }
 
     #[test]
@@ -500,49 +514,5 @@ height = 1080
         "#;
         let cfg: StoredVideoSourceConfig = toml::from_str(toml).unwrap();
         assert!(!cfg.rotated);
-    }
-
-    #[test]
-    fn metadata_config_round_trips_through_toml() {
-        let dir = tempdir().unwrap();
-        let path = dir.path().join("profiles.toml");
-        let storage = ProfileStorage::new(&path);
-
-        storage.replace(ProfilesFile {
-            profiles: vec![StoredProfile {
-                token: "Profile_MainStream".to_string(),
-                name: "MainStream".to_string(),
-                fixed: true,
-                video_source_config: None,
-                video_encoder_config: Some("VideoEncoderConfig_0".to_string()),
-                audio_source_config: None,
-                audio_encoder_config: None,
-                ptz_config: None,
-                ptz_detached: false,
-                metadata_config: Some("MetadataConfig_0".to_string()),
-            }],
-            metadata_configs: vec![StoredMetadataConfig {
-                token: "MetadataConfig_0".to_string(),
-                name: "MetadataConfig".to_string(),
-                use_count: 1,
-                ptz_status: true,
-                ptz_position: true,
-                analytics: false,
-                session_timeout: Some("PT60S".to_string()),
-            }],
-            ..Default::default()
-        });
-        storage.save().unwrap();
-
-        let reloaded = ProfileStorage::new(&path);
-        reloaded.load().unwrap();
-        let data = reloaded.snapshot();
-
-        assert_eq!(
-            data.profiles[0].metadata_config.as_deref(),
-            Some("MetadataConfig_0")
-        );
-        assert_eq!(data.metadata_configs.len(), 1);
-        assert!(data.metadata_configs[0].ptz_position);
     }
 }

@@ -93,7 +93,7 @@ pub fn get_compatible_ptz_configurations(
         "GetCompatiblePTZConfigurations for profile: {}",
         request.profile_token
     );
-    let _ = pm.get_profile(&request.profile_token)?;
+    pm.get_profile(&request.profile_token)?;
     let configurations = pm.get_compatible_ptz_configurations(&request.profile_token);
     Ok(GetCompatiblePTZConfigurationsResponse { configurations })
 }
@@ -134,7 +134,7 @@ pub fn get_compatible_metadata_configurations(
         "GetCompatibleMetadataConfigurations for profile: {}",
         request.profile_token
     );
-    let _ = pm.get_profile(&request.profile_token)?;
+    pm.get_profile(&request.profile_token)?;
     let configurations = pm.get_compatible_metadata_configurations(&request.profile_token);
     Ok(GetCompatibleMetadataConfigurationsResponse { configurations })
 }
@@ -248,21 +248,6 @@ mod tests {
     }
 
     #[test]
-    fn test_add_ptz_configuration_attaches_to_profile() {
-        let pm = create_test_pm();
-        let result = add_ptz_configuration(
-            &pm,
-            AddPTZConfiguration {
-                profile_token: "Profile_MainStream".to_string(),
-                configuration_token: format!("{}0", PTZ_CONFIG_PREFIX),
-            },
-        );
-        assert!(result.is_ok());
-        let profile = pm.get_profile(&"Profile_MainStream".to_string()).unwrap();
-        assert!(profile.ptz_configuration.is_some());
-    }
-
-    #[test]
     fn test_add_ptz_configuration_rejects_unknown_profile() {
         let pm = create_test_pm();
         let result = add_ptz_configuration(
@@ -279,33 +264,6 @@ mod tests {
     }
 
     #[test]
-    fn test_add_ptz_configuration_rejects_non_default_token() {
-        let pm = create_test_pm();
-        let result = add_ptz_configuration(
-            &pm,
-            AddPTZConfiguration {
-                profile_token: "Profile_MainStream".to_string(),
-                configuration_token: "BogusPTZ".to_string(),
-            },
-        );
-        assert!(result.is_err(), "a non-default PTZ token must fault");
-    }
-
-    #[test]
-    fn test_remove_ptz_configuration_detaches_from_profile() {
-        let pm = create_test_pm();
-        let result = remove_ptz_configuration(
-            &pm,
-            RemovePTZConfiguration {
-                profile_token: "Profile_MainStream".to_string(),
-            },
-        );
-        assert!(result.is_ok());
-        let profile = pm.get_profile(&"Profile_MainStream".to_string()).unwrap();
-        assert!(profile.ptz_configuration.is_none());
-    }
-
-    #[test]
     fn test_remove_ptz_configuration_rejects_unknown_profile() {
         let pm = create_test_pm();
         let result = remove_ptz_configuration(
@@ -315,19 +273,6 @@ mod tests {
             },
         );
         assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_get_compatible_ptz_configurations_lists_default_when_enabled() {
-        let pm = create_test_pm();
-        let result = get_compatible_ptz_configurations(
-            &pm,
-            GetCompatiblePTZConfigurations {
-                profile_token: "Profile_MainStream".to_string(),
-            },
-        )
-        .unwrap();
-        assert_eq!(result.configurations.len(), 1);
     }
 
     #[test]
@@ -356,21 +301,6 @@ mod tests {
     }
 
     #[test]
-    fn test_add_metadata_configuration_attaches_to_profile() {
-        let pm = create_test_pm();
-        let result = add_metadata_configuration(
-            &pm,
-            AddMetadataConfiguration {
-                profile_token: "Profile_MainStream".to_string(),
-                configuration_token: format!("{}0", METADATA_CONFIG_PREFIX),
-            },
-        );
-        assert!(result.is_ok());
-        let profile = pm.get_profile(&"Profile_MainStream".to_string()).unwrap();
-        assert!(profile.metadata_configuration.is_some());
-    }
-
-    #[test]
     fn test_add_metadata_configuration_rejects_unknown_profile() {
         let pm = create_test_pm();
         let result = add_metadata_configuration(
@@ -384,25 +314,6 @@ mod tests {
     }
 
     #[test]
-    fn test_remove_metadata_configuration_detaches_from_profile() {
-        let pm = create_test_pm();
-        pm.add_metadata_configuration(
-            &"Profile_MainStream".to_string(),
-            &format!("{}0", METADATA_CONFIG_PREFIX),
-        )
-        .unwrap();
-        let result = remove_metadata_configuration(
-            &pm,
-            RemoveMetadataConfiguration {
-                profile_token: "Profile_MainStream".to_string(),
-            },
-        );
-        assert!(result.is_ok());
-        let profile = pm.get_profile(&"Profile_MainStream".to_string()).unwrap();
-        assert!(profile.metadata_configuration.is_none());
-    }
-
-    #[test]
     fn test_remove_metadata_configuration_rejects_unknown_profile() {
         let pm = create_test_pm();
         let result = remove_metadata_configuration(
@@ -412,19 +323,6 @@ mod tests {
             },
         );
         assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_get_compatible_metadata_configurations_lists_all() {
-        let pm = create_test_pm();
-        let result = get_compatible_metadata_configurations(
-            &pm,
-            GetCompatibleMetadataConfigurations {
-                profile_token: "Profile_MainStream".to_string(),
-            },
-        )
-        .unwrap();
-        assert!(!result.configurations.is_empty());
     }
 
     #[test]

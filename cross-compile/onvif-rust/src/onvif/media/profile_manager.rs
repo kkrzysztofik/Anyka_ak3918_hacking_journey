@@ -21,8 +21,8 @@ use crate::config::{ConfigRuntime, PersistenceHandle, ProfileStorage};
 use crate::onvif::error::{OnvifError, OnvifResult};
 use crate::onvif::types::common::{
     AudioEncoderConfiguration, AudioSource, AudioSourceConfiguration, IntRange, IntRectangle,
-    MetadataConfiguration, MulticastConfiguration, Name, PTZConfiguration, PTZFilter, Profile,
-    ReferenceToken, VideoEncoderConfiguration, VideoRateControl, VideoResolution, VideoSource,
+    MetadataConfiguration, Name, PTZConfiguration, PTZFilter, Profile, ReferenceToken,
+    VideoEncoderConfiguration, VideoRateControl, VideoResolution, VideoSource,
     VideoSourceConfiguration,
 };
 use crate::onvif::types::media::{
@@ -1094,12 +1094,7 @@ impl ProfileManager {
         }
         // When PTZ is disabled there is no attachable PTZ configuration, so
         // reject the attach rather than re-enabling a disabled feature.
-        let ptz_enabled = self
-            .config
-            .as_ref()
-            .map(|c| c.read().ptz.enabled)
-            .unwrap_or(true);
-        if !ptz_enabled {
+        if !self.ptz_enabled() {
             return Err(no_config_error(config_token));
         }
         let config = Self::create_default_ptz_configuration();
@@ -1140,12 +1135,7 @@ impl ProfileManager {
         &self,
         _profile_token: &ReferenceToken,
     ) -> Vec<PTZConfiguration> {
-        let ptz_enabled = self
-            .config
-            .as_ref()
-            .map(|c| c.read().ptz.enabled)
-            .unwrap_or(true);
-        if ptz_enabled {
+        if self.ptz_enabled() {
             vec![Self::create_default_ptz_configuration()]
         } else {
             Vec::new()
@@ -1200,11 +1190,7 @@ impl ProfileManager {
         let audio_source_configs = self.audio_source_configs.read();
         let audio_encoder_configs = self.audio_encoder_configs.read();
         let metadata_configs = self.metadata_configs.read();
-        let ptz_enabled = self
-            .config
-            .as_ref()
-            .map(|c| c.read().ptz.enabled)
-            .unwrap_or(true);
+        let ptz_enabled = self.ptz_enabled();
 
         ProfilesFile {
             profiles: profiles
@@ -1533,16 +1519,7 @@ impl ProfileManager {
                 gov_length: s.gov_length.unwrap_or(30) as i32,
                 h264_profile: profile,
             }),
-            multicast: Some(MulticastConfiguration {
-                address: crate::onvif::types::common::IpAddress {
-                    address_type: crate::onvif::types::common::IpType::IPv4,
-                    ipv4_address: Some("0.0.0.0".to_string()),
-                    ipv6_address: None,
-                },
-                port: 0,
-                ttl: 0,
-                auto_start: false,
-            }),
+            multicast: Some(defaults::default_multicast_configuration()),
             session_timeout: s
                 .session_timeout
                 .clone()
@@ -1576,16 +1553,7 @@ impl ProfileManager {
             encoding,
             bitrate: s.bitrate.unwrap_or(64) as i32,
             sample_rate: s.sample_rate.unwrap_or(8000) as i32,
-            multicast: Some(MulticastConfiguration {
-                address: crate::onvif::types::common::IpAddress {
-                    address_type: crate::onvif::types::common::IpType::IPv4,
-                    ipv4_address: Some("0.0.0.0".to_string()),
-                    ipv6_address: None,
-                },
-                port: 0,
-                ttl: 0,
-                auto_start: false,
-            }),
+            multicast: Some(defaults::default_multicast_configuration()),
             session_timeout: s
                 .session_timeout
                 .clone()
@@ -1603,16 +1571,7 @@ impl ProfileManager {
                 position: s.ptz_position,
             }),
             analytics: Some(s.analytics),
-            multicast: Some(MulticastConfiguration {
-                address: crate::onvif::types::common::IpAddress {
-                    address_type: crate::onvif::types::common::IpType::IPv4,
-                    ipv4_address: Some("0.0.0.0".to_string()),
-                    ipv6_address: None,
-                },
-                port: 0,
-                ttl: 0,
-                auto_start: false,
-            }),
+            multicast: Some(defaults::default_multicast_configuration()),
             session_timeout: s
                 .session_timeout
                 .clone()
@@ -1757,6 +1716,16 @@ impl ProfileManager {
     ) -> Vec<AudioEncoderConfiguration> {
         // All audio encoder configurations are compatible
         self.get_audio_encoder_configurations()
+    }
+
+    /// Whether PTZ is enabled in the current configuration.
+    ///
+    /// An absent configuration means "no opinion", so PTZ defaults to enabled.
+    fn ptz_enabled(&self) -> bool {
+        self.config
+            .as_ref()
+            .map(|c| c.read().ptz.enabled)
+            .unwrap_or(true)
     }
 
     /// Create default PTZ configuration for profiles.

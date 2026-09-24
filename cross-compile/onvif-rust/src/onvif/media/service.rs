@@ -694,14 +694,7 @@ impl MediaService {
         &self,
         request: AddPTZConfiguration,
     ) -> OnvifResult<AddPTZConfigurationResponse> {
-        tracing::debug!(
-            "AddPTZConfiguration: profile={}, config={}",
-            request.profile_token,
-            request.configuration_token
-        );
-        self.profile_manager
-            .add_ptz_configuration(&request.profile_token, &request.configuration_token)?;
-        Ok(AddPTZConfigurationResponse {})
+        profile_ops::add_ptz_configuration(&self.profile_manager, request)
     }
 
     /// Handle RemovePTZConfiguration request.
@@ -709,10 +702,7 @@ impl MediaService {
         &self,
         request: RemovePTZConfiguration,
     ) -> OnvifResult<RemovePTZConfigurationResponse> {
-        tracing::debug!("RemovePTZConfiguration: profile={}", request.profile_token);
-        self.profile_manager
-            .remove_ptz_configuration(&request.profile_token)?;
-        Ok(RemovePTZConfigurationResponse {})
+        profile_ops::remove_ptz_configuration(&self.profile_manager, request)
     }
 
     /// Handle GetCompatiblePTZConfigurations request.
@@ -720,16 +710,7 @@ impl MediaService {
         &self,
         request: GetCompatiblePTZConfigurations,
     ) -> OnvifResult<GetCompatiblePTZConfigurationsResponse> {
-        tracing::debug!(
-            "GetCompatiblePTZConfigurations for profile: {}",
-            request.profile_token
-        );
-        // Verify the profile exists (fault on an unknown profile token).
-        self.profile_manager.get_profile(&request.profile_token)?;
-        let configurations = self
-            .profile_manager
-            .get_compatible_ptz_configurations(&request.profile_token);
-        Ok(GetCompatiblePTZConfigurationsResponse { configurations })
+        profile_ops::get_compatible_ptz_configurations(&self.profile_manager, request)
     }
 
     /// Handle AddMetadataConfiguration request.
@@ -737,14 +718,7 @@ impl MediaService {
         &self,
         request: AddMetadataConfiguration,
     ) -> OnvifResult<AddMetadataConfigurationResponse> {
-        tracing::debug!(
-            "AddMetadataConfiguration: profile={}, config={}",
-            request.profile_token,
-            request.configuration_token
-        );
-        self.profile_manager
-            .add_metadata_configuration(&request.profile_token, &request.configuration_token)?;
-        Ok(AddMetadataConfigurationResponse {})
+        profile_ops::add_metadata_configuration(&self.profile_manager, request)
     }
 
     /// Handle RemoveMetadataConfiguration request.
@@ -752,13 +726,7 @@ impl MediaService {
         &self,
         request: RemoveMetadataConfiguration,
     ) -> OnvifResult<RemoveMetadataConfigurationResponse> {
-        tracing::debug!(
-            "RemoveMetadataConfiguration: profile={}",
-            request.profile_token
-        );
-        self.profile_manager
-            .remove_metadata_configuration(&request.profile_token)?;
-        Ok(RemoveMetadataConfigurationResponse {})
+        profile_ops::remove_metadata_configuration(&self.profile_manager, request)
     }
 
     /// Handle GetCompatibleMetadataConfigurations request.
@@ -766,16 +734,7 @@ impl MediaService {
         &self,
         request: GetCompatibleMetadataConfigurations,
     ) -> OnvifResult<GetCompatibleMetadataConfigurationsResponse> {
-        tracing::debug!(
-            "GetCompatibleMetadataConfigurations for profile: {}",
-            request.profile_token
-        );
-        // Verify the profile exists (fault on an unknown profile token).
-        self.profile_manager.get_profile(&request.profile_token)?;
-        let configurations = self
-            .profile_manager
-            .get_compatible_metadata_configurations(&request.profile_token);
-        Ok(GetCompatibleMetadataConfigurationsResponse { configurations })
+        profile_ops::get_compatible_metadata_configurations(&self.profile_manager, request)
     }
 
     // ========================================================================
