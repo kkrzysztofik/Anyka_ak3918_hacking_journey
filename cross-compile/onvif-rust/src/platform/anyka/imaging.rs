@@ -972,8 +972,10 @@ mod tests {
         std::fs::write(&ir_led, "0").unwrap();
 
         let mock_ffi = MockImagingHalTrait::new();
-        let mut cfg = crate::config::types::ImagingConfig::default();
-        cfg.ir_cut_filter = IrCutFilterMode::ON;
+        let cfg = crate::config::types::ImagingConfig {
+            ir_cut_filter: IrCutFilterMode::ON,
+            ..Default::default()
+        };
         let control = AnykaImagingControl::with_ffi_and_paths(Arc::new(mock_ffi), paths, cfg, None);
 
         // Force the lamp on: the node reads 1, the cache holds ir_cut ON.
@@ -1063,10 +1065,12 @@ mod tests {
             .times(1)
             .returning(|_| AK_SUCCESS_I32);
 
-        let mut cfg = crate::config::types::ImagingConfig::default();
-        cfg.hue = 60.0;
-        cfg.power_hz = 60;
-        cfg.style_id = 2;
+        let cfg = crate::config::types::ImagingConfig {
+            hue: 60.0,
+            power_hz: 60,
+            style_id: 2,
+            ..Default::default()
+        };
         let control = AnykaImagingControl::with_ffi_and_paths(Arc::new(mock_ffi), paths, cfg, None);
 
         // Must not fail boot.

@@ -1603,10 +1603,10 @@ mod tests {
     #[tokio::test]
     async fn test_set_settings_partial_set_preserves_unmodeled_fields() {
         use crate::onvif::types::common::{
-            BacklightCompensationMode, ImagingSettings20, WhiteBalance20, WhiteBalanceMode,
+            BacklightCompensationMode, ImagingSettings20, WhiteBalanceMode,
         };
         use crate::platform::Platform;
-        use crate::platform::common::traits::{ImagingControl, ImagingSettings, ToggleWithLevel};
+        use crate::platform::common::traits::{ImagingSettings, ToggleWithLevel};
         use crate::platform::stub::StubPlatformBuilder;
 
         let platform: Arc<dyn Platform> =
