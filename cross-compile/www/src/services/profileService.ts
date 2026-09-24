@@ -436,7 +436,9 @@ export async function setVideoSourceConfiguration(
 // as compatible and attaching is a profile-field update.
 // ---------------------------------------------------------------------------
 
-export type ConfigurationReference = { '@_ref': string };
+// The response carries repeated `<trt:Configurations token="...">` elements —
+// each a full configuration object, not a bare reference.
+export type ConfigurationReference = { '@_token': string };
 
 export async function addConfiguration(
   profileToken: string,
@@ -469,11 +471,11 @@ export async function getCompatibleConfigurations(
     body,
     `GetCompatible${configType}ConfigurationsResponse`,
   );
-  const refs = data?.[`${configType}Configurations`] as
+  const refs = data?.Configurations as
     Array<ConfigurationReference> | ConfigurationReference | undefined;
   if (!refs) return [];
   const list = Array.isArray(refs) ? refs : [refs];
-  return list.map((r) => safeString(r['@_ref'], ''));
+  return list.map((r) => safeString(r['@_token'], ''));
 }
 
 export function addVideoSourceConfiguration(profileToken: string, configToken: string) {

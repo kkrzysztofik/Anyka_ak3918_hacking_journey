@@ -85,6 +85,11 @@ pub(crate) fn fault_details(error: &OnvifError) -> FaultDetails {
         OnvifError::ConfigurationConflict(msg) => {
             FaultDetails::new("s:Sender", "ter:ConfigurationConflict", msg.clone())
         }
+        OnvifError::IncompleteConfiguration(msg) => FaultDetails::new(
+            "s:Receiver",
+            "ter:Action/ter:IncompleteConfiguration",
+            msg.clone(),
+        ),
         OnvifError::Internal(msg) => {
             FaultDetails::new("s:Receiver", "ter:InternalError", msg.clone())
         }
@@ -178,6 +183,16 @@ mod tests {
         assert_eq!(details.code, "s:Sender");
         assert_eq!(details.subcode, "ter:ConfigurationConflict");
         assert_eq!(details.reason, "Profile already exists");
+    }
+
+    #[test]
+    fn test_fault_details_incomplete_configuration() {
+        let error = OnvifError::IncompleteConfiguration("Profile has no encoder".to_string());
+        let details = fault_details(&error);
+
+        assert_eq!(details.code, "s:Receiver");
+        assert_eq!(details.subcode, "ter:Action/ter:IncompleteConfiguration");
+        assert_eq!(details.reason, "Profile has no encoder");
     }
 
     #[test]

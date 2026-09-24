@@ -114,12 +114,12 @@ describe('profile configuration attach/detach/compatible', () => {
         expect(body).toContain('<trt:ProfileToken>P_1</trt:ProfileToken>');
       });
 
-      it(`getCompatible emits the request and parses the ref tokens`, async () => {
+      it(`getCompatible emits the request and parses the config tokens`, async () => {
         vi.mocked(apiClient.post).mockResolvedValueOnce(
           createMockSOAPResponse(
             `<GetCompatible${family.type}ConfigurationsResponse>` +
-              `<${family.type}Configurations ref="C_1" />` +
-              `<${family.type}Configurations ref="C_2" />` +
+              `<trt:Configurations token="C_1" />` +
+              `<trt:Configurations token="C_2" />` +
               `</GetCompatible${family.type}ConfigurationsResponse>`,
           ),
         );

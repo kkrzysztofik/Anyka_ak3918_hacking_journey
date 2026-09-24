@@ -48,13 +48,10 @@ pub fn get_stream_uri(
         .as_ref()
         .map(|c| c.token.as_str())
         .ok_or_else(|| {
-            OnvifError::invalid_arg_val(
-                "ter:InvalidArgVal",
-                format!(
-                    "Profile '{}' has no video encoder configuration and cannot be streamed",
-                    request.profile_token
-                ),
-            )
+            OnvifError::IncompleteConfiguration(format!(
+                "Profile '{}' has no video encoder configuration and cannot be streamed",
+                request.profile_token
+            ))
         })?;
 
     // Build RTSP URI from the encoder-derived channel
@@ -348,9 +345,18 @@ mod tests {
                 profile_token: "Profile_Bare".to_string(),
             },
         );
+        let fault = result
+            .expect_err(
+                "a profile with no video encoder must fault, not hand out a dead /stream URI",
+            )
+            .to_soap_fault();
         assert!(
-            result.is_err(),
-            "a profile with no video encoder must fault, not hand out a dead /stream URI"
+            fault.contains("s:Receiver"),
+            "GetStreamUri with no encoder is a receiver-side fault: {fault}"
+        );
+        assert!(
+            fault.contains("ter:Action/ter:IncompleteConfiguration"),
+            "ONVIF Media 24.12 5.15.1 requires ter:Action/ter:IncompleteConfiguration: {fault}"
         );
     }
 

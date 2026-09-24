@@ -310,6 +310,22 @@ describe('ProfilesPage', () => {
     expect(getVideoEncoderConfigurationOptions).toHaveBeenCalled();
   });
 
+  it('should associate every video encoder control with its label', async () => {
+    const user = userEvent.setup();
+    await expandProfileAndOpenVideoEncoderDialog(user);
+
+    for (const label of [
+      'Resolution',
+      'Quality',
+      'Frame Rate Limit',
+      'Bitrate Limit',
+      'H.264 Profile',
+      'GOP Length',
+    ]) {
+      expect(screen.getByLabelText(label)).toBeInTheDocument();
+    }
+  });
+
   it('should handle VideoEncoderEditDialog loading state', async () => {
     vi.mocked(getVideoEncoderConfiguration).mockImplementation(
       () => new Promise(() => {}), // Never resolves

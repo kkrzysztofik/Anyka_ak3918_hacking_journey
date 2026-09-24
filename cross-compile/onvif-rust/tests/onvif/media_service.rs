@@ -796,10 +796,8 @@ fn test_metadata_handlers_return_expected_results() {
     let configurations = service
         .handle_get_metadata_configurations(GetMetadataConfigurations {})
         .unwrap();
-    assert!(
-        !configurations.configurations.is_empty(),
-        "the device exposes its default metadata configuration"
-    );
+    assert_eq!(configurations.configurations.len(), 1);
+    assert_eq!(configurations.configurations[0].token, "MetadataConfig_0");
 
     let result = service.handle_set_metadata_configuration(SetMetadataConfiguration {
         configuration: MetadataConfiguration {

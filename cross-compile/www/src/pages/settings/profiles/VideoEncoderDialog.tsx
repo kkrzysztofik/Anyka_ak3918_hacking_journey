@@ -32,6 +32,7 @@ export function VideoEncoderDialog({
   const [config, setConfig] = React.useState<VideoEncoderConfiguration | null>(null);
   const [options, setOptions] = React.useState<VideoEncoderConfigurationOptions | null>(null);
   const [isLoading, setIsLoading] = React.useState(true);
+  const controlId = React.useId();
 
   // Stabilize onClose so it doesn't cause re-fetches when the parent re-renders
   const onCloseRef = React.useRef(onClose);
@@ -139,8 +140,11 @@ export function VideoEncoderDialog({
         <div className="space-y-4 py-4">
           {/* Resolution */}
           <div className="space-y-2">
-            <Label className="text-[#e5e5e5]">Resolution</Label>
+            <Label className="text-[#e5e5e5]" htmlFor={`${controlId}-resolution`}>
+              Resolution
+            </Label>
             <select
+              id={`${controlId}-resolution`}
               value={`${config.resolution.width}x${config.resolution.height}`}
               onChange={(e) => {
                 const [width, height] = e.target.value.split('x').map(Number);
@@ -160,10 +164,13 @@ export function VideoEncoderDialog({
           {/* Quality */}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <Label className="text-[#e5e5e5]">Quality</Label>
+              <Label className="text-[#e5e5e5]" htmlFor={`${controlId}-quality`}>
+                Quality
+              </Label>
               <span className="text-sm text-[#a1a1a6] tabular-nums">{config.quality}</span>
             </div>
             <input
+              id={`${controlId}-quality`}
               type="range"
               min={options.qualityRange.min}
               max={options.qualityRange.max}
@@ -178,12 +185,15 @@ export function VideoEncoderDialog({
           {config.rateControl && h264Options && (
             <div className="space-y-2">
               <div className="flex items-center justify-between">
-                <Label className="text-[#e5e5e5]">Frame Rate Limit</Label>
+                <Label className="text-[#e5e5e5]" htmlFor={`${controlId}-frame-rate`}>
+                  Frame Rate Limit
+                </Label>
                 <span className="text-sm text-[#a1a1a6] tabular-nums">
                   {config.rateControl.frameRateLimit} fps
                 </span>
               </div>
               <input
+                id={`${controlId}-frame-rate`}
                 type="range"
                 min={h264Options.frameRateRange.min}
                 max={h264Options.frameRateRange.max}
@@ -207,12 +217,15 @@ export function VideoEncoderDialog({
           {config.rateControl && h264Options && (
             <div className="space-y-2">
               <div className="flex items-center justify-between">
-                <Label className="text-[#e5e5e5]">Bitrate Limit</Label>
+                <Label className="text-[#e5e5e5]" htmlFor={`${controlId}-bitrate`}>
+                  Bitrate Limit
+                </Label>
                 <span className="text-sm text-[#a1a1a6] tabular-nums">
                   {config.rateControl.bitrateLimit} kbps
                 </span>
               </div>
               <input
+                id={`${controlId}-bitrate`}
                 type="range"
                 min={h264Options.bitrateRange.min}
                 max={h264Options.bitrateRange.max}
@@ -235,8 +248,11 @@ export function VideoEncoderDialog({
           {/* H.264 Profile */}
           {config.h264 && h264Options && (
             <div className="space-y-2">
-              <Label className="text-[#e5e5e5]">H.264 Profile</Label>
+              <Label className="text-[#e5e5e5]" htmlFor={`${controlId}-h264-profile`}>
+                H.264 Profile
+              </Label>
               <select
+                id={`${controlId}-h264-profile`}
                 value={config.h264.h264Profile}
                 onChange={(e) =>
                   setConfig({
@@ -260,10 +276,13 @@ export function VideoEncoderDialog({
           {config.h264 && h264Options && (
             <div className="space-y-2">
               <div className="flex items-center justify-between">
-                <Label className="text-[#e5e5e5]">GOP Length</Label>
+                <Label className="text-[#e5e5e5]" htmlFor={`${controlId}-gop`}>
+                  GOP Length
+                </Label>
                 <span className="text-sm text-[#a1a1a6] tabular-nums">{config.h264.govLength}</span>
               </div>
               <input
+                id={`${controlId}-gop`}
                 type="range"
                 min={h264Options.govLengthRange.min}
                 max={h264Options.govLengthRange.max}
