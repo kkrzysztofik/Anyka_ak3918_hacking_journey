@@ -22,6 +22,18 @@ Phase A pins `a_gain_max=256` (1×) and sweeps the exposure ceiling; Phase B pin
 daylight; `frameY` is the mean of the RTSP Y plane, `avg_lumi` the driver's own
 scene-luma reading.
 
+> **Measurement caveat (2026-09-24):** the `frameY` values below were computed
+> with the pre-fix script, which averaged `len(raw)/3` bytes — the *upper half
+> of the Y plane*, not the full plane (in 8-bit planar yuv420p, Y is 2/3 of the
+> frame and U/V 1/6 each). They are still luma (no chroma contamination — the
+> U/V mixing problem was in `wb_gate.sh`'s chroma means, not here), but they
+> are biased toward the top of the frame and are **not** comparable to values
+> produced by the fixed script. The unit conclusions in this document come
+> from the driver's own readback (`a_gain`, `exp_time`, `avg_lumi`), which the
+> fix does not affect. Remeasuring `frameY` is blocked until a supported
+> AE-ceiling write path replaces the removed `/api/ae-debug` endpoint
+> (see `scripts/debugging/measure_ae_units.py`).
+
 | phase | a_gain_max | exp_time_max | a_gain | d_gain | isp_d_gain | exp_time | avg_lumi | frameY |
 |---|---|---|---|---|---|---|---|---|
 | A | 256 | 40 | 0 | 256 | 256 | 0 | 0 | 0.09 |
