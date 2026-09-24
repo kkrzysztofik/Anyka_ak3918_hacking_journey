@@ -189,6 +189,73 @@ ftp_escape() {
   printf '%s' "${s}"
 }
 
+# Fetch the camera's live anyka.toml and, if it carries real [wifi] creds, build
+# a replacement anyka.toml = the repo's file with those ssid/password values
+# restored. The repo ships CHANGE_ME placeholders (it is public, so real creds
+# are never committed), and the payload mirror would clobber the live creds —
+# which reverts the camera to the vendor path on the next reboot because
+# anyka-init's own wpa can't join. Set WIFI_FINAL (the dir to push) when there
+# is something to preserve; leave it empty otherwise.
+fetch_live_wifi() {
+  local remote_hack="${REMOTE_ROOT}/anyka_hack"
+  local user_esc pass_esc host_esc
+  user_esc="$(ftp_escape "${FTP_USER}")"
+  pass_esc="$(ftp_escape "${FTP_PASS}")"
+  host_esc="$(ftp_escape "${FTP_HOST}")"
+  local workdir; workdir="$(mktemp -d)"
+  WIFI_WORKDIR="${workdir}"
+  WIFI_FINAL="${workdir}/final"
+  # Single-arg get lands in lftp's local cwd; run it from a scratch dir.
+  ( cd "${workdir}" && lftp -u "${FTP_USER},${FTP_PASS}" ftp://${host_esc} -e \
+      "set ftp:ssl-allow no; set net:timeout 20; cd ${remote_hack}; get anyka.toml; bye" \
+      >/dev/null 2>&1 )
+  if [[ ! -f "${workdir}/anyka.toml" ]]; then
+    log_info "No live anyka.toml on ${FTP_HOST} (first deploy); nothing to preserve"
+    rm -rf "${workdir}"; WIFI_WORKDIR=""; WIFI_FINAL=""
+    return 0
+  fi
+  local live_ssid live_pass
+  live_ssid="$(sed -nE 's/^[[:space:]]*ssid[[:space:]]*=[[:space:]]*"([^"]*)".*/\1/p' "${workdir}/anyka.toml" | head -1)"
+  live_pass="$(sed -nE 's/^[[:space:]]*password[[:space:]]*=[[:space:]]*"([^"]*)".*/\1/p' "${workdir}/anyka.toml" | head -1)"
+  if [[ -z "${live_ssid}" || "${live_ssid}" == "CHANGE_ME" ]]; then
+    log_info "Live anyka.toml has placeholder/absent [wifi] ssid; nothing to preserve"
+    rm -rf "${workdir}"; WIFI_WORKDIR=""; WIFI_FINAL=""
+    return 0
+  fi
+  mkdir -p "${WIFI_FINAL}"
+  cp "${SRC_HACK}/anyka.toml" "${WIFI_FINAL}/anyka.toml"
+  local ssid_esc pass_esc2
+  ssid_esc="${live_ssid//\\/\\\\}"; ssid_esc="${ssid_esc//\"/\\\"}"
+  pass_esc2="${live_pass//\\/\\\\}"; pass_esc2="${pass_esc2//\"/\\\"}"
+  sed -i -E "s|^([[:space:]]*ssid[[:space:]]*=).*|\1 \"${ssid_esc}\"|" "${WIFI_FINAL}/anyka.toml"
+  sed -i -E "s|^([[:space:]]*password[[:space:]]*=).*|\1 \"${pass_esc2}\"|" "${WIFI_FINAL}/anyka.toml"
+  log_info "Live [wifi] ssid=${live_ssid} will be preserved across this push"
+}
+
+# Re-push only the preserved anyka.toml (a one-file mirror over the just-written
+# CHANGE_ME copy) so the camera keeps its real [wifi] creds.
+push_live_wifi() {
+  [[ -n "${WIFI_FINAL}" && -f "${WIFI_FINAL}/anyka.toml" ]] || return 0
+  local remote_hack="${REMOTE_ROOT}/anyka_hack"
+  local user_esc pass_esc host_esc
+  user_esc="$(ftp_escape "${FTP_USER}")"
+  pass_esc="$(ftp_escape "${FTP_PASS}")"
+  host_esc="$(ftp_escape "${FTP_HOST}")"
+  log_step "Re-pushing anyka.toml with preserved [wifi] credentials"
+  local rc=0
+  set +e
+  lftp -u "${FTP_USER},${FTP_PASS}" ftp://${host_esc} -e "set ftp:ssl-allow no; set net:timeout 20; mirror -R --no-perms --no-umask ${WIFI_FINAL} ${remote_hack}; bye" >/dev/null 2>&1
+  rc=$?
+  set -e
+  [[ -n "${WIFI_WORKDIR}" ]] && rm -rf "${WIFI_WORKDIR}"
+  WIFI_WORKDIR=""; WIFI_FINAL=""
+  if [[ ${rc} -ne 0 ]]; then
+    log_warn "Preserved anyka.toml re-push failed (exit ${rc}); re-apply [wifi] on ${FTP_HOST} if the camera reverts"
+  else
+    log_success "[wifi] credentials preserved on ${FTP_HOST}"
+  fi
+}
+
 copy_ftp() {
   if ! command -v lftp &>/dev/null; then
     log_error "lftp is required for --ftp tree uploads (install: sudo apt-get install -y lftp)"
@@ -217,18 +284,23 @@ copy_ftp() {
     log_warn "Dry-run: no remote writes"
   fi
 
-  # Prefer open + user over embedding credentials in the URL (safer with special chars).
+  WIFI_WORKDIR=""; WIFI_FINAL=""
+  if [[ "${DRY_RUN}" = false ]]; then
+    fetch_live_wifi
+  fi
+
+  # lftp 4.9.x dropped -c and its in-script `open` fails login (530); the
+  # -u + URL form works and keeps credentials out of the URL.
   local lftp_script
   lftp_script=$(
     cat <<EOF
 set ftp:ssl-allow no
 set net:max-retries 2
 set net:timeout 20
-open -u "${user_esc}","${pass_esc}" ${host_esc}
 mkdir -p ${remote_hack}
 mkdir -p ${remote_factory}
-mirror ${mirror_flags} "${SRC_HACK}" ${remote_hack}
-mirror ${mirror_flags} "${SRC_FACTORY}" ${remote_factory}
+mirror ${mirror_flags} ${SRC_HACK} ${remote_hack}
+mirror ${mirror_flags} ${SRC_FACTORY} ${remote_factory}
 bye
 EOF
   )
@@ -236,7 +308,7 @@ EOF
   log_step "Uploading via lftp mirror"
   local lftp_output lftp_rc=0
   set +e
-  lftp_output=$(lftp -c "${lftp_script}" 2>&1)
+  lftp_output=$(lftp -u "${FTP_USER},${FTP_PASS}" ftp://${host_esc} -e "${lftp_script}" 2>&1)
   lftp_rc=$?
   set -e
 
@@ -252,6 +324,7 @@ EOF
   if [[ "${DRY_RUN}" = true ]]; then
     log_success "FTP dry-run complete"
   else
+    push_live_wifi
     log_success "FTP upload complete → ${FTP_HOST}:${REMOTE_ROOT}/{anyka_hack,Factory}"
     log_info "Reboot the camera or re-insert the SD card so Factory/config.sh can pick up changes."
   fi
