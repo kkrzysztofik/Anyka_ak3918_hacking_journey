@@ -331,29 +331,60 @@ impl ImagingSettingsStore {
         self.validate_settings(video_source_token, settings).await?;
 
         // Apply to platform if available
+        let mut cache_entry = settings.clone();
         if let Some(ref control) = self.platform_control {
             let mut platform_settings = ImagingSettingsStore::onvif_to_platform_settings(settings);
-            // The ONVIF surface does not model hue / power_hz / style_id, so
-            // an ONVIF set must carry the current values across instead of
-            // resetting them to defaults. A failed read must fail the whole
-            // set: defaulting here would silently wipe the operator's
-            // advanced knobs (hue 50 / 50 Hz / style 0) on any transient IPC
-            // error during an ordinary brightness set.
+            // An omitted ImagingSettings element means "leave it alone": the
+            // converter would default WDR/BLC/WB/exposure to off/AUTO, and a
+            // brightness-only set from any client would silently reset the
+            // operator's manual white balance and BLC. Merge every omitted
+            // element from the live platform state instead. A failed read must
+            // fail the whole set: defaulting here would silently wipe state on
+            // any transient IPC error during an ordinary brightness set.
             let current = control.get_settings().await.map_err(|e| {
                 ImagingSettingsError::PlatformError(format!(
                     "failed to read current settings before applying: {e}"
                 ))
             })?;
+            // The ONVIF surface does not model hue / power_hz / style_id, so an
+            // ONVIF set must carry the current values across instead of
+            // resetting them to defaults.
             platform_settings.hue = current.hue;
             platform_settings.power_hz = current.power_hz;
             platform_settings.style_id = current.style_id;
+            if settings.wide_dynamic_range.is_none() {
+                platform_settings.wdr = current.wdr;
+            }
+            if settings.backlight_compensation.is_none() {
+                platform_settings.backlight_compensation = current.backlight_compensation;
+            }
+            match &settings.white_balance {
+                None => platform_settings.white_balance = current.white_balance,
+                Some(wb) => {
+                    // MANUAL with omitted gains must keep the live gains, not
+                    // write 0 (the converter's default).
+                    if wb.cr_gain.is_none() {
+                        platform_settings.white_balance.cr_gain = current.white_balance.cr_gain;
+                    }
+                    if wb.cb_gain.is_none() {
+                        platform_settings.white_balance.cb_gain = current.white_balance.cb_gain;
+                    }
+                }
+            }
+            if settings.exposure.is_none() {
+                platform_settings.exposure = current.exposure;
+            }
             control.set_settings(&platform_settings).await?;
+            // The cache holds the complete resulting state, not the raw
+            // request: a partial request must not leave a partial cache entry
+            // that a later GetImagingSettings fallback would report.
+            cache_entry = ImagingSettingsStore::platform_to_onvif_settings(&platform_settings);
         }
 
         // Update cache
         {
             let mut cache = self.settings.write();
-            cache.insert(video_source_token.to_string(), settings.clone());
+            cache.insert(video_source_token.to_string(), cache_entry);
         }
 
         // Persist if requested. This only enqueues a debounced save; the
@@ -427,10 +458,16 @@ impl ImagingSettingsStore {
 
         // Capability gate, not a range check: the sensor's ISP decides whether
         // WDR exists at all (platform `wdr_supported`). This GC1084 build links
-        // AK_ISP_set_wdr_attr but the driver rejects it at runtime, so the set
-        // path would fault. A client that ignores GetOptions and sends WDR must
-        // get a clean 400 here, never the 500 HardwareFailure the SDK path gives.
-        if settings.wide_dynamic_range.is_some() && options.wide_dynamic_range.is_none() {
+        // AK_ISP_set_wdr_attr but the driver rejects it at runtime, so a set
+        // that turns WDR ON must fault. Only ON is rejected: GetImagingSettings
+        // always reports WDR (ON or OFF), so every full save from a UI carries
+        // it, and an OFF on an unsupported device is a no-op echo — set_settings
+        // merges it from the current state — and must not poison the whole
+        // batch with a 400.
+        if let Some(wdr) = &settings.wide_dynamic_range
+            && options.wide_dynamic_range.is_none()
+            && matches!(wdr.mode, crate::onvif::types::common::WideDynamicMode::ON)
+        {
             return Err(ImagingSettingsError::ValidationFailed(
                 "WideDynamicRange is not supported on this device".to_string(),
             ));
@@ -1503,7 +1540,7 @@ mod tests {
         use crate::platform::stub::StubPlatformBuilder;
 
         // The stub (like this GC1084 build) reports wdr_supported=false, so
-        // GetOptions does not advertise WDR. A raw client that sends WDR anyway
+        // GetOptions does not advertise WDR. A raw client that turns WDR ON
         // must get a clean ValidationFailed (400) — never the 500 HardwareFailure
         // the SDK set path returns when the driver rejects AK_ISP_set_wdr_attr.
         let platform: Arc<dyn Platform> =
@@ -1527,6 +1564,104 @@ mod tests {
             }
             other => panic!("expected ValidationFailed, got {other:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn test_validate_settings_wdr_off_unsupported_is_ignored() {
+        use crate::onvif::types::common::WideDynamicMode;
+        use crate::onvif::types::common::WideDynamicRange20;
+        use crate::platform::Platform;
+        use crate::platform::stub::StubPlatformBuilder;
+
+        // GetImagingSettings always reports WDR, so every full save from a UI
+        // carries it even on a device where GetOptions does not advertise it.
+        // An OFF on such a device is a no-op echo, not a request to turn WDR
+        // on — it must pass validation, or no imaging save from the UI could
+        // ever succeed on this hardware.
+        let platform: Arc<dyn Platform> =
+            Arc::new(StubPlatformBuilder::new().imaging_supported(true).build());
+        let control = platform
+            .imaging_control()
+            .expect("stub platform exposes an imaging control");
+        let store = ImagingSettingsStore::with_platform(control);
+
+        let settings = ImagingSettings20 {
+            wide_dynamic_range: Some(WideDynamicRange20 {
+                mode: WideDynamicMode::OFF,
+                level: None,
+            }),
+            ..Default::default()
+        };
+        assert!(
+            store
+                .validate_settings("VideoSource_1", &settings)
+                .await
+                .is_ok()
+        );
+    }
+
+    #[tokio::test]
+    async fn test_set_settings_partial_set_preserves_unmodeled_fields() {
+        use crate::onvif::types::common::{
+            BacklightCompensationMode, ImagingSettings20, WhiteBalance20, WhiteBalanceMode,
+        };
+        use crate::platform::Platform;
+        use crate::platform::common::traits::{ImagingControl, ImagingSettings, ToggleWithLevel};
+        use crate::platform::stub::StubPlatformBuilder;
+
+        let platform: Arc<dyn Platform> =
+            Arc::new(StubPlatformBuilder::new().imaging_supported(true).build());
+        let control = platform
+            .imaging_control()
+            .expect("stub platform exposes an imaging control");
+
+        // Operator state: manual WB with live gains, BLC enabled at 40.
+        let mut seeded = ImagingSettings::default();
+        seeded.white_balance.mode = WhiteBalanceMode::MANUAL;
+        seeded.white_balance.cr_gain = 1.8;
+        seeded.white_balance.cb_gain = 2.2;
+        seeded.backlight_compensation = ToggleWithLevel {
+            enabled: true,
+            level: 40.0,
+        };
+        control.set_settings(&seeded).await.unwrap();
+
+        let store = ImagingSettingsStore::with_platform(Arc::clone(&control));
+
+        // A brightness-only set: no WDR/BLC/WB/exposure elements at all.
+        let settings = ImagingSettings20 {
+            brightness: Some(60.0),
+            ..Default::default()
+        };
+        store
+            .set_settings("VideoSource_1", &settings, false)
+            .await
+            .unwrap();
+
+        // The platform must show brightness applied and everything else
+        // preserved — this is the bug: the converter's defaults used to reset
+        // the manual WB gains to 0 and BLC to off.
+        let applied = control.get_settings().await.unwrap();
+        assert_eq!(applied.brightness, 60.0);
+        assert_eq!(applied.white_balance.mode, WhiteBalanceMode::MANUAL);
+        assert!((applied.white_balance.cr_gain - 1.8).abs() < f32::EPSILON);
+        assert!((applied.white_balance.cb_gain - 2.2).abs() < f32::EPSILON);
+        assert!(applied.backlight_compensation.enabled);
+        assert!((applied.backlight_compensation.level - 40.0).abs() < f32::EPSILON);
+
+        // The cache must hold the complete resulting state, not the partial
+        // request: a later GetImagingSettings fallback may not report missing
+        // WB/BLC just because the request omitted them.
+        let cached = store.get_settings("VideoSource_1").await.unwrap();
+        let wb = cached
+            .white_balance
+            .expect("WB must be in the cached state");
+        assert_eq!(wb.mode, WhiteBalanceMode::MANUAL);
+        let blc = cached
+            .backlight_compensation
+            .expect("BLC must be in the cached state");
+        assert!(blc.mode == BacklightCompensationMode::ON);
+        assert!((blc.level.unwrap_or_default() - 40.0).abs() < 1e-6);
     }
 
     #[tokio::test]

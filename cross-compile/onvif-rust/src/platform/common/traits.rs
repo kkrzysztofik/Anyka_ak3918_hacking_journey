@@ -715,6 +715,14 @@ pub trait ImagingControl: Send + Sync {
     /// Set imaging settings.
     async fn set_settings(&self, settings: &ImagingSettings) -> PlatformResult<()>;
 
+    /// Best-effort boot-time application of the configured hue / power_hz /
+    /// style, which the SDK does not hold across daemon restarts. Never
+    /// fails boot: a value the hardware rejects is logged and the cache
+    /// falls back to the SDK default.
+    async fn apply_configured_advanced(&self) -> PlatformResult<()> {
+        Ok(())
+    }
+
     /// Get valid imaging options.
     async fn get_options(&self) -> PlatformResult<ImagingOptions>;
 

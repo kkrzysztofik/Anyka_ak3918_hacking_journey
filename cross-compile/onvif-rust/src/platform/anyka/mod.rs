@@ -688,6 +688,14 @@ impl Platform for AnykaPlatform {
         self.start_frame_production().await?;
         self.validate_pipeline_readiness()?;
 
+        // The configured hue / power_hz / style are boot-time defaults the SDK
+        // does not hold across restarts; apply them now. Best-effort — an
+        // imaging knob must never fail boot (same policy as the PTZ restore
+        // below).
+        if let Some(imaging) = &self.imaging_control {
+            let _ = imaging.apply_configured_advanced().await;
+        }
+
         // Restore the saved PTZ position *after* `check_self` has driven the
         // motors to true center, so the dead-reckoned move starts from the
         // most accurate origin available. Every failure is non-fatal: a state

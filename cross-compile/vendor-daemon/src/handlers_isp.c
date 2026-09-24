@@ -86,10 +86,10 @@ int handle_isp_set_ir_filter(int fd, const uint8_t *req, uint32_t req_len)
  */
 /*
  * bl_*_offset register range is [-2048, 2047] (ak_isp_drv.h). Scaling the
- * incoming [-50, 50] offset to a quarter of that keeps the full ONVIF
- * slider range visible in the image without crushing the black point
- * entirely. Bump it up if the hardware gate shows the top of the slider
- * is not visibly different.
+ * incoming [0, 100] level (0 = disabled, ONVIF effect scale) to half of that
+ * keeps the full slider range visible in the image without crushing the black
+ * point entirely. Bump it up if the hardware gate shows the top of the
+ * slider is not visibly different.
  */
 #define BLC_OFFSET_FULL_SCALE 512
 
@@ -98,17 +98,30 @@ int handle_isp_set_ir_filter(int fd, const uint8_t *req, uint32_t req_len)
 static AK_ISP_BLC_ATTR g_blc_profile;
 static int g_blc_manual;
 
+/* CMD_ISP_SET_BLC. Wire format: [i32 level] = 4 bytes, ONVIF effect scale
+ * (0 disables and restores the pristine profile, 1-100 is the effect
+ * offset). Read-modify-write; the manual/profile mode flag is only updated
+ * after a successful SDK write. */
 int handle_isp_set_blc(int fd, const uint8_t *req, uint32_t req_len)
 {
     AK_ISP_BLC_ATTR attr;
     int32_t level;
     int offset;
+    int write_ret;
 
     if (req_len < 4) {
         log_warn("[isp] set_blc: req too short (%u)", req_len);
         return send_response(fd, STATUS_ERROR, NULL, 0);
     }
     level = req_read_i32(req, 0);
+
+    /* Trust boundary: the level is the ONVIF scale the Rust side validates,
+     * but a hostile or buggy IPC client must not drive the black-level offset
+     * (level * 512 / 50) with a negative or unbounded value. */
+    if (level < 0 || level > 100) {
+        log_warn("[isp] set_blc: level out of range (%d)", (int)level);
+        return send_response(fd, STATUS_ERROR, NULL, 0);
+    }
 
     /* Read-modify-write: a fresh struct would zero the tuning fields we do
      * not model, which is worse than leaving BLC alone. */
@@ -120,13 +133,12 @@ int handle_isp_set_blc(int fd, const uint8_t *req, uint32_t req_len)
         g_blc_profile = attr;
     }
 
+    if (level == 0 && !g_blc_manual) {
+        /* Profile settings already in force; nothing to write. */
+        return send_response(fd, STATUS_OK, NULL, 0);
+    }
     if (level == 0) {
-        if (!g_blc_manual) {
-            /* Profile settings already in force; nothing to write. */
-            return send_response(fd, STATUS_OK, NULL, 0);
-        }
         attr = g_blc_profile; /* restore the profile's own BLC */
-        g_blc_manual = 0;
     } else {
         offset = level * BLC_OFFSET_FULL_SCALE / 50;
         attr.blc_mode = BLC_MODE_MANUAL;
@@ -135,11 +147,18 @@ int handle_isp_set_blc(int fd, const uint8_t *req, uint32_t req_len)
         attr.m_blc.bl_gr_offset = offset;
         attr.m_blc.bl_gb_offset = offset;
         attr.m_blc.bl_b_offset = offset;
-        g_blc_manual = 1;
     }
 
     log_debug("[isp] set_blc level=%d mode=%u", (int)level, (unsigned)attr.blc_mode);
-    return send_response(fd, AK_ISP_set_blc_attr(&attr), NULL, 0);
+    write_ret = AK_ISP_set_blc_attr(&attr);
+    if (write_ret == 0) {
+        /* Flip the manual flag only after a successful write: a failed write
+         * must not desync it from the hardware (a stuck 1 would make a later
+         * disable skip its restore write; a stuck 0 would re-cache a dirty
+         * profile). */
+        g_blc_manual = (level != 0);
+    }
+    return send_response(fd, write_ret, NULL, 0);
 }
 
 /* CMD_ISP_GET_BLC. Returns the raw AK_ISP_BLC_ATTR bytes; the daemon does
@@ -174,6 +193,12 @@ int handle_isp_set_wb_type(int fd, const uint8_t *req, uint32_t req_len)
         return send_response(fd, STATUS_ERROR, NULL, 0);
     }
     wb_type = req_read_i32(req, 0);
+    /* Trust boundary: pass through only the two valid SDK modes; anything
+     * else must not be cast into the T_U16 and handed to the SDK. */
+    if (wb_type != WB_OPS_TYPE_MANU && wb_type != WB_OPS_TYPE_AUTO) {
+        log_warn("[isp] set_wb_type: invalid wb_type (%d)", (int)wb_type);
+        return send_response(fd, STATUS_ERROR, NULL, 0);
+    }
     attr.wb_type = (T_U16)wb_type;
     log_debug("[isp] set_wb_type type=%d", (int)wb_type);
     return send_response(fd, AK_ISP_set_wb_type(&attr), NULL, 0);
