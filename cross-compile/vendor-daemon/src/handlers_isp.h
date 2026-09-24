@@ -11,11 +11,16 @@
 int handle_isp_effect(int fd, const uint8_t *req, uint32_t req_len,
                       int effect_type, const char *name);
 
-int handle_isp_set_wdr(int fd, const uint8_t *req, uint32_t req_len);
 int handle_isp_set_ir_filter(int fd, const uint8_t *req, uint32_t req_len);
+int handle_isp_set_blc(int fd, const uint8_t *req, uint32_t req_len);
+int handle_isp_get_blc(int fd, const uint8_t *req, uint32_t req_len);
+int handle_isp_set_wb_type(int fd, const uint8_t *req, uint32_t req_len);
+int handle_isp_set_mwb_attr(int fd, const uint8_t *req, uint32_t req_len);
+int handle_isp_get_mwb_attr(int fd, const uint8_t *req, uint32_t req_len);
 int handle_isp_get_ae_luma(int fd, const uint8_t *req, uint32_t req_len);
 int handle_isp_get_lum_factor(int fd, const uint8_t *req, uint32_t req_len);
 int handle_isp_get_ae_attr(int fd, const uint8_t *req, uint32_t req_len);
 int handle_isp_get_awb_stat(int fd, const uint8_t *req, uint32_t req_len);
+int handle_isp_ae_get_run_info(int fd, const uint8_t *req, uint32_t req_len);
 
 #endif /* VENDOR_DAEMON_HANDLERS_ISP_H */

@@ -19,7 +19,10 @@ use std::sync::{Arc, Weak};
 use async_trait::async_trait;
 use parking_lot::RwLock;
 
-use crate::platform::common::{ImagingControl, ImagingOptions, ImagingSettings, PlatformResult};
+use crate::platform::common::{
+    ExposureSettings, ImagingControl, ImagingOptions, ImagingSettings, PlatformResult,
+    ToggleWithLevel, WhiteBalanceSettings,
+};
 
 use super::video_encoder::AnykaVideoEncoder;
 
@@ -116,8 +119,21 @@ impl AnykaImagingControl {
                 sharpness: cfg.sharpness as f32,
                 ir_cut_filter: cfg.ir_cut_filter,
                 ir_led: cfg.ir_led,
-                wdr: false,
-                backlight_compensation: false,
+                wdr: ToggleWithLevel::default(),
+                backlight_compensation: ToggleWithLevel::default(),
+                white_balance: WhiteBalanceSettings::default(),
+                exposure: ExposureSettings::default(),
+                hue: if cfg.hue.is_finite() && (0.0..=100.0).contains(&cfg.hue) {
+                    cfg.hue as f32
+                } else {
+                    50.0 // neutral — a hand-edited config must not tint the image
+                },
+                power_hz: if cfg.power_hz == 50 || cfg.power_hz == 60 {
+                    cfg.power_hz
+                } else {
+                    50
+                },
+                style_id: cfg.style_id.min(2),
             }),
             video_encoder: None,
             night,
@@ -182,23 +198,83 @@ impl AnykaImagingControl {
             "Imaging update applied"
         );
     }
-}
 
-#[async_trait]
-impl ImagingControl for AnykaImagingControl {
-    async fn get_settings(&self) -> PlatformResult<ImagingSettings> {
-        Ok(self.settings.read().clone())
+    /// Batch-validate a settings batch before any write: applying knob-by-
+    /// knob and bailing on the first rejection would leave the ISP
+    /// inconsistent with the store, and the store is what the UI reads back.
+    fn validate_settings_batch(settings: &ImagingSettings) -> PlatformResult<()> {
+        use crate::onvif::types::common::WhiteBalanceMode;
+
+        crate::hal::common::imaging::validate_onvif_range(settings.brightness, "brightness")?;
+        crate::hal::common::imaging::validate_onvif_range(settings.contrast, "contrast")?;
+        crate::hal::common::imaging::validate_onvif_range(settings.saturation, "saturation")?;
+        crate::hal::common::imaging::validate_onvif_range(settings.sharpness, "sharpness")?;
+        if settings.wdr.enabled {
+            crate::hal::common::imaging::validate_onvif_range(settings.wdr.level, "wdr level")?;
+        }
+        if settings.backlight_compensation.enabled {
+            crate::hal::common::imaging::validate_onvif_range(
+                settings.backlight_compensation.level,
+                "backlight level",
+            )?;
+        }
+        // Manual WB gains cross the IPC boundary as f32 and are cast to u16 in
+        // the HAL; validate them here so NaN/negative/overflowing values get a
+        // clean InvalidParameter (400) instead of wrapping at the cast.
+        if settings.white_balance.mode == WhiteBalanceMode::MANUAL {
+            for (gain, name) in [
+                (settings.white_balance.cr_gain, "white balance CrGain"),
+                (settings.white_balance.cb_gain, "white balance CbGain"),
+            ] {
+                if !gain.is_finite() || gain < 0.0 || gain.round() > u16::MAX as f32 {
+                    return Err(crate::platform::PlatformError::InvalidParameter(format!(
+                        "{name} must be a finite value in [0, {max}] (got {gain})",
+                        max = u16::MAX
+                    )));
+                }
+            }
+        }
+        // MANUAL exposure would freeze the AE at driver-held values with no
+        // path to set them (mae is unexported) — an unrecoverable picture.
+        if settings.exposure.mode != crate::onvif::types::common::ExposureMode::AUTO {
+            return Err(crate::platform::PlatformError::NotSupported(
+                "manual exposure is not supported on this device".to_string(),
+            ));
+        }
+        crate::hal::common::imaging::validate_onvif_range(settings.hue, "hue")?;
+        if settings.power_hz != 50 && settings.power_hz != 60 {
+            return Err(crate::platform::PlatformError::InvalidParameter(format!(
+                "power_hz must be 50 or 60 (got {})",
+                settings.power_hz
+            )));
+        }
+        if settings.style_id > 2 {
+            return Err(crate::platform::PlatformError::InvalidParameter(format!(
+                "style_id must be 0-2 (got {})",
+                settings.style_id
+            )));
+        }
+        Ok(())
     }
 
-    async fn set_settings(&self, settings: &ImagingSettings) -> PlatformResult<()> {
+    /// Apply an ir-cut mode change: disable auto tracking for forced modes
+    /// and run the day/night plan. Only runs when the mode actually changed:
+    /// re-applying the current mode re-runs the plan, and the day plan writes
+    /// IR_LED=0 — which would turn off a manually forced lamp (set_ir_lamp
+    /// caches ir_cut_filter=ON while the mode stays Day).
+    async fn apply_ir_cut_mode(
+        &self,
+        current: &ImagingSettings,
+        settings: &ImagingSettings,
+    ) -> PlatformResult<()> {
         use super::night_mode::DayNight;
         use crate::onvif::types::common::IrCutFilterMode;
 
-        let start = std::time::Instant::now();
-        let current = self.settings.read().clone();
-
-        // Day/night first: GPIO transitions must not be blocked by ISP color
-        // controls (which can fail independently over IPC).
+        // GPIO transitions must not be blocked by ISP color controls (which
+        // can fail independently over IPC).
+        if current.ir_cut_filter == settings.ir_cut_filter {
+            return Ok(());
+        }
         match settings.ir_cut_filter {
             IrCutFilterMode::ON => {
                 self.night.set_auto_enabled(false);
@@ -212,6 +288,83 @@ impl ImagingControl for AnykaImagingControl {
                 self.night.set_auto_enabled(true);
             }
         }
+        Ok(())
+    }
+
+    /// Switch white balance mode and (for MANUAL) write the gains, only when
+    /// the batch differs from the live state.
+    async fn apply_white_balance(
+        &self,
+        current: &ImagingSettings,
+        settings: &ImagingSettings,
+    ) -> PlatformResult<()> {
+        use crate::hal::common::imaging::{WB_TYPE_AUTO, WB_TYPE_MANUAL};
+        use crate::onvif::types::common::WhiteBalanceMode;
+
+        if current.white_balance == settings.white_balance {
+            return Ok(());
+        }
+        match settings.white_balance.mode {
+            WhiteBalanceMode::AUTO => {
+                crate::hal::common::imaging::imaging_set_wb_type(WB_TYPE_AUTO, self.ffi.as_ref())
+                    .await?;
+            }
+            WhiteBalanceMode::MANUAL => {
+                crate::hal::common::imaging::imaging_set_wb_type(WB_TYPE_MANUAL, self.ffi.as_ref())
+                    .await?;
+                crate::hal::common::imaging::imaging_set_mwb_attr(
+                    settings.white_balance.cr_gain,
+                    settings.white_balance.cb_gain,
+                    self.ffi.as_ref(),
+                )
+                .await?;
+            }
+        }
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl ImagingControl for AnykaImagingControl {
+    async fn get_settings(&self) -> PlatformResult<ImagingSettings> {
+        use crate::onvif::types::common::WhiteBalanceMode;
+
+        // The manual white balance gains are what the ISP holds live (in
+        // MANUAL that is what we set; in AUTO the AWB drives them), so in
+        // MANUAL mode we read them back instead of trusting the cache. The
+        // read is skipped in AUTO: the ONVIF response omits the gains there,
+        // so an IPC round trip would buy nothing. A failed read keeps the
+        // cached values. The guard is taken after the await: a parking_lot
+        // guard must not cross an await point.
+        let manual = self
+            .settings
+            .read()
+            .white_balance
+            .mode
+            .eq(&WhiteBalanceMode::MANUAL);
+        let mwb = if manual {
+            self.ffi.get_mwb_attr().await
+        } else {
+            None
+        };
+
+        let mut settings = self.settings.write();
+        if let Some((r_gain, b_gain)) = mwb {
+            settings.white_balance.cr_gain = r_gain as f32;
+            settings.white_balance.cb_gain = b_gain as f32;
+        }
+        Ok(settings.clone())
+    }
+
+    /// Apply a full settings batch to the ISP: batch-validates every field,
+    /// then writes only the fields that changed.
+    async fn set_settings(&self, settings: &ImagingSettings) -> PlatformResult<()> {
+        let start = std::time::Instant::now();
+        let current = self.settings.read().clone();
+
+        Self::validate_settings_batch(settings)?;
+
+        self.apply_ir_cut_mode(&current, settings).await?;
 
         if !Self::approximately_equal(current.brightness, settings.brightness) {
             crate::hal::common::imaging::imaging_set_brightness(
@@ -239,6 +392,46 @@ impl ImagingControl for AnykaImagingControl {
             .await?;
         }
 
+        if current.wdr != settings.wdr {
+            if settings.wdr.enabled {
+                crate::hal::common::imaging::imaging_set_wdr(settings.wdr.level, self.ffi.as_ref())
+                    .await?;
+            } else {
+                crate::hal::common::imaging::imaging_set_wdr_disabled(self.ffi.as_ref()).await?;
+            }
+        }
+        if !Self::approximately_equal(current.hue, settings.hue) {
+            crate::hal::common::imaging::imaging_set_hue(settings.hue, self.ffi.as_ref()).await?;
+            self.settings.write().hue = settings.hue;
+            self.mark_imaging_update_and_request_idr("set_hue");
+        }
+        if current.power_hz != settings.power_hz {
+            crate::hal::common::imaging::imaging_set_power_hz(settings.power_hz, self.ffi.as_ref())
+                .await?;
+            self.settings.write().power_hz = settings.power_hz;
+            self.mark_imaging_update_and_request_idr("set_power_hz");
+        }
+        if current.style_id != settings.style_id {
+            crate::hal::common::imaging::imaging_set_style_id(settings.style_id, self.ffi.as_ref())
+                .await?;
+            self.settings.write().style_id = settings.style_id;
+            self.mark_imaging_update_and_request_idr("set_style_id");
+        }
+
+        if current.backlight_compensation != settings.backlight_compensation {
+            if settings.backlight_compensation.enabled {
+                crate::hal::common::imaging::imaging_set_blc(
+                    settings.backlight_compensation.level,
+                    self.ffi.as_ref(),
+                )
+                .await?;
+            } else {
+                crate::hal::common::imaging::imaging_set_blc_disabled(self.ffi.as_ref()).await?;
+            }
+        }
+
+        self.apply_white_balance(&current, settings).await?;
+
         *self.settings.write() = settings.clone();
         self.mark_imaging_update_and_request_idr("set_settings");
         tracing::info!(
@@ -248,12 +441,87 @@ impl ImagingControl for AnykaImagingControl {
         Ok(())
     }
 
+    async fn apply_configured_advanced(&self) -> PlatformResult<()> {
+        // The SDK does not hold hue / power_hz / style across a daemon
+        // restart, so the configured values (the boot-time defaults) must be
+        // written to the ISP after attach. Best-effort: a value the hardware
+        // rejects (60 Hz is known to be one on this SDK build) is logged and
+        // the cache falls back to the SDK default — boot must never fail on
+        // an imaging knob, and the cache must hold what the ISP actually
+        // holds. Hold the imaging write lock: this is one of the writers in
+        // the read–merge–write serialization (an early REST save racing the
+        // startup apply must not be merged against a state this call then
+        // overwrites).
+        let _write_lock = crate::platform::common::traits::imaging_write_lock().await;
+        let s = self.settings.read().clone();
+        if s.hue != 50.0 {
+            match crate::hal::common::imaging::imaging_set_hue(s.hue, self.ffi.as_ref()).await {
+                Ok(()) => {
+                    self.settings.write().hue = s.hue;
+                    self.mark_imaging_update_and_request_idr("startup hue");
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        error = %e,
+                        hue = s.hue,
+                        "startup hue apply failed; keeping SDK default (50)"
+                    );
+                    self.settings.write().hue = 50.0;
+                }
+            }
+        }
+        if s.power_hz != 50 {
+            match crate::hal::common::imaging::imaging_set_power_hz(s.power_hz, self.ffi.as_ref())
+                .await
+            {
+                Ok(()) => {
+                    self.settings.write().power_hz = s.power_hz;
+                    self.mark_imaging_update_and_request_idr("startup power_hz");
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        error = %e,
+                        power_hz = s.power_hz,
+                        "startup power_hz apply failed; keeping SDK default (50)"
+                    );
+                    self.settings.write().power_hz = 50;
+                }
+            }
+        }
+        if s.style_id != 0 {
+            match crate::hal::common::imaging::imaging_set_style_id(s.style_id, self.ffi.as_ref())
+                .await
+            {
+                Ok(()) => {
+                    self.settings.write().style_id = s.style_id;
+                    self.mark_imaging_update_and_request_idr("startup style_id");
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        error = %e,
+                        style_id = s.style_id,
+                        "startup style_id apply failed; keeping SDK default (0)"
+                    );
+                    self.settings.write().style_id = 0;
+                }
+            }
+        }
+        Ok(())
+    }
+
     async fn get_options(&self) -> PlatformResult<ImagingOptions> {
         let caps = self.night.capabilities();
+        // The AE gain ceiling is profile-dependent (day/night), so the option
+        // is read live; a failed read degrades to "not advertised" rather than
+        // a stale number. Q8 scale: 256 = 1.0x (docs/reference/anyka-ae-units.md).
+        let ae_max_gain_db = self.ffi.get_ae_attr().await.and_then(|ae| {
+            (ae.a_gain_max > 0).then(|| 20.0f32 * (ae.a_gain_max as f32 / 256.0f32).log10())
+        });
         Ok(ImagingOptions {
             ir_cut_filter_supported: caps.ircut,
             ir_led_supported: caps.ir_led,
             white_light_supported: caps.white_led,
+            ae_max_gain_db,
             ..ImagingOptions::default_options()
         })
     }
@@ -371,6 +639,10 @@ impl ImagingControl for AnykaImagingControl {
     ) -> PlatformResult<Option<crate::platform::common::VisionDiagnostics>> {
         Ok(Some(self.night.live_diagnostics().await))
     }
+
+    async fn ae_run_info(&self) -> PlatformResult<Option<crate::hal::common::imaging::AeRunInfo>> {
+        Ok(self.ffi.get_ae_run_info().await)
+    }
 }
 
 #[cfg(test)]
@@ -388,14 +660,526 @@ mod tests {
         let _ = AnykaImagingControl::approximately_equal;
     }
 
+    /// A value the SDK will reject must be caught before anything is applied,
+    /// so a bad request cannot leave the ISP half-configured.
+    ///
+    /// Brightness is 60.0, not the plan's 50.0: the control starts from the
+    /// 50.0 config default, so 50.0 would be skipped as redundant even by the
+    /// unfixed code and the test would not fail pre-fix.
+    #[tokio::test]
+    async fn test_set_settings_rejects_invalid_batch_without_applying() {
+        use crate::hal::common::imaging::MockImagingHalTrait;
+
+        let dir = tempfile::tempdir().unwrap();
+        let paths = crate::platform::anyka::night_mode::NodePaths::rooted(dir.path(), dir.path());
+
+        let mut mock_ffi = MockImagingHalTrait::new();
+        // No setter may be called at all.
+        mock_ffi.expect_set_brightness().times(0);
+        mock_ffi.expect_set_contrast().times(0);
+
+        let control = AnykaImagingControl::with_ffi_and_paths(
+            Arc::new(mock_ffi),
+            paths,
+            crate::config::types::ImagingConfig::default(),
+            None,
+        );
+
+        let settings = ImagingSettings {
+            brightness: 60.0,
+            contrast: 150.0, // out of ONVIF range
+            ..ImagingSettings::default()
+        };
+
+        assert!(control.set_settings(&settings).await.is_err());
+    }
+
+    /// MANUAL exposure would freeze the AE at driver-held values with no path
+    /// to set them (mae is unexported by the shipped libs), so the batch must
+    /// be rejected before any knob is applied.
+    #[tokio::test]
+    async fn test_set_settings_rejects_manual_exposure() {
+        use crate::hal::common::imaging::MockImagingHalTrait;
+        use crate::onvif::types::common::ExposureMode;
+
+        let dir = tempfile::tempdir().unwrap();
+        let paths = crate::platform::anyka::night_mode::NodePaths::rooted(dir.path(), dir.path());
+        let mut mock_ffi = MockImagingHalTrait::new();
+        mock_ffi.expect_set_brightness().times(0);
+
+        let control = AnykaImagingControl::with_ffi_and_paths(
+            Arc::new(mock_ffi),
+            paths,
+            crate::config::types::ImagingConfig::default(),
+            None,
+        );
+
+        let settings = ImagingSettings {
+            brightness: 60.0,
+            exposure: crate::platform::common::ExposureSettings {
+                mode: ExposureMode::MANUAL,
+            },
+            ..ImagingSettings::default()
+        };
+
+        let err = control.set_settings(&settings).await.unwrap_err();
+        assert!(matches!(
+            err,
+            crate::platform::PlatformError::NotSupported(_)
+        ));
+    }
+
+    /// The vendor lib silently accepts any power frequency that is not
+    /// 50/60 (it breaks out of the switch and returns success), so the
+    /// platform must reject it before the IPC call ever happens.
+    #[tokio::test]
+    async fn test_set_settings_rejects_bad_power_hz_without_ipc() {
+        use crate::hal::common::imaging::MockImagingHalTrait;
+
+        let dir = tempfile::tempdir().unwrap();
+        let paths = crate::platform::anyka::night_mode::NodePaths::rooted(dir.path(), dir.path());
+        let mut mock_ffi = MockImagingHalTrait::new();
+        mock_ffi.expect_set_power_hz().times(0);
+
+        let control = AnykaImagingControl::with_ffi_and_paths(
+            Arc::new(mock_ffi),
+            paths,
+            crate::config::types::ImagingConfig::default(),
+            None,
+        );
+
+        let settings = ImagingSettings {
+            power_hz: 55,
+            ..ImagingSettings::default()
+        };
+
+        let err = control.set_settings(&settings).await.unwrap_err();
+        assert!(matches!(
+            err,
+            crate::platform::PlatformError::InvalidParameter(ref m) if m.contains("55")
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_set_settings_rejects_style_id_above_two() {
+        use crate::hal::common::imaging::MockImagingHalTrait;
+
+        let dir = tempfile::tempdir().unwrap();
+        let paths = crate::platform::anyka::night_mode::NodePaths::rooted(dir.path(), dir.path());
+        let mut mock_ffi = MockImagingHalTrait::new();
+        mock_ffi.expect_set_style_id().times(0);
+
+        let control = AnykaImagingControl::with_ffi_and_paths(
+            Arc::new(mock_ffi),
+            paths,
+            crate::config::types::ImagingConfig::default(),
+            None,
+        );
+
+        let settings = ImagingSettings {
+            style_id: 3,
+            ..ImagingSettings::default()
+        };
+
+        let err = control.set_settings(&settings).await.unwrap_err();
+        assert!(matches!(
+            err,
+            crate::platform::PlatformError::InvalidParameter(ref m) if m.contains("3")
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_set_settings_applies_power_hz_style_and_hue() {
+        use crate::hal::common::AK_SUCCESS_I32;
+        use crate::hal::common::imaging::MockImagingHalTrait;
+        use mockall::predicate::eq;
+
+        let dir = tempfile::tempdir().unwrap();
+        let paths = crate::platform::anyka::night_mode::NodePaths::rooted(dir.path(), dir.path());
+        let mut mock_ffi = MockImagingHalTrait::new();
+        mock_ffi
+            .expect_set_power_hz()
+            .with(eq(60))
+            .times(1)
+            .returning(|_| AK_SUCCESS_I32);
+        mock_ffi
+            .expect_set_style_id()
+            .with(eq(1))
+            .times(1)
+            .returning(|_| AK_SUCCESS_I32);
+        // 60.0 ONVIF -> +10 raw (onvif_to_effect_value).
+        mock_ffi
+            .expect_set_hue()
+            .with(eq(10))
+            .times(1)
+            .returning(|_| AK_SUCCESS_I32);
+
+        let control = AnykaImagingControl::with_ffi_and_paths(
+            Arc::new(mock_ffi),
+            paths,
+            crate::config::types::ImagingConfig::default(),
+            None,
+        );
+
+        let settings = ImagingSettings {
+            // The config defaults: everything but the three new knobs stays
+            // where it started, so only those may trigger IPC.
+            brightness: 50.0,
+            contrast: 50.0,
+            saturation: 50.0,
+            sharpness: 50.0,
+            hue: 60.0,
+            power_hz: 60,
+            style_id: 1,
+            ..ImagingSettings::default()
+        };
+        control.set_settings(&settings).await.unwrap();
+
+        let applied = control.get_settings().await.unwrap();
+        assert_eq!(applied.power_hz, 60);
+        assert_eq!(applied.style_id, 1);
+        assert_eq!(applied.hue, 60.0);
+    }
+
+    /// The gain ceiling is profile-dependent (day/night), so GetOptions reads
+    /// it live and converts the measured Q8 scale (256 = 1.0x) to dB:
+    /// 16384 = 64x = 20*log10(64) ~= 36.12 dB.
+    #[tokio::test]
+    async fn test_get_options_converts_ae_gain_ceiling_to_db() {
+        use crate::hal::common::imaging::{AeAttr, MockImagingHalTrait};
+
+        let dir = tempfile::tempdir().unwrap();
+        let paths = crate::platform::anyka::night_mode::NodePaths::rooted(dir.path(), dir.path());
+        let mut mock_ffi = MockImagingHalTrait::new();
+        mock_ffi.expect_get_ae_attr().returning(|| {
+            Some(AeAttr {
+                exp_time_max: 2250,
+                exp_time_min: 0,
+                d_gain_max: 24,
+                a_gain_max: 16384,
+                target_lumiance: 55,
+            })
+        });
+
+        let control = AnykaImagingControl::with_ffi_and_paths(
+            Arc::new(mock_ffi),
+            paths,
+            crate::config::types::ImagingConfig::default(),
+            None,
+        );
+
+        let options = control.get_options().await.unwrap();
+        let db = options.ae_max_gain_db.expect("ceiling advertised");
+        assert!((db - 36.12).abs() < 0.01, "got {db}");
+    }
+
+    /// AUTO means wb_type 1 and — crucially — no manual-gain write: an mwb
+    /// write under AUTO would pin the gains the AWB is supposed to drive.
+    #[tokio::test]
+    async fn test_set_settings_wdr_auto_sends_wb_type_and_no_mwb_write() {
+        use crate::hal::common::AK_SUCCESS_I32;
+        use crate::hal::common::imaging::MockImagingHalTrait;
+        use crate::hal::common::imaging::{WB_TYPE_AUTO, WB_TYPE_MANUAL};
+        use crate::onvif::types::common::WhiteBalanceMode;
+        use mockall::predicate::eq;
+
+        let dir = tempfile::tempdir().unwrap();
+        let paths = crate::platform::anyka::night_mode::NodePaths::rooted(dir.path(), dir.path());
+
+        let mut mock_ffi = MockImagingHalTrait::new();
+        // Both transitions up front: the mock moves into the control, and
+        // mockall verifies each expectation exactly once on drop.
+        mock_ffi
+            .expect_set_wb_type()
+            .with(eq(WB_TYPE_MANUAL))
+            .times(1)
+            .returning(|_| AK_SUCCESS_I32);
+        mock_ffi
+            .expect_set_mwb_attr()
+            .with(eq(2u16), eq(3u16))
+            .times(1)
+            .returning(|_, _| AK_SUCCESS_I32);
+        // The return to AUTO must write the type but no manual gains.
+        mock_ffi
+            .expect_set_wb_type()
+            .with(eq(WB_TYPE_AUTO))
+            .times(1)
+            .returning(|_| AK_SUCCESS_I32);
+
+        let control = AnykaImagingControl::with_ffi_and_paths(
+            Arc::new(mock_ffi),
+            paths,
+            crate::config::types::ImagingConfig::default(),
+            None,
+        );
+        let manual = ImagingSettings {
+            brightness: 50.0,
+            contrast: 50.0,
+            saturation: 50.0,
+            sharpness: 50.0,
+            white_balance: WhiteBalanceSettings {
+                mode: WhiteBalanceMode::MANUAL,
+                cr_gain: 2.0,
+                cb_gain: 3.0,
+            },
+            ..ImagingSettings::default()
+        };
+        assert!(control.set_settings(&manual).await.is_ok());
+
+        // Back to AUTO: one more wb_type write, no mwb write.
+        let auto = ImagingSettings {
+            brightness: 50.0,
+            contrast: 50.0,
+            saturation: 50.0,
+            sharpness: 50.0,
+            ..ImagingSettings::default()
+        };
+        assert!(control.set_settings(&auto).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_set_settings_wdr_manual_sends_wb_type_and_gains() {
+        use crate::hal::common::AK_SUCCESS_I32;
+        use crate::hal::common::imaging::MockImagingHalTrait;
+        use crate::hal::common::imaging::WB_TYPE_MANUAL;
+        use crate::onvif::types::common::WhiteBalanceMode;
+        use mockall::predicate::eq;
+
+        let dir = tempfile::tempdir().unwrap();
+        let paths = crate::platform::anyka::night_mode::NodePaths::rooted(dir.path(), dir.path());
+
+        let mut mock_ffi = MockImagingHalTrait::new();
+        mock_ffi
+            .expect_set_wb_type()
+            .with(eq(WB_TYPE_MANUAL))
+            .times(1)
+            .returning(|_| AK_SUCCESS_I32);
+        mock_ffi
+            .expect_set_mwb_attr()
+            .with(eq(2u16), eq(3u16))
+            .times(1)
+            .returning(|_, _| AK_SUCCESS_I32);
+
+        let control = AnykaImagingControl::with_ffi_and_paths(
+            Arc::new(mock_ffi),
+            paths,
+            crate::config::types::ImagingConfig::default(),
+            None,
+        );
+        let settings = ImagingSettings {
+            brightness: 50.0,
+            contrast: 50.0,
+            saturation: 50.0,
+            sharpness: 50.0,
+            white_balance: WhiteBalanceSettings {
+                mode: WhiteBalanceMode::MANUAL,
+                cr_gain: 2.0,
+                cb_gain: 3.0,
+            },
+            ..ImagingSettings::default()
+        };
+
+        assert!(control.set_settings(&settings).await.is_ok());
+    }
+
+    /// A PUT /api/imaging with an unchanged ir_cut_filter must not re-run the
+    /// day/night plan: the day plan writes IR_LED=0, which would turn off a
+    /// manually forced lamp. With the mode unchanged the lamp node is never
+    /// touched and no FFI call fires (the expectationless mock panics on any
+    /// unexpected IPC, so a regression fails loudly).
+    #[tokio::test]
+    async fn test_set_settings_unchanged_ir_cut_keeps_forced_ir_lamp() {
+        use crate::hal::common::imaging::MockImagingHalTrait;
+        use crate::onvif::types::common::IrCutFilterMode;
+
+        let dir = tempfile::tempdir().unwrap();
+        let paths = crate::platform::anyka::night_mode::NodePaths::rooted(dir.path(), dir.path());
+        let ir_led = paths.node(crate::platform::anyka::night_mode::Node::IrLed);
+        std::fs::write(&ir_led, "0").unwrap();
+
+        let mock_ffi = MockImagingHalTrait::new();
+        let cfg = crate::config::types::ImagingConfig {
+            ir_cut_filter: IrCutFilterMode::ON,
+            ..Default::default()
+        };
+        let control = AnykaImagingControl::with_ffi_and_paths(Arc::new(mock_ffi), paths, cfg, None);
+
+        // Force the lamp on: the node reads 1, the cache holds ir_cut ON.
+        control.set_ir_lamp(true).await.unwrap();
+        assert_eq!(std::fs::read_to_string(&ir_led).unwrap(), "1");
+
+        // The unchanged-mode set (exactly what a PUT /api/imaging round-trips):
+        // the lamp must stay on.
+        let unchanged = control.get_settings().await.unwrap();
+        control.set_settings(&unchanged).await.unwrap();
+        assert_eq!(std::fs::read_to_string(&ir_led).unwrap(), "1");
+    }
+
+    /// Manual WB gains cross the IPC boundary as f32 and are cast to u16 in
+    /// the HAL. NaN, negative, and values that would round past u16::MAX must
+    /// be rejected before any IPC call (the expectationless mock panics on any
+    /// unexpected call).
+    #[tokio::test]
+    async fn test_set_settings_rejects_bad_wb_gains_before_any_ipc() {
+        use crate::hal::common::imaging::MockImagingHalTrait;
+        use crate::onvif::types::common::WhiteBalanceMode;
+
+        let dir = tempfile::tempdir().unwrap();
+        let paths = crate::platform::anyka::night_mode::NodePaths::rooted(dir.path(), dir.path());
+        let mock_ffi = MockImagingHalTrait::new();
+        let control = AnykaImagingControl::with_ffi_and_paths(
+            Arc::new(mock_ffi),
+            paths,
+            crate::config::types::ImagingConfig::default(),
+            None,
+        );
+
+        let mk = |cr: f32, cb: f32| ImagingSettings {
+            white_balance: WhiteBalanceSettings {
+                mode: WhiteBalanceMode::MANUAL,
+                cr_gain: cr,
+                cb_gain: cb,
+            },
+            ..ImagingSettings::default()
+        };
+        for (cr, cb) in [
+            (f32::NAN, 1.0),
+            (-1.0, 1.0),
+            (1.0, f32::NAN),
+            (70_000.0, 1.0), // above u16::MAX: would wrap at the cast
+            (1.0, 65_535.6), // rounds to 65_536, which does not fit in u16
+        ] {
+            let result = control.set_settings(&mk(cr, cb)).await;
+            assert!(
+                matches!(
+                    &result,
+                    Err(crate::platform::PlatformError::InvalidParameter(_))
+                ),
+                "cr={cr} cb={cb} should be InvalidParameter, got {result:?}"
+            );
+        }
+    }
+
+    /// The SDK does not hold hue / power_hz / style across a daemon restart,
+    /// so `initialize` reapplies the configured values. A value the hardware
+    /// rejects (60 Hz is known to be one on this SDK build) must fall back to
+    /// the honest SDK default in the cache — never fail boot, never keep a
+    /// phantom value the ISP does not hold.
+    #[tokio::test]
+    async fn test_apply_configured_advanced_applies_and_falls_back_on_failure() {
+        use crate::hal::common::AK_SUCCESS_I32;
+        use crate::hal::common::imaging::MockImagingHalTrait;
+        use mockall::predicate::eq;
+
+        let dir = tempfile::tempdir().unwrap();
+        let paths = crate::platform::anyka::night_mode::NodePaths::rooted(dir.path(), dir.path());
+        let mut mock_ffi = MockImagingHalTrait::new();
+        // 60.0 ONVIF -> +10 raw (onvif_to_effect_value).
+        mock_ffi
+            .expect_set_hue()
+            .with(eq(10))
+            .times(1)
+            .returning(|_| AK_SUCCESS_I32);
+        mock_ffi
+            .expect_set_power_hz()
+            .with(eq(60))
+            .times(1)
+            .returning(|_| -1); // the SDK build rejects 60 Hz at runtime
+        mock_ffi
+            .expect_set_style_id()
+            .with(eq(2))
+            .times(1)
+            .returning(|_| AK_SUCCESS_I32);
+
+        let cfg = crate::config::types::ImagingConfig {
+            hue: 60.0,
+            power_hz: 60,
+            style_id: 2,
+            ..Default::default()
+        };
+        let control = AnykaImagingControl::with_ffi_and_paths(Arc::new(mock_ffi), paths, cfg, None);
+
+        // Must not fail boot.
+        control.apply_configured_advanced().await.unwrap();
+
+        let applied = control.get_settings().await.unwrap();
+        assert_eq!(applied.hue, 60.0);
+        assert_eq!(
+            applied.power_hz, 50,
+            "rejected power_hz must fall back to the SDK default"
+        );
+        assert_eq!(applied.style_id, 2);
+    }
+
+    /// In MANUAL mode the gains the ISP actually holds are the truth: the
+    /// platform refreshes its cache from the daemon read-back rather than
+    /// reporting what it asked for.
+    #[tokio::test]
+    async fn test_get_settings_wdr_returns_gains_read_from_the_device() {
+        use crate::hal::common::AK_SUCCESS_I32;
+        use crate::hal::common::imaging::MockImagingHalTrait;
+        use crate::hal::common::imaging::WB_TYPE_MANUAL;
+        use crate::onvif::types::common::WhiteBalanceMode;
+        use mockall::predicate::eq;
+
+        let dir = tempfile::tempdir().unwrap();
+        let paths = crate::platform::anyka::night_mode::NodePaths::rooted(dir.path(), dir.path());
+
+        let mut mock_ffi = MockImagingHalTrait::new();
+        mock_ffi
+            .expect_set_wb_type()
+            .with(eq(WB_TYPE_MANUAL))
+            .times(1)
+            .returning(|_| AK_SUCCESS_I32);
+        mock_ffi
+            .expect_set_mwb_attr()
+            .with(eq(2u16), eq(3u16))
+            .times(1)
+            .returning(|_, _| AK_SUCCESS_I32);
+        mock_ffi
+            .expect_get_mwb_attr()
+            .times(1)
+            .returning(|| Some((7, 9)));
+
+        let control = AnykaImagingControl::with_ffi_and_paths(
+            Arc::new(mock_ffi),
+            paths,
+            crate::config::types::ImagingConfig::default(),
+            None,
+        );
+        control
+            .set_settings(&ImagingSettings {
+                brightness: 50.0,
+                contrast: 50.0,
+                saturation: 50.0,
+                sharpness: 50.0,
+                white_balance: WhiteBalanceSettings {
+                    mode: WhiteBalanceMode::MANUAL,
+                    cr_gain: 2.0,
+                    cb_gain: 3.0,
+                },
+                ..ImagingSettings::default()
+            })
+            .await
+            .unwrap();
+
+        let settings = control.get_settings().await.unwrap();
+        assert_eq!(settings.white_balance.mode, WhiteBalanceMode::MANUAL);
+        // The read-back (7, 9), not what we asked for (2, 3).
+        assert_eq!(settings.white_balance.cr_gain, 7.0);
+        assert_eq!(settings.white_balance.cb_gain, 9.0);
+    }
+
     #[tokio::test]
     async fn test_get_options_reports_ir_unsupported_when_nodes_are_absent() {
         use crate::hal::common::imaging::MockImagingHalTrait;
 
         let dir = tempfile::tempdir().expect("tempdir");
         let paths = crate::platform::anyka::night_mode::NodePaths::rooted(dir.path(), dir.path());
+        let mut ffi = MockImagingHalTrait::new();
+        ffi.expect_get_ae_attr().returning(|| None);
         let control = AnykaImagingControl::with_ffi_and_paths(
-            Arc::new(MockImagingHalTrait::new()),
+            Arc::new(ffi),
             paths,
             crate::config::types::ImagingConfig::default(),
             None,
@@ -419,8 +1203,10 @@ mod tests {
             std::fs::write(paths.node(n), "0").unwrap();
         }
 
+        let mut ffi = MockImagingHalTrait::new();
+        ffi.expect_get_ae_attr().returning(|| None);
         let control = AnykaImagingControl::with_ffi_and_paths(
-            Arc::new(MockImagingHalTrait::new()),
+            Arc::new(ffi),
             paths,
             crate::config::types::ImagingConfig::default(),
             None,

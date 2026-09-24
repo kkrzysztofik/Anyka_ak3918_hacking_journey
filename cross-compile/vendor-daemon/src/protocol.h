@@ -98,8 +98,18 @@ enum cmd_id {
     CMD_ISP_GET_AE_LUMA            = 106,
     CMD_ISP_GET_LUM_FACTOR         = 107,
     CMD_ISP_GET_AE_ATTR            = 108,
-    /* 109 reserved: was CMD_ISP_SET_AE_ATTR, since cancelled */
+    /* 109 unused: the plan's Task 10 proposed reclaiming it for CMD_ISP_SET_AE_ATTR;
+     * the AE commands were appended at 119-121 instead (append-only wire protocol) */
     CMD_ISP_GET_AWB_STAT           = 110,
+    CMD_ISP_SET_BLC                = 111,
+    CMD_ISP_SET_WB_TYPE            = 112,
+    CMD_ISP_SET_MWB_ATTR           = 113,
+    CMD_ISP_GET_MWB_ATTR           = 114,
+    CMD_ISP_SET_HUE                = 115,
+    CMD_ISP_SET_POWER_HZ           = 116,
+    CMD_ISP_SET_STYLE_ID           = 117,
+    CMD_ISP_GET_BLC                = 118,
+    CMD_ISP_AE_GET_RUN_INFO        = 120, /* -> 36-byte vpss_isp_ae_run_info */
     /* Utility */
     CMD_GET_ERROR_NO              = 200,
     CMD_GET_ERROR_STR             = 201,

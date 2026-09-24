@@ -1,10 +1,12 @@
 /**
  * ImagingPage Tests
  */
-import { screen, waitFor } from '@testing-library/react';
+import { fireEvent, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { getDiagnostics } from '@/services/diagnosticsService';
+import { getAdvancedImaging, putAdvancedImaging } from '@/services/imagingAdvancedService';
 import {
   getImagingOptions,
   getImagingSettings,
@@ -41,6 +43,14 @@ vi.mock('@/services/ptzService', () => ({
   sendAuxiliaryCommand: vi.fn(),
 }));
 
+vi.mock('@/services/imagingAdvancedService', () => ({
+  getAdvancedImaging: vi.fn(),
+  putAdvancedImaging: vi.fn(),
+}));
+vi.mock('@/services/diagnosticsService', () => ({
+  getDiagnostics: vi.fn(),
+}));
+
 const MOCK_VIDEO_SOURCE_CONFIG = {
   token: 'VideoSourceConfig_0',
   name: 'VideoSourceConfig_0',
@@ -56,6 +66,11 @@ describe('ImagingPage', () => {
     vi.mocked(getImagingSettings).mockResolvedValue(MOCK_DATA.imaging.settings);
     vi.mocked(getImagingOptions).mockResolvedValue(MOCK_DATA.imaging.options);
     vi.mocked(setImagingSettings).mockResolvedValue(undefined);
+    vi.mocked(getAdvancedImaging).mockResolvedValue({ hue: 50, powerHz: 50, styleId: 0 });
+    vi.mocked(putAdvancedImaging).mockResolvedValue(undefined);
+    vi.mocked(getDiagnostics).mockResolvedValue({
+      vision: { ir_led: false, white_led: false },
+    } as never);
     vi.mocked(getProfiles).mockResolvedValue(MOCK_DATA.profiles);
     vi.mocked(sendAuxiliaryCommand).mockResolvedValue(undefined);
     vi.mocked(getVideoSourceConfiguration).mockResolvedValue(MOCK_VIDEO_SOURCE_CONFIG);
@@ -111,16 +126,14 @@ describe('ImagingPage', () => {
     expect(selects.length).toBeGreaterThan(0);
   });
 
-  it('should show WDR level slider when WDR mode is ON', async () => {
+  it('should stub the WDR control and mark it unavailable on this ISP', async () => {
     renderWithProviders(<ImagingPage />);
 
-    await waitFor(() => {
-      expect(screen.getByTestId('imaging-wdr-level-label')).toBeInTheDocument();
-    });
-
-    // WDR level value should be present (may appear multiple times)
-    const wdrLevelValues = screen.getAllByText('60%');
-    expect(wdrLevelValues.length).toBeGreaterThan(0);
+    const select = await screen.findByTestId('imaging-wdr-mode-select');
+    expect(select).toBeDisabled();
+    // The level slider the mode used to reveal is gone with it.
+    expect(screen.queryByTestId('imaging-wdr-level-label')).not.toBeInTheDocument();
+    expect(screen.getByTestId('imaging-wdr-unavailable')).toBeInTheDocument();
   });
 
   it('should show backlight level slider when backlight compensation is ON', async () => {
@@ -190,10 +203,14 @@ describe('ImagingPage', () => {
 
     await waitFor(() => {
       expect(screen.getByTestId('imaging-color-brightness-title')).toBeInTheDocument();
-      expect(screen.getByTestId('imaging-focus-sharpness-title')).toBeInTheDocument();
       expect(screen.getByTestId('imaging-infrared-settings-title')).toBeInTheDocument();
       expect(screen.getByTestId('imaging-backlight-wdr-title')).toBeInTheDocument();
+      expect(screen.getByTestId('imaging-advanced-title')).toBeInTheDocument();
     });
+
+    // Sharpness lives in Color & Brightness: the device has no motorised
+    // focus, so there is no longer a Focus card.
+    expect(screen.queryByTestId('imaging-focus-sharpness-title')).not.toBeInTheDocument();
   });
 
   it('should update slider values when changed', async () => {
@@ -541,23 +558,16 @@ describe('ImagingPage', () => {
       expect(irCutFilterSelect).toHaveValue('ON');
     });
 
-    it('should change WDR mode and show level slider when ON', async () => {
+    it('should stub the WDR mode select and hide the level slider it would reveal', async () => {
       renderWithProviders(<ImagingPage />);
 
       await waitFor(() => {
         expect(screen.getByTestId('imaging-title')).toBeInTheDocument();
       });
 
-      // Find WDR mode select (it's in the Backlight & WDR card)
-      const selects = screen.getAllByRole('combobox');
-      // WDR mode select should be present
-      expect(selects.length).toBeGreaterThan(0);
-
-      // When WDR mode is ON, the level slider should be visible
-      // From mock data, WDR mode is ON, so level slider should be visible
-      await waitFor(() => {
-        expect(screen.getByTestId('imaging-wdr-level-label')).toBeInTheDocument();
-      });
+      const select = screen.getByTestId('imaging-wdr-mode-select');
+      expect(select).toBeDisabled();
+      expect(screen.queryByTestId('imaging-wdr-level-label')).not.toBeInTheDocument();
     });
 
     it('should change backlight compensation mode and show level slider when ON', async () => {
@@ -655,14 +665,14 @@ describe('ImagingPage', () => {
   });
 
   describe('illumination card', () => {
-    it('renders the illumination card with both lamp switches', async () => {
+    it('should render the illumination card with both lamp switches', async () => {
       renderWithProviders(<ImagingPage />);
 
       expect(await screen.findByTestId('imaging-ir-lamp-switch')).toBeInTheDocument();
       expect(screen.getByTestId('imaging-white-light-switch')).toBeInTheDocument();
     });
 
-    it('sends the IR lamp on command when the switch is enabled', async () => {
+    it('should send the IR lamp on command when the switch is enabled', async () => {
       const user = userEvent.setup();
       renderWithProviders(<ImagingPage />);
 
@@ -677,7 +687,7 @@ describe('ImagingPage', () => {
       });
     });
 
-    it('sends the white light off command when the switch is toggled twice', async () => {
+    it('should send the white light off command when the switch is toggled twice', async () => {
       const user = userEvent.setup();
       renderWithProviders(<ImagingPage />);
 
@@ -697,7 +707,7 @@ describe('ImagingPage', () => {
       });
     });
 
-    it('hides the IR cut card when the backend reports no filter modes', async () => {
+    it('should hide the IR cut card when the backend reports no filter modes', async () => {
       vi.mocked(getImagingOptions).mockResolvedValue({
         ...MOCK_DATA.imaging.options,
         irCutFilterModes: [],
@@ -787,6 +797,105 @@ describe('ImagingPage', () => {
 
       const flipSwitch = await screen.findByTestId('imaging-flip-switch');
       expect(flipSwitch).toBeDisabled();
+    });
+  });
+
+  it('should render the advanced card with hue slider and both selects', async () => {
+    renderWithProviders(<ImagingPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('imaging-advanced-title')).toBeInTheDocument();
+    });
+    expect(screen.getByTestId('imaging-hue-slider')).toBeInTheDocument();
+    expect(screen.getByTestId('imaging-power-hz-select')).toBeInTheDocument();
+    expect(screen.getByTestId('imaging-style-select')).toBeInTheDocument();
+  });
+
+  it('should save the mains frequency when the select changes', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<ImagingPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('imaging-power-hz-select')).toBeInTheDocument();
+    });
+
+    await user.selectOptions(screen.getByTestId('imaging-power-hz-select'), '60');
+    await waitFor(() => {
+      expect(putAdvancedImaging).toHaveBeenCalledWith({ powerHz: 60 });
+    });
+  });
+
+  it('should seed the lamp switches from the diagnostics snapshot', async () => {
+    vi.mocked(getDiagnostics).mockResolvedValue({
+      vision: { ir_led: true, white_led: true },
+    } as never);
+    renderWithProviders(<ImagingPage />);
+
+    const ir = await screen.findByTestId('imaging-ir-lamp-switch');
+    const white = screen.getByTestId('imaging-white-light-switch');
+    // The diagnostics query resolves independently of the settings query that
+    // gates isLoading; wait for it to actually land before asserting the
+    // seeded (checked) state.
+    await waitFor(() => {
+      expect(ir).toBeChecked();
+      expect(white).toBeChecked();
+    });
+  });
+
+  it('should mount the live preview beside the cards', async () => {
+    renderWithProviders(<ImagingPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('imaging-live-preview')).toBeInTheDocument();
+    });
+  });
+
+  it('should not write on intermediate hue steps', async () => {
+    renderWithProviders(<ImagingPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('imaging-hue-slider')).toBeInTheDocument();
+    });
+
+    // Radix renders one thumb per value; the wrapper tags it with a testid.
+    const thumb = document
+      .querySelector('[data-testid="imaging-hue-slider"]')
+      ?.querySelector('[data-testid="slider-thumb"]') as HTMLElement | null;
+    expect(thumb).not.toBeNull();
+    fireEvent.focusIn(thumb!);
+
+    // Intermediate (change-only) events must never write. A keyboard step on
+    // the controlled slider updates the displayed value through
+    // onValueChange without firing onValueCommit — the same change-only path
+    // a drag tick takes.
+    const mock = vi.mocked(putAdvancedImaging);
+    const initial = mock.mock.calls.length;
+    fireEvent.keyDown(thumb!, { key: 'ArrowRight', code: 'ArrowRight', keyCode: 39 });
+    fireEvent.keyDown(thumb!, { key: 'ArrowRight', code: 'ArrowRight', keyCode: 39 });
+    expect(mock.mock.calls).toHaveLength(initial);
+
+    // The pointer-up that ends a real drag fires onValueCommit, which
+    // jsdom cannot reproduce (react-aria's slide-end never fires from
+    // synthetic pointer events here, and this Radix build discards the
+    // keyboard commit on a controlled slider). The commit side of the
+    // invariant is therefore covered by its verifiable halves: the
+    // advanced mutation performs exactly one service write when invoked
+    // (the select-based tests below drive the same advancedMutation), and
+    // the regression this design exists to prevent — a write per
+    // intermediate value — is the one asserted above.
+  });
+
+  it('should save the picture style when the select changes', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<ImagingPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('imaging-style-select')).toBeInTheDocument();
+    });
+
+    await user.selectOptions(screen.getByTestId('imaging-style-select'), '1');
+    await waitFor(() => {
+      expect(putAdvancedImaging).toHaveBeenCalledWith({ styleId: 1 });
     });
   });
 });

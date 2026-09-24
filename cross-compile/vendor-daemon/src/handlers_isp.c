@@ -8,6 +8,7 @@
 #include "globals.h"
 #include "ak_vpss.h"
 #include "ak_vi.h"
+#include "ak_isp_sdk.h"
 
 /* ponytail: sole-VI, pass token only if multi-VI appears. */
 static int isp_first_vi(void **out)
@@ -44,15 +45,6 @@ int handle_isp_effect(int fd, const uint8_t *req, uint32_t req_len,
     return send_response(fd, ret, NULL, 0);
 }
 
-/* CMD_ISP_SET_WDR (no-op). */
-int handle_isp_set_wdr(int fd, const uint8_t *req, uint32_t req_len)
-{
-    (void)req;
-    (void)req_len;
-    log_debug("[isp] set_wdr: no-op (libre_anyka_app SDK)");
-    return send_response(fd, STATUS_OK, NULL, 0);
-}
-
 /* CMD_ISP_SET_IR_FILTER. Wire format: [i32 mode] = 4 bytes. */
 int handle_isp_set_ir_filter(int fd, const uint8_t *req, uint32_t req_len)
 {
@@ -75,6 +67,191 @@ int handle_isp_set_ir_filter(int fd, const uint8_t *req, uint32_t req_len)
 }
 
 /* Return current_calc_avg_lumi for the sole VI. */
+/* CMD_ISP_SET_BLC. Wire format: [i32 level] = 4 bytes, the ONVIF effect
+ * offset [-50, 50] (0 = "use the ISP profile's own setting").
+ *
+ * BLC has no ak_vpss effect, so it goes through the low-level ISP SDK:
+ * a black-level offset lift applied in manual BLC mode. libakispsdk is
+ * already linked and initialised in-process by libplat_vi; never call
+ * AK_ISP_sdk_init here.
+ */
+#define BLC_MODE_MANUAL 0
+#define BLC_MODE_LINKAGE 1
+/*
+ * The compiled driver (component/ispdrv_lib/ak39_isp2_3a.c) applies m_blc
+ * when blc_mode == MODE_MANUAL, and its enum work_mode has MODE_MANUAL=0 /
+ * MODE_LINKAGE=1 — the comments in ak_isp_drv.h and the isptool headers
+ * state the opposite. The driver code is what is actually compiled into the
+ * shipped libs, so we follow it; the hardware gate confirms the direction.
+ */
+/*
+ * bl_*_offset register range is [-2048, 2047] (ak_isp_drv.h). Scaling the
+ * incoming [0, 100] level (0 = disabled, ONVIF effect scale) to half of that
+ * keeps the full slider range visible in the image without crushing the black
+ * point entirely. Bump it up if the hardware gate shows the top of the
+ * slider is not visibly different.
+ */
+#define BLC_OFFSET_FULL_SCALE 512
+
+/* Pristine profile BLC attr, cached on first touch so a neutral level
+ * can restore the profile's own settings. */
+static AK_ISP_BLC_ATTR g_blc_profile;
+static int g_blc_manual;
+
+/* CMD_ISP_SET_BLC. Wire format: [i32 level] = 4 bytes, ONVIF effect scale
+ * (0 disables and restores the pristine profile, 1-100 is the effect
+ * offset). Read-modify-write; the manual/profile mode flag is only updated
+ * after a successful SDK write. */
+int handle_isp_set_blc(int fd, const uint8_t *req, uint32_t req_len)
+{
+    AK_ISP_BLC_ATTR attr;
+    int32_t level;
+    int offset;
+    int write_ret;
+
+    if (req_len < 4) {
+        log_warn("[isp] set_blc: req too short (%u)", req_len);
+        return send_response(fd, STATUS_ERROR, NULL, 0);
+    }
+    level = req_read_i32(req, 0);
+
+    /* Trust boundary: the level is the ONVIF scale the Rust side validates,
+     * but a hostile or buggy IPC client must not drive the black-level offset
+     * (level * 512 / 50) with a negative or unbounded value. */
+    if (level < 0 || level > 100) {
+        log_warn("[isp] set_blc: level out of range (%d)", (int)level);
+        return send_response(fd, STATUS_ERROR, NULL, 0);
+    }
+
+    /* Read-modify-write: a fresh struct would zero the tuning fields we do
+     * not model, which is worse than leaving BLC alone. */
+    if (AK_ISP_get_blc_attr(&attr)) {
+        log_warn("[isp] set_blc: read failed; not writing");
+        return send_response(fd, STATUS_ERROR, NULL, 0);
+    }
+    if (!g_blc_manual) {
+        g_blc_profile = attr;
+    }
+
+    if (level == 0 && !g_blc_manual) {
+        /* Profile settings already in force; nothing to write. */
+        return send_response(fd, STATUS_OK, NULL, 0);
+    }
+    if (level == 0) {
+        attr = g_blc_profile; /* restore the profile's own BLC */
+    } else {
+        offset = level * BLC_OFFSET_FULL_SCALE / 50;
+        attr.blc_mode = BLC_MODE_MANUAL;
+        attr.m_blc.black_level_enable = 1;
+        attr.m_blc.bl_r_offset = offset;
+        attr.m_blc.bl_gr_offset = offset;
+        attr.m_blc.bl_gb_offset = offset;
+        attr.m_blc.bl_b_offset = offset;
+    }
+
+    log_debug("[isp] set_blc level=%d mode=%u", (int)level, (unsigned)attr.blc_mode);
+    write_ret = AK_ISP_set_blc_attr(&attr);
+    if (write_ret == 0) {
+        /* Flip the manual flag only after a successful write: a failed write
+         * must not desync it from the hardware (a stuck 1 would make a later
+         * disable skip its restore write; a stuck 0 would re-cache a dirty
+         * profile). */
+        g_blc_manual = (level != 0);
+    }
+    return send_response(fd, write_ret, NULL, 0);
+}
+
+/* CMD_ISP_GET_BLC. Returns the raw AK_ISP_BLC_ATTR bytes; the daemon does
+ * not interpret them. */
+int handle_isp_get_blc(int fd, const uint8_t *req, uint32_t req_len)
+{
+    AK_ISP_BLC_ATTR attr;
+
+    (void)req;
+    if (req_len != 0) {
+        log_warn("[isp] get_blc: expected empty request (%u)", req_len);
+        return send_response(fd, STATUS_ERROR, NULL, 0);
+    }
+    if (AK_ISP_get_blc_attr(&attr)) {
+        log_warn("[isp] get_blc: read failed");
+        return send_response(fd, STATUS_ERROR, NULL, 0);
+    }
+    return send_response(fd, STATUS_OK, (const uint8_t *)&attr, sizeof(attr));
+}
+
+/* CMD_ISP_SET_WB_TYPE. Wire format: [i32 wb_type] = 4 bytes, passed through
+ * to the SDK uninterpreted (WB_OPS_TYPE_MANU=0, WB_OPS_TYPE_AUTO=1). The
+ * SDK layer needs no VI handle: libplat_vi owns the SDK handle in-process,
+ * the same path the effect and BLC handlers use. */
+int handle_isp_set_wb_type(int fd, const uint8_t *req, uint32_t req_len)
+{
+    AK_ISP_WB_TYPE_ATTR attr;
+    int32_t wb_type;
+
+    if (req_len < 4) {
+        log_warn("[isp] set_wb_type: req too short (%u)", req_len);
+        return send_response(fd, STATUS_ERROR, NULL, 0);
+    }
+    wb_type = req_read_i32(req, 0);
+    /* Trust boundary: pass through only the two valid SDK modes; anything
+     * else must not be cast into the T_U16 and handed to the SDK. */
+    if (wb_type != WB_OPS_TYPE_MANU && wb_type != WB_OPS_TYPE_AUTO) {
+        log_warn("[isp] set_wb_type: invalid wb_type (%d)", (int)wb_type);
+        return send_response(fd, STATUS_ERROR, NULL, 0);
+    }
+    attr.wb_type = (T_U16)wb_type;
+    log_debug("[isp] set_wb_type type=%d", (int)wb_type);
+    return send_response(fd, AK_ISP_set_wb_type(&attr), NULL, 0);
+}
+
+/* CMD_ISP_SET_MWB_ATTR. Wire format: [u16 r_gain][u16 b_gain] = 4 bytes.
+ * Read-modify-write: a fresh struct would zero g_gain and the three offsets,
+ * so only the two gains we model are replaced. */
+int handle_isp_set_mwb_attr(int fd, const uint8_t *req, uint32_t req_len)
+{
+    AK_ISP_MWB_ATTR attr;
+    uint32_t gains;
+    uint16_t r_gain;
+    uint16_t b_gain;
+
+    if (req_len < 4) {
+        log_warn("[isp] set_mwb_attr: req too short (%u)", req_len);
+        return send_response(fd, STATUS_ERROR, NULL, 0);
+    }
+    gains = req_read_u32(req, 0);
+    r_gain = (uint16_t)(gains & 0xffff);
+    b_gain = (uint16_t)(gains >> 16);
+
+    if (AK_ISP_get_mwb_attr(&attr)) {
+        log_warn("[isp] set_mwb_attr: read failed; not writing");
+        return send_response(fd, STATUS_ERROR, NULL, 0);
+    }
+    attr.r_gain = r_gain;
+    attr.b_gain = b_gain;
+
+    log_debug("[isp] set_mwb_attr r=%u b=%u (g=%u preserved)",
+              (unsigned)r_gain, (unsigned)b_gain, (unsigned)attr.g_gain);
+    return send_response(fd, AK_ISP_set_mwb_attr(&attr), NULL, 0);
+}
+
+/* CMD_ISP_GET_MWB_ATTR. Returns the raw AK_ISP_MWB_ATTR bytes; the daemon
+ * does not interpret them. */
+int handle_isp_get_mwb_attr(int fd, const uint8_t *req, uint32_t req_len)
+{
+    AK_ISP_MWB_ATTR attr;
+
+    (void)req;
+    if (req_len != 0) {
+        log_warn("[isp] get_mwb_attr: expected empty request (%u)", req_len);
+        return send_response(fd, STATUS_ERROR, NULL, 0);
+    }
+    if (AK_ISP_get_mwb_attr(&attr)) {
+        log_warn("[isp] get_mwb_attr: read failed");
+        return send_response(fd, STATUS_ERROR, NULL, 0);
+    }
+    return send_response(fd, STATUS_OK, (const uint8_t *)&attr, sizeof(attr));
+}
+
 int handle_isp_get_ae_luma(int fd, const uint8_t *req, uint32_t req_len)
 {
     void *vi;
@@ -268,3 +445,46 @@ int handle_isp_get_awb_stat(int fd, const uint8_t *req, uint32_t req_len)
     log_debug("[isp] get_awb_stat vi=%p total=%lu", vi, total);
     return send_response(fd, STATUS_OK, resp, sizeof(resp));
 }
+
+/* AE run-info command (docs/plans/2026-09-21-imaging-tab-completion.md
+ * Task 10): appended at 120 after the Phase-3 effect commands (115-117)
+ * and GET_BLC (118) — the wire protocol is append-only, and 109 (originally
+ * proposed for the AE set-attr) was left unused rather than reclaimed.
+ * The AE world runs in the kernel (aec_* threads); the run-info ioctl reads
+ * the same instance the 3A loop updates, so unlike the manual WB branch
+ * (dead in the shipped kernel) AE state is live. */
+
+
+/**
+ * handle_isp_ae_get_run_info - The AE loop's current operating point.
+ *
+ * Empty request. Response payload: struct vpss_isp_ae_run_info verbatim.
+ */
+_Static_assert(sizeof(struct vpss_isp_ae_run_info) == 36,
+               "AE run-info wire size changed");
+
+int handle_isp_ae_get_run_info(int fd, const uint8_t *req, uint32_t req_len)
+{
+    void *vi;
+    struct vpss_isp_ae_run_info info;
+
+    (void)req;
+    (void)req_len;
+
+    if (isp_first_vi(&vi) != 0) {
+        log_warn("[isp] ae_get_run_info: no VI registered");
+        return send_response(fd, STATUS_ERROR, NULL, 0);
+    }
+
+    memset(&info, 0, sizeof(info));
+    if (ak_vpss_isp_get_ae_run_info(vi, &info) != 0) {
+        log_warn("[isp] ae_get_run_info: read failed");
+        return send_response(fd, STATUS_ERROR, NULL, 0);
+    }
+
+    log_debug("[isp] ae_get_run_info exp=%ld a_gain=%ld d_gain=%ld isp_d=%ld darked=%u",
+              info.current_exp_time, info.current_a_gain, info.current_d_gain,
+              info.current_isp_d_gain, info.current_darked_flag);
+    return send_response(fd, STATUS_OK, &info, sizeof(info));
+}
+

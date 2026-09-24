@@ -238,6 +238,27 @@ impl AppConfig {
             0.0,
             100.0,
         );
+        // Hue needs an explicit finite check: the `range` helper is NaN-blind
+        // (NaN compares neither < nor >), and a NaN hue would be carried into
+        // the platform cache as an unfixable phantom value.
+        if !self.imaging.hue.is_finite() || self.imaging.hue < 0.0 || self.imaging.hue > 100.0 {
+            errors.push(format!(
+                "imaging.hue: {} must be a finite value in [0, 100]",
+                self.imaging.hue
+            ));
+        }
+        if self.imaging.power_hz != 50 && self.imaging.power_hz != 60 {
+            errors.push(format!(
+                "imaging.power_hz: {} must be 50 or 60",
+                self.imaging.power_hz
+            ));
+        }
+        if self.imaging.style_id > 2 {
+            errors.push(format!(
+                "imaging.style_id: {} must be in [0, 2]",
+                self.imaging.style_id
+            ));
+        }
 
         // Night thresholds. Ordering, not range, is what matters: each pair
         // must leave a hysteresis band between them, and an inverted pair
@@ -706,6 +727,12 @@ pub struct ImagingConfig {
     /// was previously unimplementable at this layer.
     pub ir_cut_filter: crate::onvif::types::common::IrCutFilterMode,
     pub ir_led: bool,
+    /// Colour tint, ONVIF-style 0.0-100.0 (50 = neutral).
+    pub hue: f64,
+    /// Mains frequency for flicker reduction; 50 or 60.
+    pub power_hz: u16,
+    /// ISP picture-style id; 0-2.
+    pub style_id: u8,
     pub night: NightConfig,
 }
 
@@ -718,6 +745,9 @@ impl Default for ImagingConfig {
             sharpness: 50.0,
             ir_cut_filter: crate::onvif::types::common::IrCutFilterMode::AUTO,
             ir_led: false,
+            hue: 50.0,
+            power_hz: 50,
+            style_id: 0,
             night: NightConfig::default(),
         }
     }
@@ -1098,6 +1128,46 @@ scopes = ["onvif://www.onvif.org/name/Front%20Door"]
     /// `validate` must refuse a night config whose threshold pairs leave no
     /// hysteresis band: an equal or inverted pair classifies every reading as
     /// both day and night, which makes the camera oscillate at every poll.
+    #[test]
+    fn test_validate_rejects_invalid_imaging_advanced_knobs() {
+        let mut config = AppConfig::default();
+        config.imaging.hue = 150.0; // out of [0, 100]
+        config.imaging.power_hz = 55; // neither 50 nor 60
+        config.imaging.style_id = 9; // outside [0, 2]
+
+        let errors = config
+            .validate()
+            .expect_err("invalid advanced imaging knobs must be refused at load time");
+        assert!(
+            errors.iter().any(|e| e.starts_with("imaging.hue")),
+            "{errors:?}"
+        );
+        assert!(
+            errors.iter().any(|e| e.starts_with("imaging.power_hz")),
+            "{errors:?}"
+        );
+        assert!(
+            errors.iter().any(|e| e.starts_with("imaging.style_id")),
+            "{errors:?}"
+        );
+    }
+
+    #[test]
+    fn test_validate_rejects_nan_imaging_hue() {
+        // NaN slips past the `range` helper (NaN compares neither < nor >),
+        // so hue gets an explicit finite check.
+        let mut config = AppConfig::default();
+        config.imaging.hue = f64::NAN;
+
+        let errors = config
+            .validate()
+            .expect_err("NaN hue must be refused at load time");
+        assert!(
+            errors.iter().any(|e| e.starts_with("imaging.hue")),
+            "{errors:?}"
+        );
+    }
+
     #[test]
     fn test_validate_ae_thresholds_equal_reports_ordering_error() {
         let mut config = AppConfig::default();

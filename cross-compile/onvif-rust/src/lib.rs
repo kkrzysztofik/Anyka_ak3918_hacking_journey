@@ -87,6 +87,20 @@ pub fn build_version() -> &'static str {
     &BUILD_STAMP[BUILD_STAMP_PREFIX.len()..BUILD_STAMP.len() - ">>".len()]
 }
 
+/// C-exported pointer to the full delimited build stamp.
+///
+/// The bundle pipeline (`scripts/package_bundle.sh`) greps the final binary
+/// for this exact delimited string to prove it matches `manifest.meta`. LTO
+/// can constant-fold the slice in `build_version()` into a re-derived literal
+/// — or drop the data entirely — depending on unrelated source changes, which
+/// broke that guard on the imaging-tab-completion branch. An exported symbol
+/// cannot be dead-code-eliminated, and it references the full constant, so the
+/// delimited bytes are guaranteed to survive in `.rodata`.
+#[unsafe(no_mangle)]
+pub extern "C" fn anyka_build_stamp_ptr() -> *const u8 {
+    BUILD_STAMP.as_ptr()
+}
+
 pub mod app;
 pub mod lifecycle;
 

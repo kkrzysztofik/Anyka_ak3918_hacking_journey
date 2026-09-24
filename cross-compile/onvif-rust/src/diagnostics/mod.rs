@@ -4,6 +4,7 @@
 //! arrives, so an unwatched page costs this single-core device nothing.
 
 pub mod http;
+pub mod imaging;
 pub mod logs;
 pub mod network;
 pub mod proc;

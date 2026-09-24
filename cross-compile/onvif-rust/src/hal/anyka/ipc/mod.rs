@@ -288,8 +288,16 @@ const CMD_ISP_SET_WDR: i32 = 105;
 const CMD_ISP_GET_AE_LUMA: i32 = 106;
 const CMD_ISP_GET_LUM_FACTOR: i32 = 107;
 const CMD_ISP_GET_AE_ATTR: i32 = 108;
-// 109 was CMD_ISP_SET_AE_ATTR, since cancelled.
+// 109 unused: the plan proposed it for the AE set-attr; the AE commands were appended at 119-121 instead (120 GET_RUN_INFO is the permanent one; 119/121 were temporary and removed after the measurement).
 const CMD_ISP_GET_AWB_STAT: i32 = 110;
+const CMD_ISP_SET_BLC: i32 = 111;
+const CMD_ISP_SET_WB_TYPE: i32 = 112;
+const CMD_ISP_SET_MWB_ATTR: i32 = 113;
+const CMD_ISP_GET_MWB_ATTR: i32 = 114;
+const CMD_ISP_SET_HUE: i32 = 115;
+const CMD_ISP_SET_POWER_HZ: i32 = 116;
+const CMD_ISP_SET_STYLE_ID: i32 = 117;
+const CMD_ISP_AE_GET_RUN_INFO: i32 = 120;
 const CMD_GET_ERROR_NO: i32 = 200;
 const CMD_GET_ERROR_STR: i32 = 201;
 
@@ -575,6 +583,13 @@ impl AnykaIpc {
             CMD_ISP_GET_LUM_FACTOR => "ISP_GET_LUM_FACTOR",
             CMD_ISP_GET_AE_ATTR => "ISP_GET_AE_ATTR",
             CMD_ISP_GET_AWB_STAT => "ISP_GET_AWB_STAT",
+            CMD_ISP_SET_BLC => "ISP_SET_BLC",
+            CMD_ISP_SET_WB_TYPE => "ISP_SET_WB_TYPE",
+            CMD_ISP_SET_MWB_ATTR => "ISP_SET_MWB_ATTR",
+            CMD_ISP_GET_MWB_ATTR => "ISP_GET_MWB_ATTR",
+            CMD_ISP_SET_HUE => "ISP_SET_HUE",
+            CMD_ISP_SET_POWER_HZ => "ISP_SET_POWER_HZ",
+            CMD_ISP_SET_STYLE_ID => "ISP_SET_STYLE_ID",
             CMD_GET_ERROR_NO => "GET_ERROR_NO",
             CMD_GET_ERROR_STR => "GET_ERROR_STR",
             CMD_HELLO => "HELLO",

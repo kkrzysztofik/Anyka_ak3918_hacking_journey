@@ -274,8 +274,56 @@ impl PtzLimits {
     };
 }
 
+/// An imaging feature that is either off, or on at a given strength.
+///
+/// ONVIF models WDR and backlight compensation as a mode plus a 0-100 level;
+/// the SDK takes a single signed offset where 0 is the profile default. Keeping
+/// both here means the level survives a round trip instead of being flattened
+/// to a bool.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ToggleWithLevel {
+    /// Whether the feature is active.
+    pub enabled: bool,
+    /// Strength, 0.0 to 100.0. Ignored when `enabled` is false.
+    pub level: f32,
+}
+
+impl Default for ToggleWithLevel {
+    fn default() -> Self {
+        // 50.0 is the ONVIF midpoint, i.e. the ISP profile's own value.
+        Self {
+            enabled: false,
+            level: 50.0,
+        }
+    }
+}
+
+/// White balance state.
+///
+/// Gains are unitless ONVIF-style multipliers (`CrGain`/`CbGain`) and are
+/// meaningful only in `MANUAL` mode.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct WhiteBalanceSettings {
+    /// AUTO or MANUAL.
+    pub mode: crate::onvif::types::common::WhiteBalanceMode,
+    /// Red gain (unitless multiplier).
+    pub cr_gain: f32,
+    /// Blue gain (unitless multiplier).
+    pub cb_gain: f32,
+}
+
+/// Exposure control state.
+///
+/// Only AUTO exists on this ISP: the AE loop's ceilings are driver-owned and
+/// the manual-AE values are unreachable (see `docs/reference/anyka-ae-units.md`),
+/// so a MANUAL selection would freeze the AE with no way to set it.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ExposureSettings {
+    pub mode: crate::onvif::types::common::ExposureMode,
+}
+
 /// Imaging settings.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct ImagingSettings {
     /// Brightness (0.0 to 100.0).
     pub brightness: f32,
@@ -290,10 +338,40 @@ pub struct ImagingSettings {
     pub ir_cut_filter: crate::onvif::types::common::IrCutFilterMode,
     /// IR LED enabled.
     pub ir_led: bool,
-    /// Wide dynamic range enabled.
-    pub wdr: bool,
-    /// Backlight compensation enabled.
-    pub backlight_compensation: bool,
+    /// Wide dynamic range.
+    pub wdr: ToggleWithLevel,
+    /// Backlight compensation.
+    pub backlight_compensation: ToggleWithLevel,
+    /// White balance.
+    pub white_balance: WhiteBalanceSettings,
+    /// Exposure control (AUTO only on this device).
+    pub exposure: ExposureSettings,
+    /// Colour tint, ONVIF-style 0.0-100.0 (50 = neutral).
+    pub hue: f32,
+    /// Mains frequency for flicker reduction; 50 or 60.
+    pub power_hz: u16,
+    /// ISP picture-style id; 0-2.
+    pub style_id: u8,
+}
+
+impl Default for ImagingSettings {
+    fn default() -> Self {
+        Self {
+            brightness: 0.0,
+            contrast: 0.0,
+            saturation: 0.0,
+            sharpness: 0.0,
+            ir_cut_filter: Default::default(),
+            ir_led: false,
+            wdr: Default::default(),
+            backlight_compensation: Default::default(),
+            white_balance: Default::default(),
+            exposure: Default::default(),
+            hue: 50.0,
+            power_hz: 50,
+            style_id: 0,
+        }
+    }
 }
 
 /// Imaging options (valid ranges for settings).
@@ -317,6 +395,14 @@ pub struct ImagingOptions {
     pub wdr_supported: bool,
     /// Backlight compensation supported.
     pub backlight_compensation_supported: bool,
+    /// White balance supported (the ISP SDK offers AUTO and MANUAL).
+    pub white_balance_supported: bool,
+    /// Exposure modes the device can actually run. AUTO only: manual AE
+    /// values are unreachable on this ISP, so MANUAL would freeze the AE.
+    pub exposure_modes: Vec<crate::onvif::types::imaging::ExposureMode>,
+    /// Live AE gain ceiling in dB (20·log10 of the Q8 gain over 256), from
+    /// the sensor profile in force; `None` when the read is unavailable.
+    pub ae_max_gain_db: Option<f32>,
 }
 
 impl ImagingOptions {
@@ -332,6 +418,9 @@ impl ImagingOptions {
             white_light_supported: false,
             wdr_supported: false,
             backlight_compensation_supported: true,
+            white_balance_supported: true,
+            exposure_modes: vec![crate::onvif::types::imaging::ExposureMode::AUTO],
+            ae_max_gain_db: None,
         }
     }
 }
@@ -527,6 +616,10 @@ pub struct VisionDiagnostics {
     /// stay distinguishable from `None` — that distinction is the whole point
     /// of the day/night AWB-gate measurement.
     pub awb_cnt: Option<[i32; 10]>,
+    /// The AE loop's current operating point in raw driver units, or `None`
+    /// if unavailable. Raw on purpose: interpreting the units (µs, dB) is the
+    /// job of `docs/reference/anyka-ae-units.md`.
+    pub ae_run_info: Option<crate::hal::common::imaging::AeRunInfo>,
     /// Raw ADC reading on AIN0 (light-sensor channel), or `None` if not read.
     pub ain0: Option<i32>,
     /// Current IR LED state (`true` = on), or `None` if undriven.
@@ -622,6 +715,14 @@ pub trait ImagingControl: Send + Sync {
     /// Set imaging settings.
     async fn set_settings(&self, settings: &ImagingSettings) -> PlatformResult<()>;
 
+    /// Best-effort boot-time application of the configured hue / power_hz /
+    /// style, which the SDK does not hold across daemon restarts. Never
+    /// fails boot: a value the hardware rejects is logged and the cache
+    /// falls back to the SDK default.
+    async fn apply_configured_advanced(&self) -> PlatformResult<()> {
+        Ok(())
+    }
+
     /// Get valid imaging options.
     async fn get_options(&self) -> PlatformResult<ImagingOptions>;
 
@@ -660,6 +761,12 @@ pub trait ImagingControl: Send + Sync {
     /// The default returns `Ok(None)` — stubs and minimal implementations do
     /// not need to override this method.
     async fn vision_diagnostics(&self) -> PlatformResult<Option<VisionDiagnostics>> {
+        Ok(None)
+    }
+
+    /// The AE loop's current operating point in raw driver units, or `None`
+    /// if this implementation has no AE operating-point source.
+    async fn ae_run_info(&self) -> PlatformResult<Option<crate::hal::common::imaging::AeRunInfo>> {
         Ok(None)
     }
 }
@@ -948,6 +1055,24 @@ pub trait Platform: Send + Sync {
     }
 }
 
+/// Serializes imaging read–merge–write sequences (ONVIF partial saves, the
+/// REST advanced-knob save, and the startup apply) so concurrent writers
+/// cannot merge against a state the other writer has already replaced.
+///
+/// # ponytail: one process-wide lock — this device runs a single ISP pipeline
+/// in a single daemon, so per-control locking buys nothing; key locks by
+/// control if multi-pipeline support ever appears.
+static IMAGING_WRITE_LOCK: std::sync::OnceLock<tokio::sync::Mutex<()>> = std::sync::OnceLock::new();
+
+/// Acquire the imaging write lock. Hold the returned guard from before the
+/// platform read, through the merge, to after the platform write.
+pub async fn imaging_write_lock() -> tokio::sync::MutexGuard<'static, ()> {
+    IMAGING_WRITE_LOCK
+        .get_or_init(Default::default)
+        .lock()
+        .await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1134,7 +1259,27 @@ mod tests {
             settings.ir_cut_filter,
             crate::onvif::types::common::IrCutFilterMode::AUTO
         );
-        assert!(!settings.wdr);
+        assert!(!settings.wdr.enabled);
+    }
+
+    /// WDR and BLC carry a level in ONVIF, so the platform model must too —
+    /// a bare bool silently discards whatever the operator set.
+    #[test]
+    fn test_imaging_settings_carries_wdr_and_blc_levels() {
+        let settings = ImagingSettings {
+            wdr: ToggleWithLevel {
+                enabled: true,
+                level: 70.0,
+            },
+            backlight_compensation: ToggleWithLevel {
+                enabled: false,
+                level: 30.0,
+            },
+            ..ImagingSettings::default()
+        };
+        assert!(settings.wdr.enabled);
+        assert_eq!(settings.wdr.level, 70.0);
+        assert_eq!(settings.backlight_compensation.level, 30.0);
     }
 
     #[test]
@@ -1146,8 +1291,16 @@ mod tests {
             sharpness: 80.0,
             ir_cut_filter: crate::onvif::types::common::IrCutFilterMode::ON,
             ir_led: true,
-            wdr: false,
-            backlight_compensation: true,
+            wdr: ToggleWithLevel::default(),
+            backlight_compensation: ToggleWithLevel {
+                enabled: true,
+                level: 50.0,
+            },
+            white_balance: WhiteBalanceSettings::default(),
+            exposure: ExposureSettings::default(),
+            hue: 50.0,
+            power_hz: 50,
+            style_id: 0,
         };
         assert_eq!(settings.brightness, 50.0);
         assert_eq!(
@@ -1155,7 +1308,8 @@ mod tests {
             crate::onvif::types::common::IrCutFilterMode::ON
         );
         assert!(settings.ir_led);
-        assert!(!settings.wdr);
+        assert!(!settings.wdr.enabled);
+        assert!(settings.backlight_compensation.enabled);
     }
 
     #[test]

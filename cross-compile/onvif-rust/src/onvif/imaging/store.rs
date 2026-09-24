@@ -13,7 +13,10 @@ use crate::config::{PendingWrite, PersistenceHandle, PersistenceService};
 
 use crate::onvif::types::common::{FloatRange, ImagingSettings20, ImagingStatus20};
 use crate::onvif::types::imaging::ImagingOptions20;
-use crate::platform::{ImagingControl, ImagingOptions, ImagingSettings, PlatformError};
+use crate::platform::{
+    ExposureSettings, ImagingControl, ImagingOptions, ImagingSettings, PlatformError,
+    ToggleWithLevel, WhiteBalanceSettings,
+};
 
 // ============================================================================
 // Error Types
@@ -46,7 +49,18 @@ pub enum ImagingSettingsError {
 
 impl From<PlatformError> for ImagingSettingsError {
     fn from(err: PlatformError) -> Self {
-        ImagingSettingsError::PlatformError(err.to_string())
+        match &err {
+            // NotSupported is a client-addressable spec fault (400
+            // InvalidArgVal), not a hardware failure: the request names
+            // something this device cannot honor, and the client can act on
+            // that. Collapsing it into HardwareFailure/500 (as the fallthrough
+            // used to) made SetImagingSettings(MANUAL exposure) look like a
+            // crash instead of "not supported".
+            PlatformError::NotSupported(msg) => {
+                ImagingSettingsError::ValidationFailed(format!("Not supported: {msg}"))
+            }
+            _ => ImagingSettingsError::PlatformError(err.to_string()),
+        }
     }
 }
 
@@ -275,7 +289,8 @@ impl ImagingSettingsStore {
         if let Some(ref control) = self.platform_control {
             match control.get_settings().await {
                 Ok(platform_settings) => {
-                    let settings = Self::platform_to_onvif_settings(&platform_settings);
+                    let settings =
+                        ImagingSettingsStore::platform_to_onvif_settings(&platform_settings);
                     // Cache the settings
                     let mut cache = self.settings.write();
                     cache.insert(video_source_token.to_string(), settings.clone());
@@ -293,7 +308,7 @@ impl ImagingSettingsStore {
         Ok(cache
             .get(video_source_token)
             .cloned()
-            .unwrap_or_else(Self::default_settings))
+            .unwrap_or_else(ImagingSettingsStore::default_settings))
     }
 
     /// Set imaging settings for a video source.
@@ -315,16 +330,85 @@ impl ImagingSettingsStore {
         // Validate settings against options
         self.validate_settings(video_source_token, settings).await?;
 
+        // Serialize the read–merge–write (and cache update) against every
+        // other writer to this control (ONVIF, REST, startup apply): a
+        // concurrent partial save merging against the pre-merge state would
+        // restore the other save's old value (lost update).
+        let _write_lock = crate::platform::common::traits::imaging_write_lock().await;
+
         // Apply to platform if available
+        let mut cache_entry = settings.clone();
         if let Some(ref control) = self.platform_control {
-            let platform_settings = Self::onvif_to_platform_settings(settings);
+            let mut platform_settings = ImagingSettingsStore::onvif_to_platform_settings(settings);
+            // An omitted ImagingSettings element means "leave it alone": the
+            // converter would default the scalars to 50 and WDR/BLC/WB/exposure
+            // to off/AUTO, and a brightness-only set from any client would
+            // silently reset the operator's contrast, saturation, manual white
+            // balance and BLC. Merge every omitted element from the live
+            // platform state instead. A failed read must fail the whole set:
+            // defaulting here would silently wipe state on any transient IPC
+            // error during an ordinary brightness set.
+            let current = control.get_settings().await.map_err(|e| {
+                ImagingSettingsError::PlatformError(format!(
+                    "failed to read current settings before applying: {e}"
+                ))
+            })?;
+            // The ONVIF surface does not model hue / power_hz / style_id, so an
+            // ONVIF set must carry the current values across instead of
+            // resetting them to defaults.
+            platform_settings.hue = current.hue;
+            platform_settings.power_hz = current.power_hz;
+            platform_settings.style_id = current.style_id;
+            if settings.brightness.is_none() {
+                platform_settings.brightness = current.brightness;
+            }
+            if settings.contrast.is_none() {
+                platform_settings.contrast = current.contrast;
+            }
+            if settings.color_saturation.is_none() {
+                platform_settings.saturation = current.saturation;
+            }
+            if settings.sharpness.is_none() {
+                platform_settings.sharpness = current.sharpness;
+            }
+            if settings.ir_cut_filter.is_none() {
+                platform_settings.ir_cut_filter = current.ir_cut_filter;
+            }
+            // Not modelled by ImagingSettings20 at all.
+            platform_settings.ir_led = current.ir_led;
+            if settings.wide_dynamic_range.is_none() {
+                platform_settings.wdr = current.wdr;
+            }
+            if settings.backlight_compensation.is_none() {
+                platform_settings.backlight_compensation = current.backlight_compensation;
+            }
+            match &settings.white_balance {
+                None => platform_settings.white_balance = current.white_balance,
+                Some(wb) => {
+                    // MANUAL with omitted gains must keep the live gains, not
+                    // write 0 (the converter's default).
+                    if wb.cr_gain.is_none() {
+                        platform_settings.white_balance.cr_gain = current.white_balance.cr_gain;
+                    }
+                    if wb.cb_gain.is_none() {
+                        platform_settings.white_balance.cb_gain = current.white_balance.cb_gain;
+                    }
+                }
+            }
+            if settings.exposure.is_none() {
+                platform_settings.exposure = current.exposure;
+            }
             control.set_settings(&platform_settings).await?;
+            // The cache holds the complete resulting state, not the raw
+            // request: a partial request must not leave a partial cache entry
+            // that a later GetImagingSettings fallback would report.
+            cache_entry = ImagingSettingsStore::platform_to_onvif_settings(&platform_settings);
         }
 
         // Update cache
         {
             let mut cache = self.settings.write();
-            cache.insert(video_source_token.to_string(), settings.clone());
+            cache.insert(video_source_token.to_string(), cache_entry);
         }
 
         // Persist if requested. This only enqueues a debounced save; the
@@ -396,6 +480,23 @@ impl ImagingSettingsStore {
             });
         }
 
+        // Capability gate, not a range check: the sensor's ISP decides whether
+        // WDR exists at all (platform `wdr_supported`). This GC1084 build links
+        // AK_ISP_set_wdr_attr but the driver rejects it at runtime, so a set
+        // that turns WDR ON must fault. Only ON is rejected: GetImagingSettings
+        // always reports WDR (ON or OFF), so every full save from a UI carries
+        // it, and an OFF on an unsupported device is a no-op echo — set_settings
+        // merges it from the current state — and must not poison the whole
+        // batch with a 400.
+        if let Some(wdr) = &settings.wide_dynamic_range
+            && options.wide_dynamic_range.is_none()
+            && matches!(wdr.mode, crate::onvif::types::common::WideDynamicMode::ON)
+        {
+            return Err(ImagingSettingsError::ValidationFailed(
+                "WideDynamicRange is not supported on this device".to_string(),
+            ));
+        }
+
         Ok(())
     }
 
@@ -444,7 +545,8 @@ impl ImagingSettingsStore {
         if let Some(ref control) = self.platform_control {
             match control.get_options().await {
                 Ok(platform_options) => {
-                    let options = Self::platform_to_onvif_options(&platform_options);
+                    let options =
+                        ImagingSettingsStore::platform_to_onvif_options(&platform_options);
                     // Cache the options
                     let mut cache = self.options.write();
                     cache.insert(video_source_token.to_string(), options.clone());
@@ -569,9 +671,15 @@ impl ImagingSettingsStore {
 
     /// Convert platform settings to ONVIF format.
     fn platform_to_onvif_settings(settings: &ImagingSettings) -> ImagingSettings20 {
+        use crate::onvif::types::common::WhiteBalanceMode;
         use crate::onvif::types::common::{
-            BacklightCompensation20, BacklightCompensationMode, WideDynamicMode, WideDynamicRange20,
+            BacklightCompensation20, BacklightCompensationMode, Exposure20, WhiteBalance20,
+            WideDynamicMode, WideDynamicRange20,
         };
+
+        // The gains are only meaningful in MANUAL; reporting them under AUTO
+        // would assert values the AWB is free to change every frame.
+        let wb_gains = matches!(settings.white_balance.mode, WhiteBalanceMode::MANUAL);
 
         ImagingSettings20 {
             brightness: Some(settings.brightness),
@@ -579,10 +687,10 @@ impl ImagingSettingsStore {
             color_saturation: Some(settings.saturation),
             sharpness: Some(settings.sharpness),
             ir_cut_filter: Some(settings.ir_cut_filter),
-            wide_dynamic_range: if settings.wdr {
+            wide_dynamic_range: if settings.wdr.enabled {
                 Some(WideDynamicRange20 {
                     mode: WideDynamicMode::ON,
-                    level: Some(50.0),
+                    level: Some(settings.wdr.level),
                 })
             } else {
                 Some(WideDynamicRange20 {
@@ -590,10 +698,10 @@ impl ImagingSettingsStore {
                     level: None,
                 })
             },
-            backlight_compensation: if settings.backlight_compensation {
+            backlight_compensation: if settings.backlight_compensation.enabled {
                 Some(BacklightCompensation20 {
                     mode: BacklightCompensationMode::ON,
-                    level: Some(50.0),
+                    level: Some(settings.backlight_compensation.level),
                 })
             } else {
                 Some(BacklightCompensation20 {
@@ -601,9 +709,31 @@ impl ImagingSettingsStore {
                     level: None,
                 })
             },
-            exposure: None,
+            exposure: Some(Exposure20 {
+                mode: settings.exposure.mode.clone(),
+                priority: None,
+                window: None,
+                // Exposure time stays omitted: the driver keeps it in sensor
+                // lines and no µs conversion is established (see
+                // docs/reference/anyka-ae-units.md), and gain is AE-owned in
+                // AUTO mode.
+                min_exposure_time: None,
+                max_exposure_time: None,
+                min_gain: None,
+                max_gain: None,
+                min_iris: None,
+                max_iris: None,
+                exposure_time: None,
+                gain: None,
+                iris: None,
+            }),
             focus: None,
-            white_balance: None,
+            white_balance: Some(WhiteBalance20 {
+                mode: settings.white_balance.mode.clone(),
+                cr_gain: wb_gains.then_some(settings.white_balance.cr_gain),
+                cb_gain: wb_gains.then_some(settings.white_balance.cb_gain),
+                extension: None,
+            }),
             extension: None,
         }
     }
@@ -622,18 +752,41 @@ impl ImagingSettingsStore {
             wdr: settings
                 .wide_dynamic_range
                 .as_ref()
-                .map(|wdr| matches!(wdr.mode, WideDynamicMode::ON))
-                .unwrap_or(false),
+                .map(|w| ToggleWithLevel {
+                    enabled: matches!(w.mode, WideDynamicMode::ON),
+                    level: w.level.unwrap_or(50.0),
+                })
+                .unwrap_or_default(),
             backlight_compensation: settings
                 .backlight_compensation
                 .as_ref()
-                .map(|blc| {
-                    matches!(
-                        blc.mode,
+                .map(|b| ToggleWithLevel {
+                    enabled: matches!(
+                        b.mode,
                         crate::onvif::types::common::BacklightCompensationMode::ON
-                    )
+                    ),
+                    level: b.level.unwrap_or(50.0),
                 })
-                .unwrap_or(false),
+                .unwrap_or_default(),
+            white_balance: settings
+                .white_balance
+                .as_ref()
+                .map(|w| WhiteBalanceSettings {
+                    mode: w.mode.clone(),
+                    cr_gain: w.cr_gain.unwrap_or(0.0),
+                    cb_gain: w.cb_gain.unwrap_or(0.0),
+                })
+                .unwrap_or_default(),
+            exposure: settings
+                .exposure
+                .as_ref()
+                .map(|e| ExposureSettings {
+                    mode: e.mode.clone(),
+                })
+                .unwrap_or_default(),
+            hue: 50.0,
+            power_hz: 50,
+            style_id: 0,
         }
     }
 
@@ -641,7 +794,7 @@ impl ImagingSettingsStore {
     fn platform_to_onvif_options(options: &ImagingOptions) -> ImagingOptions20 {
         use crate::onvif::types::imaging::{
             BacklightCompensationMode, BacklightCompensationOptions20, IrCutFilterMode,
-            WideDynamicMode, WideDynamicRangeOptions20,
+            WhiteBalanceMode, WhiteBalanceOptions20, WideDynamicMode, WideDynamicRangeOptions20,
         };
 
         ImagingOptions20 {
@@ -695,16 +848,48 @@ impl ImagingSettingsStore {
             } else {
                 None
             },
-            exposure: None,
+            // AUTO only: manual AE values are unreachable on this ISP, so a
+            // MANUAL option would promise a picture the device cannot hold.
+            // The gain range is advertised from the live AE ceiling; the
+            // exposure-time range is omitted (driver units are sensor lines,
+            // no µs conversion established).
+            exposure: Some(crate::onvif::types::imaging::ExposureOptions20 {
+                mode: options.exposure_modes.clone(),
+                priority: vec![],
+                min_exposure_time: None,
+                max_exposure_time: None,
+                min_gain: options
+                    .ae_max_gain_db
+                    .map(|max| FloatRange { min: 0.0, max }),
+                max_gain: options
+                    .ae_max_gain_db
+                    .map(|max| FloatRange { min: 0.0, max }),
+                min_iris: None,
+                max_iris: None,
+                exposure_time: None,
+                gain: options
+                    .ae_max_gain_db
+                    .map(|max| FloatRange { min: 0.0, max }),
+                iris: None,
+            }),
             focus: None,
-            white_balance: None,
+            white_balance: options
+                .white_balance_supported
+                .then_some(WhiteBalanceOptions20 {
+                    mode: vec![WhiteBalanceMode::AUTO, WhiteBalanceMode::MANUAL],
+                    yr_gain: None,
+                    yb_gain: None,
+                    extension: None,
+                }),
             extension: None,
         }
     }
 
     /// Get default imaging settings.
     fn default_settings() -> ImagingSettings20 {
-        use crate::onvif::types::common::IrCutFilterMode;
+        use crate::onvif::types::common::{
+            Exposure20, ExposureMode, IrCutFilterMode, WhiteBalance20, WhiteBalanceMode,
+        };
 
         ImagingSettings20 {
             brightness: Some(50.0),
@@ -714,9 +899,27 @@ impl ImagingSettingsStore {
             ir_cut_filter: Some(IrCutFilterMode::AUTO),
             wide_dynamic_range: None,
             backlight_compensation: None,
-            exposure: None,
+            exposure: Some(Exposure20 {
+                mode: ExposureMode::AUTO,
+                priority: None,
+                window: None,
+                min_exposure_time: None,
+                max_exposure_time: None,
+                min_gain: None,
+                max_gain: None,
+                min_iris: None,
+                max_iris: None,
+                exposure_time: None,
+                gain: None,
+                iris: None,
+            }),
             focus: None,
-            white_balance: None,
+            white_balance: Some(WhiteBalance20 {
+                mode: WhiteBalanceMode::AUTO,
+                cr_gain: None,
+                cb_gain: None,
+                extension: None,
+            }),
             extension: None,
         }
     }
@@ -725,7 +928,7 @@ impl ImagingSettingsStore {
     fn default_options() -> ImagingOptions20 {
         use crate::onvif::types::imaging::{
             BacklightCompensationMode, BacklightCompensationOptions20, IrCutFilterMode,
-            WideDynamicMode, WideDynamicRangeOptions20,
+            WhiteBalanceMode, WhiteBalanceOptions20, WideDynamicMode, WideDynamicRangeOptions20,
         };
 
         ImagingOptions20 {
@@ -769,7 +972,12 @@ impl ImagingSettingsStore {
             }),
             exposure: None,
             focus: None,
-            white_balance: None,
+            white_balance: Some(WhiteBalanceOptions20 {
+                mode: vec![WhiteBalanceMode::AUTO, WhiteBalanceMode::MANUAL],
+                yr_gain: None,
+                yb_gain: None,
+                extension: None,
+            }),
             extension: None,
         }
     }
@@ -810,6 +1018,75 @@ mod tests {
         let tokens = store.get_video_source_tokens();
         assert_eq!(tokens.len(), 1);
         assert_eq!(tokens[0], "VideoSource_1");
+    }
+
+    #[test]
+    fn test_platform_to_onvif_settings_reports_exposure_mode() {
+        use crate::onvif::types::common::ExposureMode;
+
+        let platform = crate::platform::ImagingSettings::default();
+        let onvif = ImagingSettingsStore::platform_to_onvif_settings(&platform);
+        let exposure = onvif.exposure.expect("exposure advertised");
+        assert_eq!(exposure.mode, ExposureMode::AUTO);
+        // No µs conversion is established for the driver's line-based
+        // exposure time, so the range must stay absent rather than guessed.
+        assert!(exposure.min_exposure_time.is_none());
+        assert!(exposure.max_exposure_time.is_none());
+    }
+
+    #[test]
+    fn test_onvif_to_platform_settings_maps_exposure_mode() {
+        use crate::onvif::types::common::{Exposure20, ExposureMode};
+
+        let mut settings = ImagingSettingsStore::default_settings();
+        settings.exposure = Some(Exposure20 {
+            mode: ExposureMode::MANUAL,
+            priority: None,
+            window: None,
+            min_exposure_time: None,
+            max_exposure_time: None,
+            min_gain: None,
+            max_gain: None,
+            min_iris: None,
+            max_iris: None,
+            exposure_time: None,
+            gain: None,
+            iris: None,
+        });
+
+        let platform = ImagingSettingsStore::onvif_to_platform_settings(&settings);
+        assert_eq!(
+            platform.exposure.mode,
+            crate::onvif::types::common::ExposureMode::MANUAL
+        );
+    }
+
+    #[test]
+    fn test_platform_to_onvif_options_advertises_auto_exposure_and_live_gain_range() {
+        let mut options = crate::platform::ImagingOptions::default_options();
+        options.ae_max_gain_db = Some(36.12);
+
+        let onvif = ImagingSettingsStore::platform_to_onvif_options(&options);
+        let exposure = onvif.exposure.expect("exposure options advertised");
+        assert_eq!(
+            exposure.mode,
+            vec![crate::onvif::types::imaging::ExposureMode::AUTO]
+        );
+        assert_eq!(exposure.min_gain.as_ref().unwrap().max, 36.12);
+        assert_eq!(exposure.max_gain.as_ref().unwrap().max, 36.12);
+        assert_eq!(exposure.gain.as_ref().unwrap().min, 0.0);
+        assert!(exposure.min_exposure_time.is_none());
+        assert!(exposure.max_exposure_time.is_none());
+    }
+
+    #[test]
+    fn test_platform_to_onvif_options_omits_gain_range_when_unmeasured() {
+        let options = crate::platform::ImagingOptions::default_options();
+        let onvif = ImagingSettingsStore::platform_to_onvif_options(&options);
+        let exposure = onvif.exposure.expect("exposure options advertised");
+        assert!(exposure.min_gain.is_none());
+        assert!(exposure.max_gain.is_none());
+        assert!(exposure.gain.is_none());
     }
 
     #[test]
@@ -976,8 +1253,20 @@ mod tests {
         assert_eq!(platform.saturation, 80.0);
         assert_eq!(platform.sharpness, 45.0);
         assert_eq!(platform.ir_cut_filter, IrCutFilterMode::ON);
-        assert!(platform.wdr);
-        assert!(platform.backlight_compensation);
+        assert_eq!(
+            platform.wdr,
+            ToggleWithLevel {
+                enabled: true,
+                level: 50.0
+            }
+        );
+        assert_eq!(
+            platform.backlight_compensation,
+            ToggleWithLevel {
+                enabled: true,
+                level: 30.0
+            }
+        );
     }
 
     #[test]
@@ -989,8 +1278,8 @@ mod tests {
         assert_eq!(platform.brightness, 50.0);
         assert_eq!(platform.contrast, 50.0);
         assert_eq!(platform.ir_cut_filter, IrCutFilterMode::AUTO);
-        assert!(!platform.wdr);
-        assert!(!platform.backlight_compensation);
+        assert!(!platform.wdr.enabled);
+        assert!(!platform.backlight_compensation.enabled);
     }
 
     #[test]
@@ -1015,8 +1304,8 @@ mod tests {
 
         let platform = ImagingSettingsStore::onvif_to_platform_settings(&onvif_settings);
         assert_eq!(platform.ir_cut_filter, IrCutFilterMode::OFF);
-        assert!(!platform.wdr);
-        assert!(!platform.backlight_compensation);
+        assert!(!platform.wdr.enabled);
+        assert!(!platform.backlight_compensation.enabled);
     }
 
     #[test]
@@ -1047,6 +1336,65 @@ mod tests {
         });
 
         assert_ne!(on.ir_cut_filter, auto.ir_cut_filter);
+    }
+
+    /// White balance must survive the ONVIF -> platform boundary, gains and
+    /// all: previously the conversion hardcoded `white_balance: None`.
+    #[test]
+    fn test_white_balance_survives_conversion_to_platform() {
+        use crate::onvif::types::common::{ImagingSettings20, WhiteBalance20, WhiteBalanceMode};
+
+        let onvif = ImagingSettings20 {
+            white_balance: Some(WhiteBalance20 {
+                mode: WhiteBalanceMode::MANUAL,
+                cr_gain: Some(2.0),
+                cb_gain: Some(3.0),
+                extension: None,
+            }),
+            ..Default::default()
+        };
+
+        let platform = ImagingSettingsStore::onvif_to_platform_settings(&onvif);
+        assert_eq!(platform.white_balance.mode, WhiteBalanceMode::MANUAL);
+        assert_eq!(platform.white_balance.cr_gain, 2.0);
+        assert_eq!(platform.white_balance.cb_gain, 3.0);
+
+        // And back again: MANUAL reports the gains.
+        let roundtrip = ImagingSettingsStore::platform_to_onvif_settings(&platform).white_balance;
+        let rt = roundtrip.expect("white balance must not be dropped");
+        assert_eq!(rt.mode, WhiteBalanceMode::MANUAL);
+        assert_eq!(rt.cr_gain, Some(2.0));
+        assert_eq!(rt.cb_gain, Some(3.0));
+
+        // AUTO omits the gains: they are the AWB's to drive, not ours to assert.
+        let auto_platform = ImagingSettings {
+            white_balance: crate::platform::WhiteBalanceSettings::default(),
+            ..Default::default()
+        };
+        let auto = ImagingSettingsStore::platform_to_onvif_settings(&auto_platform).white_balance;
+        let rt_auto = auto.expect("white balance must not be dropped");
+        assert_eq!(rt_auto.mode, WhiteBalanceMode::AUTO);
+        assert_eq!(rt_auto.cr_gain, None);
+        assert_eq!(rt_auto.cb_gain, None);
+    }
+
+    /// GetOptions must advertise both white balance modes when the platform
+    /// supports them.
+    #[test]
+    fn test_get_options_advertises_both_white_balance_modes() {
+        use crate::onvif::types::imaging::WhiteBalanceMode as WhiteBalanceModeImaging;
+
+        let options = ImagingOptions {
+            white_balance_supported: true,
+            ..ImagingOptions::default_options()
+        };
+
+        let onvif = ImagingSettingsStore::platform_to_onvif_options(&options);
+        let wb = onvif
+            .white_balance
+            .expect("white balance options must be advertised");
+        assert!(wb.mode.contains(&WhiteBalanceModeImaging::AUTO));
+        assert!(wb.mode.contains(&WhiteBalanceModeImaging::MANUAL));
     }
 
     #[test]
@@ -1209,6 +1557,194 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_validate_settings_wdr_unsupported_is_rejected() {
+        use crate::onvif::types::common::WideDynamicMode;
+        use crate::onvif::types::common::WideDynamicRange20;
+        use crate::platform::Platform;
+        use crate::platform::stub::StubPlatformBuilder;
+
+        // The stub (like this GC1084 build) reports wdr_supported=false, so
+        // GetOptions does not advertise WDR. A raw client that turns WDR ON
+        // must get a clean ValidationFailed (400) — never the 500 HardwareFailure
+        // the SDK set path returns when the driver rejects AK_ISP_set_wdr_attr.
+        let platform: Arc<dyn Platform> =
+            Arc::new(StubPlatformBuilder::new().imaging_supported(true).build());
+        let control = platform
+            .imaging_control()
+            .expect("stub platform exposes an imaging control");
+        let store = ImagingSettingsStore::with_platform(control);
+
+        let settings = ImagingSettings20 {
+            wide_dynamic_range: Some(WideDynamicRange20 {
+                mode: WideDynamicMode::ON,
+                level: None,
+            }),
+            ..Default::default()
+        };
+
+        match store.validate_settings("VideoSource_1", &settings).await {
+            Err(ImagingSettingsError::ValidationFailed(msg)) => {
+                assert!(msg.contains("not supported"), "unexpected: {msg}");
+            }
+            other => panic!("expected ValidationFailed, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_validate_settings_wdr_off_unsupported_is_ignored() {
+        use crate::onvif::types::common::WideDynamicMode;
+        use crate::onvif::types::common::WideDynamicRange20;
+        use crate::platform::Platform;
+        use crate::platform::stub::StubPlatformBuilder;
+
+        // GetImagingSettings always reports WDR, so every full save from a UI
+        // carries it even on a device where GetOptions does not advertise it.
+        // An OFF on such a device is a no-op echo, not a request to turn WDR
+        // on — it must pass validation, or no imaging save from the UI could
+        // ever succeed on this hardware.
+        let platform: Arc<dyn Platform> =
+            Arc::new(StubPlatformBuilder::new().imaging_supported(true).build());
+        let control = platform
+            .imaging_control()
+            .expect("stub platform exposes an imaging control");
+        let store = ImagingSettingsStore::with_platform(control);
+
+        let settings = ImagingSettings20 {
+            wide_dynamic_range: Some(WideDynamicRange20 {
+                mode: WideDynamicMode::OFF,
+                level: None,
+            }),
+            ..Default::default()
+        };
+        assert!(
+            store
+                .validate_settings("VideoSource_1", &settings)
+                .await
+                .is_ok()
+        );
+    }
+
+    #[tokio::test]
+    async fn test_set_settings_partial_set_preserves_unmodeled_fields() {
+        use crate::onvif::types::common::{
+            BacklightCompensationMode, ImagingSettings20, IrCutFilterMode, WhiteBalanceMode,
+        };
+        use crate::platform::Platform;
+        use crate::platform::common::traits::{ImagingSettings, ToggleWithLevel};
+        use crate::platform::stub::StubPlatformBuilder;
+
+        let platform: Arc<dyn Platform> =
+            Arc::new(StubPlatformBuilder::new().imaging_supported(true).build());
+        let control = platform
+            .imaging_control()
+            .expect("stub platform exposes an imaging control");
+
+        // Operator state: manual WB with live gains, BLC enabled at 40,
+        // a non-default contrast, and a forced ir-cut — every one of these
+        // must survive a brightness-only set.
+        let mut seeded = ImagingSettings {
+            contrast: 70.0,
+            ir_cut_filter: IrCutFilterMode::ON,
+            ..Default::default()
+        };
+        seeded.white_balance.mode = WhiteBalanceMode::MANUAL;
+        seeded.white_balance.cr_gain = 1.8;
+        seeded.white_balance.cb_gain = 2.2;
+        seeded.backlight_compensation = ToggleWithLevel {
+            enabled: true,
+            level: 40.0,
+        };
+        control.set_settings(&seeded).await.unwrap();
+
+        let store = ImagingSettingsStore::with_platform(Arc::clone(&control));
+
+        // A brightness-only set: no WDR/BLC/WB/exposure elements at all.
+        let settings = ImagingSettings20 {
+            brightness: Some(60.0),
+            ..Default::default()
+        };
+        store
+            .set_settings("VideoSource_1", &settings, false)
+            .await
+            .unwrap();
+
+        // The platform must show brightness applied and everything else
+        // preserved — this is the bug: the converter's defaults used to reset
+        // the manual WB gains to 0 and BLC to off.
+        let applied = control.get_settings().await.unwrap();
+        assert_eq!(applied.brightness, 60.0);
+        assert!((applied.contrast - 70.0).abs() < f32::EPSILON);
+        assert_eq!(applied.ir_cut_filter, IrCutFilterMode::ON);
+        assert_eq!(applied.white_balance.mode, WhiteBalanceMode::MANUAL);
+        assert!((applied.white_balance.cr_gain - 1.8).abs() < f32::EPSILON);
+        assert!((applied.white_balance.cb_gain - 2.2).abs() < f32::EPSILON);
+        assert!(applied.backlight_compensation.enabled);
+        assert!((applied.backlight_compensation.level - 40.0).abs() < f32::EPSILON);
+
+        // The cache must hold the complete resulting state, not the partial
+        // request: a later GetImagingSettings fallback may not report missing
+        // WB/BLC just because the request omitted them.
+        let cached = store.get_settings("VideoSource_1").await.unwrap();
+        let wb = cached
+            .white_balance
+            .expect("WB must be in the cached state");
+        assert_eq!(wb.mode, WhiteBalanceMode::MANUAL);
+        let blc = cached
+            .backlight_compensation
+            .expect("BLC must be in the cached state");
+        assert!(blc.mode == BacklightCompensationMode::ON);
+        assert!((blc.level.unwrap_or_default() - 40.0).abs() < 1e-6);
+    }
+
+    #[tokio::test]
+    async fn test_concurrent_partial_sets_do_not_lose_updates() {
+        use crate::onvif::types::common::ImagingSettings20;
+        use crate::platform::Platform;
+        use crate::platform::common::traits::ImagingSettings;
+        use crate::platform::stub::StubPlatformBuilder;
+
+        // Two writers saving different fields at the same time. Without
+        // read–merge–write serialization, the second writer merges against
+        // the state read before the first writer's write and restores the
+        // first writer's field to its old value (lost update).
+        let platform: Arc<dyn Platform> =
+            Arc::new(StubPlatformBuilder::new().imaging_supported(true).build());
+        let control = platform
+            .imaging_control()
+            .expect("stub platform exposes an imaging control");
+        let seeded = ImagingSettings {
+            contrast: 70.0,
+            ..Default::default()
+        };
+        control.set_settings(&seeded).await.unwrap();
+
+        let store = Arc::new(ImagingSettingsStore::with_platform(Arc::clone(&control)));
+
+        let a = ImagingSettings20 {
+            brightness: Some(60.0),
+            ..Default::default()
+        };
+        let b = ImagingSettings20 {
+            contrast: Some(80.0),
+            ..Default::default()
+        };
+        let store_a = Arc::clone(&store);
+        let store_b = Arc::clone(&store);
+        let (ra, rb) = tokio::join!(
+            store_a.set_settings("VideoSource_1", &a, false),
+            store_b.set_settings("VideoSource_1", &b, false),
+        );
+        ra.unwrap();
+        rb.unwrap();
+
+        // Both writes must be present in the platform state: no field may
+        // have been restored to its pre-write value by the other writer.
+        let applied = control.get_settings().await.unwrap();
+        assert!((applied.brightness - 60.0).abs() < f32::EPSILON);
+        assert!((applied.contrast - 80.0).abs() < f32::EPSILON);
+    }
+
+    #[tokio::test]
     async fn test_get_status_invalid_token() {
         let store = ImagingSettingsStore::new();
         let result = store.get_status("InvalidToken").await;
@@ -1237,7 +1773,18 @@ mod tests {
     fn test_imaging_settings_error_from_platform_error() {
         use crate::platform::PlatformError;
 
-        let platform_err = PlatformError::NotSupported("test error".to_string());
+        // NotSupported is a client-addressable fault, not a hardware failure:
+        // it must surface as InvalidArgVal (400), so it lands in
+        // ValidationFailed, not the HardwareFailure bucket.
+        let platform_err = PlatformError::NotSupported("manual exposure".to_string());
+        let imaging_err: ImagingSettingsError = platform_err.into();
+        assert!(matches!(
+            imaging_err,
+            ImagingSettingsError::ValidationFailed(ref msg) if msg.contains("manual exposure")
+        ));
+
+        // A genuine hardware failure keeps the old bucket.
+        let platform_err = PlatformError::HardwareUnavailable("no sensor".to_string());
         let imaging_err: ImagingSettingsError = platform_err.into();
         assert!(matches!(
             imaging_err,

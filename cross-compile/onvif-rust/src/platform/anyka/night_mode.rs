@@ -794,10 +794,11 @@ impl NightModeController {
         let caps = self.caps;
         let blocking = tokio::task::spawn_blocking(move || read_blocking_vision(&paths, caps));
 
-        let (ae_luma, ae_attr, awb_cnt, mode, gpio) = tokio::join!(
+        let (ae_luma, ae_attr, awb_cnt, ae_run_info, mode, gpio) = tokio::join!(
             self.ffi.get_ae_luma(),
             self.ffi.get_ae_attr(),
             self.ffi.get_awb_stat(),
+            self.ffi.get_ae_run_info(),
             async {
                 self.current_mode().await.map(|m| match m {
                     DayNight::Day => "day".to_string(),
@@ -822,6 +823,7 @@ impl NightModeController {
             ae_exp_time_max: ae_attr.map(|a| a.exp_time_max),
             ae_target_luminance: ae_attr.map(|a| a.target_lumiance),
             awb_cnt,
+            ae_run_info,
             ain0: gpio.ain0,
             ir_led: gpio.ir_led,
             ircut_a: gpio.ircut_a,
@@ -1048,6 +1050,7 @@ mod tests {
         // live_diagnostics now also reads AE ceilings and AWB bins; not under
         // test here.
         ffi.expect_get_ae_attr().returning(|| None);
+        ffi.expect_get_ae_run_info().returning(|| None);
         ffi.expect_get_awb_stat().returning(|| None);
 
         let ctl = Arc::new(NightModeController::new(
@@ -2125,6 +2128,7 @@ mod tests {
         ffi.expect_get_ae_luma().times(1).returning(|| Some(42));
         // live_diagnostics now also reads AE ceilings; not under test here.
         ffi.expect_get_ae_attr().returning(|| None);
+        ffi.expect_get_ae_run_info().returning(|| None);
         ffi.expect_get_awb_stat()
             .times(1)
             .returning(|| Some([9, 0, 0, 0, 0, 0, 0, 0, 0, 1]));
@@ -2165,6 +2169,7 @@ mod tests {
         ffi.expect_get_lum_factor().returning(|| None);
         ffi.expect_get_ae_luma().returning(|| None);
         ffi.expect_get_ae_attr().returning(|| None);
+        ffi.expect_get_ae_run_info().returning(|| None);
         ffi.expect_get_awb_stat().times(1).returning(|| None);
 
         let ctl = NightModeController::new(

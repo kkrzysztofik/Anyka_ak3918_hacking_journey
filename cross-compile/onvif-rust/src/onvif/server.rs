@@ -674,6 +674,12 @@ impl OnvifServer {
                         .layer(timeout()),
                 );
                 api = api.route(
+                    "/imaging",
+                    get(crate::diagnostics::imaging::handle_get_advanced_imaging)
+                        .put(crate::diagnostics::imaging::handle_put_advanced_imaging)
+                        .layer(timeout()),
+                );
+                api = api.route(
                     "/snmp",
                     get(crate::diagnostics::snmp::handle_get_snmp)
                         .put(crate::diagnostics::snmp::handle_put_snmp)
@@ -1810,6 +1816,76 @@ mod tests {
 
         let response = app.oneshot(request).await.unwrap();
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn test_get_imaging_requires_auth() {
+        use axum::body::Body;
+        use axum::http::{Request, StatusCode};
+        use tower::ServiceExt;
+
+        let app = make_diagnostics_app(true);
+
+        let request = Request::builder()
+            .method("GET")
+            .uri("/api/imaging")
+            .body(Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn test_put_imaging_requires_auth() {
+        use axum::body::Body;
+        use axum::http::{Request, StatusCode};
+        use tower::ServiceExt;
+
+        let app = make_diagnostics_app(true);
+
+        let request = Request::builder()
+            .method("PUT")
+            .uri("/api/imaging")
+            .header("content-type", "application/json")
+            .body(Body::from(r#"{"power_hz":60}"#))
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    /// The stub platform has no imaging control, so an authenticated read
+    /// reports it as unavailable rather than silently serving defaults.
+    #[tokio::test]
+    async fn test_get_imaging_without_imaging_control_is_503() {
+        use axum::body::Body;
+        use axum::http::{Request, StatusCode};
+        use base64::Engine;
+        use tower::ServiceExt;
+
+        let app = make_diagnostics_app_with_user(
+            true,
+            "admin",
+            crate::config::UserLevel::Administrator,
+            0,
+        );
+
+        let request = Request::builder()
+            .method("GET")
+            .uri("/api/imaging")
+            .header(
+                "Authorization",
+                format!(
+                    "Basic {}",
+                    base64::engine::general_purpose::STANDARD.encode("admin:pass")
+                ),
+            )
+            .body(Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
     }
 
     #[tokio::test]

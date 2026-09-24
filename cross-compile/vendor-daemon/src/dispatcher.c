@@ -349,7 +349,20 @@ int process_request(int fd)
         ret = handle_isp_set_ir_filter(fd, req_buf, req_len);
         break;
     case CMD_ISP_SET_WDR:
-        ret = handle_isp_set_wdr(fd, req_buf, req_len);
+        ret = handle_isp_effect(fd, req_buf, req_len,
+                                VPSS_EFFECT_WDR, "set_wdr");
+        break;
+    case CMD_ISP_SET_HUE:
+        ret = handle_isp_effect(fd, req_buf, req_len,
+                                VPSS_EFFECT_HUE, "set_hue");
+        break;
+    case CMD_ISP_SET_POWER_HZ:
+        ret = handle_isp_effect(fd, req_buf, req_len,
+                                VPSS_POWER_HZ, "set_power_hz");
+        break;
+    case CMD_ISP_SET_STYLE_ID:
+        ret = handle_isp_effect(fd, req_buf, req_len,
+                                VPSS_STYLE_ID, "set_style_id");
         break;
     case CMD_ISP_GET_AE_LUMA:
         ret = handle_isp_get_ae_luma(fd, req_buf, req_len);
@@ -362,6 +375,24 @@ int process_request(int fd)
         break;
     case CMD_ISP_GET_AWB_STAT:
         ret = handle_isp_get_awb_stat(fd, req_buf, req_len);
+        break;
+    case CMD_ISP_SET_BLC:
+        ret = handle_isp_set_blc(fd, req_buf, req_len);
+        break;
+    case CMD_ISP_GET_BLC:
+        ret = handle_isp_get_blc(fd, req_buf, req_len);
+        break;
+    case CMD_ISP_SET_WB_TYPE:
+        ret = handle_isp_set_wb_type(fd, req_buf, req_len);
+        break;
+    case CMD_ISP_SET_MWB_ATTR:
+        ret = handle_isp_set_mwb_attr(fd, req_buf, req_len);
+        break;
+    case CMD_ISP_GET_MWB_ATTR:
+        ret = handle_isp_get_mwb_attr(fd, req_buf, req_len);
+        break;
+    case CMD_ISP_AE_GET_RUN_INFO:
+        ret = handle_isp_ae_get_run_info(fd, req_buf, req_len);
         break;
 
     /* --- Utility --- */
