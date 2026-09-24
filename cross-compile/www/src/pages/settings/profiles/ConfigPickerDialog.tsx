@@ -60,6 +60,48 @@ export function ConfigPickerDialog({
     },
   });
 
+  // The candidate list is one of three states: still loading, the device
+  // advertises nothing, or a pickable list.
+  const renderCandidates = () => {
+    if (isLoading) {
+      return <div className="py-6 text-center text-[#a1a1a6]">Loading…</div>;
+    }
+
+    if (candidates.length === 0) {
+      return (
+        <div className="py-6 text-center text-[#a1a1a6] italic" data-testid="config-picker-empty">
+          No compatible configurations available.
+        </div>
+      );
+    }
+
+    return (
+      <div className="space-y-2" role="radiogroup" aria-label={`Available ${title} configurations`}>
+        {candidates.map((token) => (
+          <label
+            key={token}
+            className={`flex cursor-pointer items-center gap-2 rounded-md border p-2 ${
+              effectiveSelected === token
+                ? 'border-[#0a84ff] bg-[rgba(10,132,255,0.1)]'
+                : 'border-[#3a3a3c]'
+            }`}
+          >
+            <input
+              type="radio"
+              name={`config-picker-${configType}`}
+              value={token}
+              checked={effectiveSelected === token}
+              onChange={() => setSelected(token)}
+              className="accent-[#0a84ff]"
+              data-testid={`config-picker-option-${token}`}
+            />
+            <span className="font-mono text-[12px] text-white">{token}</span>
+          </label>
+        ))}
+      </div>
+    );
+  };
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="border-[#3a3a3c] bg-[#1c1c1e] text-white sm:max-w-[425px]">
@@ -72,46 +114,7 @@ export function ConfigPickerDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="py-2">
-          {isLoading ? (
-            <div className="py-6 text-center text-[#a1a1a6]">Loading…</div>
-          ) : candidates.length === 0 ? (
-            <div
-              className="py-6 text-center text-[#a1a1a6] italic"
-              data-testid="config-picker-empty"
-            >
-              No compatible configurations available.
-            </div>
-          ) : (
-            <div
-              className="space-y-2"
-              role="radiogroup"
-              aria-label={`Available ${title} configurations`}
-            >
-              {candidates.map((token) => (
-                <label
-                  key={token}
-                  className={`flex cursor-pointer items-center gap-2 rounded-md border p-2 ${
-                    effectiveSelected === token
-                      ? 'border-[#0a84ff] bg-[rgba(10,132,255,0.1)]'
-                      : 'border-[#3a3a3c]'
-                  }`}
-                >
-                  <input
-                    type="radio"
-                    name={`config-picker-${configType}`}
-                    value={token}
-                    checked={effectiveSelected === token}
-                    onChange={() => setSelected(token)}
-                    className="accent-[#0a84ff]"
-                    data-testid={`config-picker-option-${token}`}
-                  />
-                  <span className="font-mono text-[12px] text-white">{token}</span>
-                </label>
-              ))}
-            </div>
-          )}
-        </div>
+        <div className="py-2">{renderCandidates()}</div>
 
         <DialogFooter>
           <Button

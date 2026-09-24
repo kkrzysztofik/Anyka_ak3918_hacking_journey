@@ -539,11 +539,16 @@ export function getCompatibleMetadataConfigurations(profileToken: string) {
 }
 
 /**
+ * fast-xml-parser renders a repeated element as an array and a single one as a
+ * scalar, so a parsed child is one, many, or absent.
+ */
+type XmlNodeList = Array<Record<string, unknown>> | Record<string, unknown> | undefined;
+
+/**
  * Helper function to parse H264 options
  */
 function parseH264Options(h264: Record<string, unknown>): VideoEncoderConfigurationOptions['h264'] {
-  const resolutions = h264.ResolutionsAvailable as
-    Array<Record<string, unknown>> | Record<string, unknown> | undefined;
+  const resolutions = h264.ResolutionsAvailable as XmlNodeList;
   const frameRateRange = h264.FrameRateRange as Record<string, unknown> | undefined;
   const encodingIntervalRange = h264.EncodingIntervalRange as Record<string, unknown> | undefined;
   const bitrateRange = h264.BitrateRange as Record<string, unknown> | undefined;
@@ -588,8 +593,7 @@ function parseH264Options(h264: Record<string, unknown>): VideoEncoderConfigurat
  * Helper function to parse JPEG options
  */
 function parseJpegOptions(jpeg: Record<string, unknown>): VideoEncoderConfigurationOptions['jpeg'] {
-  const resolutions = jpeg.ResolutionsAvailable as
-    Array<Record<string, unknown>> | Record<string, unknown> | undefined;
+  const resolutions = jpeg.ResolutionsAvailable as XmlNodeList;
   const frameRateRange = jpeg.FrameRateRange as Record<string, unknown> | undefined;
   const encodingIntervalRange = jpeg.EncodingIntervalRange as Record<string, unknown> | undefined;
 
@@ -760,8 +764,7 @@ export async function getAudioEncoderConfigurationOptions(
       'GetAudioEncoderConfigurationOptionsResponse',
     );
     const outer = data?.Options as Record<string, unknown> | undefined;
-    const raw = outer?.Options as
-      Array<Record<string, unknown>> | Record<string, unknown> | undefined;
+    const raw = outer?.Options as XmlNodeList;
 
     if (!raw) {
       return { options: [] };
@@ -772,7 +775,7 @@ export async function getAudioEncoderConfigurationOptions(
     const intList = (value: unknown): number[] => {
       if (value == null) return [];
       const arr = Array.isArray(value) ? value : [value];
-      return arr.map((v) => Number(v));
+      return arr.map(Number);
     };
 
     return {
