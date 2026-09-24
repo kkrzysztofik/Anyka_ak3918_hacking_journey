@@ -344,7 +344,14 @@ export async function getImagingOptions(
     // ONVIF models Mode as a repeated element, but a server with one mode
     // serializes it as a bare scalar — normalize both shapes to a list.
     const rawModes = exposureOptions.Mode;
-    const modeList = Array.isArray(rawModes) ? rawModes : rawModes !== undefined ? [rawModes] : [];
+    let modeList: unknown[];
+    if (Array.isArray(rawModes)) {
+      modeList = rawModes;
+    } else if (rawModes !== undefined) {
+      modeList = [rawModes];
+    } else {
+      modeList = [];
+    }
     const modes = modeList
       .map(String)
       .filter((m): m is ExposureMode => m === 'AUTO' || m === 'MANUAL');

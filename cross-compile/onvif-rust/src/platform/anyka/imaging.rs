@@ -198,6 +198,130 @@ impl AnykaImagingControl {
             "Imaging update applied"
         );
     }
+
+    /// Batch-validate a settings batch before any write: applying knob-by-
+    /// knob and bailing on the first rejection would leave the ISP
+    /// inconsistent with the store, and the store is what the UI reads back.
+    fn validate_settings_batch(settings: &ImagingSettings) -> PlatformResult<()> {
+        use crate::onvif::types::common::WhiteBalanceMode;
+
+        crate::hal::common::imaging::validate_onvif_range(settings.brightness, "brightness")?;
+        crate::hal::common::imaging::validate_onvif_range(settings.contrast, "contrast")?;
+        crate::hal::common::imaging::validate_onvif_range(settings.saturation, "saturation")?;
+        crate::hal::common::imaging::validate_onvif_range(settings.sharpness, "sharpness")?;
+        if settings.wdr.enabled {
+            crate::hal::common::imaging::validate_onvif_range(settings.wdr.level, "wdr level")?;
+        }
+        if settings.backlight_compensation.enabled {
+            crate::hal::common::imaging::validate_onvif_range(
+                settings.backlight_compensation.level,
+                "backlight level",
+            )?;
+        }
+        // Manual WB gains cross the IPC boundary as f32 and are cast to u16 in
+        // the HAL; validate them here so NaN/negative/overflowing values get a
+        // clean InvalidParameter (400) instead of wrapping at the cast.
+        if settings.white_balance.mode == WhiteBalanceMode::MANUAL {
+            for (gain, name) in [
+                (settings.white_balance.cr_gain, "white balance CrGain"),
+                (settings.white_balance.cb_gain, "white balance CbGain"),
+            ] {
+                if !gain.is_finite() || gain < 0.0 || gain.round() > u16::MAX as f32 {
+                    return Err(crate::platform::PlatformError::InvalidParameter(format!(
+                        "{name} must be a finite value in [0, {max}] (got {gain})",
+                        max = u16::MAX
+                    )));
+                }
+            }
+        }
+        // MANUAL exposure would freeze the AE at driver-held values with no
+        // path to set them (mae is unexported) — an unrecoverable picture.
+        if settings.exposure.mode != crate::onvif::types::common::ExposureMode::AUTO {
+            return Err(crate::platform::PlatformError::NotSupported(
+                "manual exposure is not supported on this device".to_string(),
+            ));
+        }
+        crate::hal::common::imaging::validate_onvif_range(settings.hue, "hue")?;
+        if settings.power_hz != 50 && settings.power_hz != 60 {
+            return Err(crate::platform::PlatformError::InvalidParameter(format!(
+                "power_hz must be 50 or 60 (got {})",
+                settings.power_hz
+            )));
+        }
+        if settings.style_id > 2 {
+            return Err(crate::platform::PlatformError::InvalidParameter(format!(
+                "style_id must be 0-2 (got {})",
+                settings.style_id
+            )));
+        }
+        Ok(())
+    }
+
+    /// Apply an ir-cut mode change: disable auto tracking for forced modes
+    /// and run the day/night plan. Only runs when the mode actually changed:
+    /// re-applying the current mode re-runs the plan, and the day plan writes
+    /// IR_LED=0 — which would turn off a manually forced lamp (set_ir_lamp
+    /// caches ir_cut_filter=ON while the mode stays Day).
+    async fn apply_ir_cut_mode(
+        &self,
+        current: &ImagingSettings,
+        settings: &ImagingSettings,
+    ) -> PlatformResult<()> {
+        use super::night_mode::DayNight;
+        use crate::onvif::types::common::IrCutFilterMode;
+
+        // GPIO transitions must not be blocked by ISP color controls (which
+        // can fail independently over IPC).
+        if current.ir_cut_filter == settings.ir_cut_filter {
+            return Ok(());
+        }
+        match settings.ir_cut_filter {
+            IrCutFilterMode::ON => {
+                self.night.set_auto_enabled(false);
+                self.night.apply(DayNight::Day).await?;
+            }
+            IrCutFilterMode::OFF => {
+                self.night.set_auto_enabled(false);
+                self.night.apply(DayNight::Night).await?;
+            }
+            IrCutFilterMode::AUTO => {
+                self.night.set_auto_enabled(true);
+            }
+        }
+        Ok(())
+    }
+
+    /// Switch white balance mode and (for MANUAL) write the gains, only when
+    /// the batch differs from the live state.
+    async fn apply_white_balance(
+        &self,
+        current: &ImagingSettings,
+        settings: &ImagingSettings,
+    ) -> PlatformResult<()> {
+        use crate::hal::common::imaging::{WB_TYPE_AUTO, WB_TYPE_MANUAL};
+        use crate::onvif::types::common::WhiteBalanceMode;
+
+        if current.white_balance == settings.white_balance {
+            return Ok(());
+        }
+        match settings.white_balance.mode {
+            WhiteBalanceMode::AUTO => {
+                crate::hal::common::imaging::imaging_set_wb_type(WB_TYPE_AUTO, self.ffi.as_ref())
+                    .await?;
+            }
+            WhiteBalanceMode::MANUAL => {
+                crate::hal::common::imaging::imaging_set_wb_type(WB_TYPE_MANUAL, self.ffi.as_ref())
+                    .await?;
+                crate::hal::common::imaging::imaging_set_mwb_attr(
+                    settings.white_balance.cr_gain,
+                    settings.white_balance.cb_gain,
+                    self.ffi.as_ref(),
+                )
+                .await?;
+            }
+        }
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -233,90 +357,14 @@ impl ImagingControl for AnykaImagingControl {
     }
 
     /// Apply a full settings batch to the ISP: batch-validates every field,
-    /// then writes only the fields that changed, day/night only when the
-    /// mode changed (re-applying it would reset a forced IR lamp).
+    /// then writes only the fields that changed.
     async fn set_settings(&self, settings: &ImagingSettings) -> PlatformResult<()> {
-        use super::night_mode::DayNight;
-        use crate::onvif::types::common::IrCutFilterMode;
-
         let start = std::time::Instant::now();
         let current = self.settings.read().clone();
 
-        // Validate the whole batch up front. Applying knob-by-knob and
-        // bailing on the first rejection leaves the ISP inconsistent with the
-        // store, and the store is what the UI reads back.
-        crate::hal::common::imaging::validate_onvif_range(settings.brightness, "brightness")?;
-        crate::hal::common::imaging::validate_onvif_range(settings.contrast, "contrast")?;
-        crate::hal::common::imaging::validate_onvif_range(settings.saturation, "saturation")?;
-        crate::hal::common::imaging::validate_onvif_range(settings.sharpness, "sharpness")?;
-        if settings.wdr.enabled {
-            crate::hal::common::imaging::validate_onvif_range(settings.wdr.level, "wdr level")?;
-        }
-        if settings.backlight_compensation.enabled {
-            crate::hal::common::imaging::validate_onvif_range(
-                settings.backlight_compensation.level,
-                "backlight level",
-            )?;
-        }
-        // Manual WB gains cross the IPC boundary as f32 and are cast to u16 in
-        // the HAL; validate them here so NaN/negative/overflowing values get a
-        // clean InvalidParameter (400) instead of wrapping at the cast.
-        if settings.white_balance.mode == crate::onvif::types::common::WhiteBalanceMode::MANUAL {
-            for (gain, name) in [
-                (settings.white_balance.cr_gain, "white balance CrGain"),
-                (settings.white_balance.cb_gain, "white balance CbGain"),
-            ] {
-                if !gain.is_finite() || gain < 0.0 || gain.round() > u16::MAX as f32 {
-                    return Err(crate::platform::PlatformError::InvalidParameter(format!(
-                        "{name} must be a finite value in [0, {max}] (got {gain})",
-                        max = u16::MAX
-                    )));
-                }
-            }
-        }
-        // MANUAL exposure would freeze the AE at driver-held values with no
-        // path to set them (mae is unexported) — an unrecoverable picture.
-        if settings.exposure.mode != crate::onvif::types::common::ExposureMode::AUTO {
-            return Err(crate::platform::PlatformError::NotSupported(
-                "manual exposure is not supported on this device".to_string(),
-            ));
-        }
-        crate::hal::common::imaging::validate_onvif_range(settings.hue, "hue")?;
-        if settings.power_hz != 50 && settings.power_hz != 60 {
-            return Err(crate::platform::PlatformError::InvalidParameter(format!(
-                "power_hz must be 50 or 60 (got {})",
-                settings.power_hz
-            )));
-        }
-        if settings.style_id > 2 {
-            return Err(crate::platform::PlatformError::InvalidParameter(format!(
-                "style_id must be 0-2 (got {})",
-                settings.style_id
-            )));
-        }
+        Self::validate_settings_batch(settings)?;
 
-        // Day/night first: GPIO transitions must not be blocked by ISP color
-        // controls (which can fail independently over IPC).
-        //
-        // Only when the mode actually changed: re-applying the current mode
-        // re-runs the day/night plan, and the day plan writes IR_LED=0 — which
-        // would turn off a manually forced lamp (set_ir_lamp caches
-        // ir_cut_filter=ON while the mode stays Day).
-        if current.ir_cut_filter != settings.ir_cut_filter {
-            match settings.ir_cut_filter {
-                IrCutFilterMode::ON => {
-                    self.night.set_auto_enabled(false);
-                    self.night.apply(DayNight::Day).await?;
-                }
-                IrCutFilterMode::OFF => {
-                    self.night.set_auto_enabled(false);
-                    self.night.apply(DayNight::Night).await?;
-                }
-                IrCutFilterMode::AUTO => {
-                    self.night.set_auto_enabled(true);
-                }
-            }
-        }
+        self.apply_ir_cut_mode(&current, settings).await?;
 
         if !Self::approximately_equal(current.brightness, settings.brightness) {
             crate::hal::common::imaging::imaging_set_brightness(
@@ -382,33 +430,7 @@ impl ImagingControl for AnykaImagingControl {
             }
         }
 
-        if current.white_balance != settings.white_balance {
-            use crate::hal::common::imaging::{WB_TYPE_AUTO, WB_TYPE_MANUAL};
-            use crate::onvif::types::common::WhiteBalanceMode;
-
-            match settings.white_balance.mode {
-                WhiteBalanceMode::AUTO => {
-                    crate::hal::common::imaging::imaging_set_wb_type(
-                        WB_TYPE_AUTO,
-                        self.ffi.as_ref(),
-                    )
-                    .await?;
-                }
-                WhiteBalanceMode::MANUAL => {
-                    crate::hal::common::imaging::imaging_set_wb_type(
-                        WB_TYPE_MANUAL,
-                        self.ffi.as_ref(),
-                    )
-                    .await?;
-                    crate::hal::common::imaging::imaging_set_mwb_attr(
-                        settings.white_balance.cr_gain,
-                        settings.white_balance.cb_gain,
-                        self.ffi.as_ref(),
-                    )
-                    .await?;
-                }
-            }
-        }
+        self.apply_white_balance(&current, settings).await?;
 
         *self.settings.write() = settings.clone();
         self.mark_imaging_update_and_request_idr("set_settings");

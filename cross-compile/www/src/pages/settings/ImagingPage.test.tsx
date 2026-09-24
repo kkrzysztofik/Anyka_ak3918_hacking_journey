@@ -872,7 +872,7 @@ describe('ImagingPage', () => {
     const initial = mock.mock.calls.length;
     fireEvent.keyDown(thumb!, { key: 'ArrowRight', code: 'ArrowRight', keyCode: 39 });
     fireEvent.keyDown(thumb!, { key: 'ArrowRight', code: 'ArrowRight', keyCode: 39 });
-    expect(mock.mock.calls.length).toBe(initial);
+    expect(mock.mock.calls).toHaveLength(initial);
 
     // The pointer-up that ends a real drag fires onValueCommit, which
     // jsdom cannot reproduce (react-aria's slide-end never fires from
