@@ -833,8 +833,13 @@ describe('ImagingPage', () => {
 
     const ir = await screen.findByTestId('imaging-ir-lamp-switch');
     const white = screen.getByTestId('imaging-white-light-switch');
-    expect(ir).toBeChecked();
-    expect(white).toBeChecked();
+    // The diagnostics query resolves independently of the settings query that
+    // gates isLoading; wait for it to actually land before asserting the
+    // seeded (checked) state.
+    await waitFor(() => {
+      expect(ir).toBeChecked();
+      expect(white).toBeChecked();
+    });
   });
 
   it('should mount the live preview beside the cards', async () => {

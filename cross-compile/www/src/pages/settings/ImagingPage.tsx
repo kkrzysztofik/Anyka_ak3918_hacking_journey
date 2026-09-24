@@ -95,6 +95,12 @@ export default function ImagingPage() {
       toast.error('Failed to save advanced imaging', {
         description: error instanceof Error ? error.message : 'An error occurred',
       });
+      // A rejected write leaves the server where it was: drop the local
+      // shadow so every advanced control falls back to the query value
+      // instead of keeping the rejected one (a hue drag's commit closure
+      // cannot roll back to its own pre-drag value — the drag already wrote
+      // it into the shadow).
+      setAdvancedLocal(null);
     },
   });
 
@@ -762,12 +768,6 @@ export default function ImagingPage() {
                           { hue: val },
                           {
                             onSuccess: () => toast.success('Color tint saved'),
-                            onError: (e) => {
-                              toast.error(
-                                e instanceof Error ? e.message : 'Failed to save color tint',
-                              );
-                              setAdvancedLocal(effectiveAdvanced);
-                            },
                           },
                         )
                       }
@@ -776,25 +776,23 @@ export default function ImagingPage() {
                     />
                   </div>
                   <div className="space-y-[12px]">
-                    <Label className="text-[#e5e5e5]" data-testid="imaging-power-hz-label">
+                    <Label
+                      className="text-[#e5e5e5]"
+                      htmlFor="imaging-power-hz-select"
+                      data-testid="imaging-power-hz-label"
+                    >
                       Mains frequency (reduces flicker under artificial light)
                     </Label>
                     <select
+                      id="imaging-power-hz-select"
                       value={String(effectiveAdvanced.powerHz)}
                       onChange={(e) => {
                         const powerHz = Number(e.target.value) as 50 | 60;
-                        const prev = effectiveAdvanced;
                         setAdvancedLocal({ ...effectiveAdvanced, powerHz });
                         advancedMutation.mutate(
                           { powerHz },
                           {
                             onSuccess: () => toast.success('Mains frequency saved'),
-                            onError: (e) => {
-                              toast.error(
-                                e instanceof Error ? e.message : 'Failed to save mains frequency',
-                              );
-                              setAdvancedLocal(prev);
-                            },
                           },
                         );
                       }}
@@ -806,10 +804,15 @@ export default function ImagingPage() {
                     </select>
                   </div>
                   <div className="space-y-[12px]">
-                    <Label className="text-[#e5e5e5]" data-testid="imaging-style-label">
+                    <Label
+                      className="text-[#e5e5e5]"
+                      htmlFor="imaging-style-select"
+                      data-testid="imaging-style-label"
+                    >
                       Picture style
                     </Label>
                     <select
+                      id="imaging-style-select"
                       value={String(effectiveAdvanced.styleId)}
                       onChange={(e) => {
                         const styleId = Number(e.target.value) as 0 | 1 | 2;
