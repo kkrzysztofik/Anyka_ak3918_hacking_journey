@@ -215,11 +215,15 @@ lftp_escape() {
   printf '%s' "${s}"
 }
 
-# Print the double- or single-quoted TOML string value of a key (e.g. the
-# ssid/password lines under [wifi] in anyka.toml); prints nothing if absent.
+# Print the TOML string value of a key (e.g. the ssid/password lines under
+# [wifi] in anyka.toml). Uses a real TOML parser (python3 ≥3.11's tomllib),
+# not a line pattern: values containing escaped quotes or backslashes
+# round-trip correctly. A parse failure is fatal — an unreadable live file
+# must never look like "no creds to preserve" (that would let the mirror
+# write CHANGE_ME over the camera's real [wifi]).
 toml_get() {
   local file="$1" key="$2"
-  sed -nE "s/^[[:space:]]*${key}[[:space:]]*=[[:space:]]*[\"']([^\"']*)[\"'].*/\1/p" "${file}" | head -1
+  python3 -c 'import sys, tomllib; d = tomllib.load(open(sys.argv[1], "rb")); v = d.get("wifi", {}).get(sys.argv[2]); sys.stdout.write(v if isinstance(v, str) else "")' "${file}" "${key}"
 }
 
 # Fetch the camera's live anyka.toml and, if it carries real [wifi] creds, build
@@ -248,10 +252,15 @@ fetch_live_wifi() {
       >"${fetch_out}" 2>&1
   fetch_rc=$?
   set -e
-  if [[ ! -f "${workdir}/anyka.toml" ]]; then
-    if grep -qiE 'no such file|550 ' "${fetch_out}"; then
+  # A nonzero lftp exit (a 550 is ambiguous between "missing" and "denied",
+  # so only an explicit "no such file" in the output counts as absence), a
+  # missing local file, or a zero-byte "success" (corrupt transfer) all mean
+  # the live state is unverified: abort so nothing overwrites it.
+  if [[ ${fetch_rc} -ne 0 || ! -f "${workdir}/anyka.toml" ]]; then
+    if [[ ! -f "${workdir}/anyka.toml" ]] && grep -qi 'no such file' "${fetch_out}"; then
       # Confirmed absent on the camera: first deploy, nothing to preserve.
       log_info "No live anyka.toml on ${FTP_HOST} (first deploy); nothing to preserve"
+      wifi_scratch_cleanup
       WIFI_WORKDIR=""; WIFI_FINAL=""
       return 0
     fi
@@ -259,11 +268,23 @@ fetch_live_wifi() {
     cat "${fetch_out}" >&2
     exit 1
   fi
+  if [[ ! -s "${workdir}/anyka.toml" ]]; then
+    log_error "Fetched anyka.toml is empty (corrupt transfer); aborting so its [wifi] creds are not clobbered:"
+    cat "${fetch_out}" >&2
+    exit 1
+  fi
   local live_ssid live_pass
-  live_ssid="$(toml_get "${workdir}/anyka.toml" ssid)"
-  live_pass="$(toml_get "${workdir}/anyka.toml" password)"
+  if ! live_ssid="$(toml_get "${workdir}/anyka.toml" ssid)"; then
+    log_error "Live anyka.toml is not parseable TOML (python3 with tomllib is required); aborting so its [wifi] creds are not clobbered"
+    exit 1
+  fi
+  if ! live_pass="$(toml_get "${workdir}/anyka.toml" password)"; then
+    log_error "Live anyka.toml is not parseable TOML (python3 with tomllib is required); aborting so its [wifi] creds are not clobbered"
+    exit 1
+  fi
   if [[ -z "${live_ssid}" || "${live_ssid}" == "CHANGE_ME" || -z "${live_pass}" || "${live_pass}" == "CHANGE_ME" ]]; then
     log_info "Live anyka.toml has no complete [wifi] ssid/password; nothing to preserve"
+    wifi_scratch_cleanup
     WIFI_WORKDIR=""; WIFI_FINAL=""
     return 0
   fi
@@ -285,10 +306,13 @@ fetch_live_wifi() {
   log_info "Live [wifi] ssid=${live_ssid} will be preserved across this push"
 }
 
-# Re-push only the preserved anyka.toml (a one-file mirror over the just-written
-# CHANGE_ME copy) so the camera keeps its real [wifi] creds. A failed re-push
-# is fatal: the mirror already replaced the live file with the placeholder, so
-# the camera would revert to the vendor boot path at the next reboot.
+# Re-push only the preserved anyka.toml so the camera keeps its real [wifi]
+# creds. A plain put -O, not a mirror: a one-file mirror can skip the upload
+# when size and mtime match the remote (FTP timestamps have 1 s granularity
+# and both copies were written seconds apart), leaving the CHANGE_ME
+# placeholder on the camera. A failed re-push is fatal: the mirror already
+# replaced the live file, so the camera would revert to the vendor boot path
+# at the next reboot.
 push_live_wifi() {
   [[ -n "${WIFI_FINAL}" && -f "${WIFI_FINAL}/anyka.toml" ]] || return 0
   local remote_hack final_esc host_esc
@@ -299,10 +323,11 @@ push_live_wifi() {
   local rc=0
   set +e
   lftp -u "${FTP_USER},${FTP_PASS}" ftp://${host_esc} -e \
-    "set ftp:ssl-allow no; set net:timeout 20; set cmd:fail-exit on; mirror -R --no-perms --no-umask ${final_esc} ${remote_hack}; bye" \
+    "set ftp:ssl-allow no; set net:timeout 20; set cmd:fail-exit on; put -O ${remote_hack}/anyka.toml ${final_esc}/anyka.toml; bye" \
     >/dev/null 2>&1
   rc=$?
   set -e
+  wifi_scratch_cleanup
   WIFI_WORKDIR=""; WIFI_FINAL=""
   if [[ ${rc} -ne 0 ]]; then
     log_error "Preserved anyka.toml re-push failed (exit ${rc}) — ${FTP_HOST} now has the CHANGE_ME [wifi] placeholder; re-apply the real credentials before the next reboot"
@@ -371,6 +396,10 @@ copy_ftp() {
   if [[ "${lftp_rc}" -ne 0 ]] || echo "${lftp_output}" | grep -qiE '^([[:space:]]*)?(error|fatal)|login failed|access denied|530 '; then
     log_error "lftp upload failed (exit ${lftp_rc}):"
     echo "${lftp_output}" >&2
+    # The anyka_hack mirror may already have written the CHANGE_ME anyka.toml
+    # before it failed (lftp keeps going after a failed transfer): restore
+    # the live credentials now so the camera is not wifi-less at reboot.
+    push_live_wifi
     exit 1
   fi
 

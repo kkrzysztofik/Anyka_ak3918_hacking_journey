@@ -32,7 +32,8 @@ def call(body, action):
     env = (
         '<?xml version="1.0" encoding="UTF-8"?>'
         '<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope" '
-        'xmlns:timg="http://www.onvif.org/ver20/imaging/wsdl">'
+        'xmlns:timg="http://www.onvif.org/ver20/imaging/wsdl" '
+        'xmlns:tt="http://www.onvif.org/ver10/schema">'
         '<s:Body>' + body + '</s:Body></s:Envelope>'
     )
     req = urllib.request.Request(
@@ -56,7 +57,7 @@ get_settings = (
     '<timg:GetImagingSettings><tt:VideoSourceToken xmlns:tt="http://www.onvif.org/ver10/schema">VideoSource_1</tt:VideoSourceToken></timg:GetImagingSettings>'
 )
 get_options = (
-    '<timg:GetOptions><timg:VideoSourceToken>VideoSource_1</tt:VideoSourceToken></timg:GetOptions>'
+    '<timg:GetOptions><tt:VideoSourceToken xmlns:tt="http://www.onvif.org/ver10/schema">VideoSource_1</tt:VideoSourceToken></timg:GetOptions>'
 )
 set_manual = (
     '<timg:SetImagingSettings>'

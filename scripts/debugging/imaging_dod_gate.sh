@@ -42,7 +42,8 @@ tk = '<tt:VideoSourceToken xmlns:tt="http://www.onvif.org/ver10/schema">VideoSou
 def call(body, action):
     env = ('<?xml version="1.0" encoding="UTF-8"?>'
         '<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope" '
-        'xmlns:timg="http://www.onvif.org/ver20/imaging/wsdl">'
+        'xmlns:timg="http://www.onvif.org/ver20/imaging/wsdl" '
+        'xmlns:tt="http://www.onvif.org/ver10/schema">'
         '<s:Body>' + body + '</s:Body></s:Envelope>')
     req = urllib.request.Request(soap, data=env.encode(),
         headers={"Content-Type": "application/soap+xml; charset=utf-8",
@@ -173,7 +174,7 @@ try:
     # carries it) and must be a 200.
     wdr_on_st, wdr_on_out = set_img(wdr="ON", check=None)
     wdr_off_st, wdr_off_out = set_img(wdr="OFF", check=None)
-    opt_st, opt_out = call('<timg:GetOptions><timg:VideoSourceToken>VideoSource_1</tt:VideoSourceToken></timg:GetOptions>', "options")
+    opt_st, opt_out = call('<timg:GetOptions>' + tk + '</timg:GetOptions>', "options")
     wdr_advertised = "<tt:WideDynamicRange" in opt_out
     results["wdr_marked_unavailable"] = (
         opt_st == "200"
@@ -193,7 +194,7 @@ try:
     print(f"  BLC off: {l_b0:.1f}  on: {l_b1:.1f}  delta={abs(l_b1 - l_b0):.1f}")
 
     # --- 5. exposure mode-only: exactly [AUTO], no exposure-time range
-    st, out = call('<timg:GetOptions><timg:VideoSourceToken>VideoSource_1</tt:VideoSourceToken></timg:GetOptions>', "options")
+    st, out = call('<timg:GetOptions>' + tk + '</timg:GetOptions>', "options")
     exp = re.search(r"<tt:Exposure.*?</tt:Exposure>", out, re.S)
     block = exp.group(0) if exp else ""
     modes = re.findall(r"<tt:Mode>(\w+)</tt:Mode>", block)

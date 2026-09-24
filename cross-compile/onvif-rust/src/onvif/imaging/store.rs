@@ -335,12 +335,13 @@ impl ImagingSettingsStore {
         if let Some(ref control) = self.platform_control {
             let mut platform_settings = ImagingSettingsStore::onvif_to_platform_settings(settings);
             // An omitted ImagingSettings element means "leave it alone": the
-            // converter would default WDR/BLC/WB/exposure to off/AUTO, and a
-            // brightness-only set from any client would silently reset the
-            // operator's manual white balance and BLC. Merge every omitted
-            // element from the live platform state instead. A failed read must
-            // fail the whole set: defaulting here would silently wipe state on
-            // any transient IPC error during an ordinary brightness set.
+            // converter would default the scalars to 50 and WDR/BLC/WB/exposure
+            // to off/AUTO, and a brightness-only set from any client would
+            // silently reset the operator's contrast, saturation, manual white
+            // balance and BLC. Merge every omitted element from the live
+            // platform state instead. A failed read must fail the whole set:
+            // defaulting here would silently wipe state on any transient IPC
+            // error during an ordinary brightness set.
             let current = control.get_settings().await.map_err(|e| {
                 ImagingSettingsError::PlatformError(format!(
                     "failed to read current settings before applying: {e}"
@@ -352,6 +353,23 @@ impl ImagingSettingsStore {
             platform_settings.hue = current.hue;
             platform_settings.power_hz = current.power_hz;
             platform_settings.style_id = current.style_id;
+            if settings.brightness.is_none() {
+                platform_settings.brightness = current.brightness;
+            }
+            if settings.contrast.is_none() {
+                platform_settings.contrast = current.contrast;
+            }
+            if settings.color_saturation.is_none() {
+                platform_settings.saturation = current.saturation;
+            }
+            if settings.sharpness.is_none() {
+                platform_settings.sharpness = current.sharpness;
+            }
+            if settings.ir_cut_filter.is_none() {
+                platform_settings.ir_cut_filter = current.ir_cut_filter;
+            }
+            // Not modelled by ImagingSettings20 at all.
+            platform_settings.ir_led = current.ir_led;
             if settings.wide_dynamic_range.is_none() {
                 platform_settings.wdr = current.wdr;
             }
@@ -1603,7 +1621,7 @@ mod tests {
     #[tokio::test]
     async fn test_set_settings_partial_set_preserves_unmodeled_fields() {
         use crate::onvif::types::common::{
-            BacklightCompensationMode, ImagingSettings20, WhiteBalanceMode,
+            BacklightCompensationMode, ImagingSettings20, IrCutFilterMode, WhiteBalanceMode,
         };
         use crate::platform::Platform;
         use crate::platform::common::traits::{ImagingSettings, ToggleWithLevel};
@@ -1615,8 +1633,14 @@ mod tests {
             .imaging_control()
             .expect("stub platform exposes an imaging control");
 
-        // Operator state: manual WB with live gains, BLC enabled at 40.
-        let mut seeded = ImagingSettings::default();
+        // Operator state: manual WB with live gains, BLC enabled at 40,
+        // a non-default contrast, and a forced ir-cut — every one of these
+        // must survive a brightness-only set.
+        let mut seeded = ImagingSettings {
+            contrast: 70.0,
+            ir_cut_filter: IrCutFilterMode::ON,
+            ..Default::default()
+        };
         seeded.white_balance.mode = WhiteBalanceMode::MANUAL;
         seeded.white_balance.cr_gain = 1.8;
         seeded.white_balance.cb_gain = 2.2;
@@ -1643,6 +1667,8 @@ mod tests {
         // the manual WB gains to 0 and BLC to off.
         let applied = control.get_settings().await.unwrap();
         assert_eq!(applied.brightness, 60.0);
+        assert!((applied.contrast - 70.0).abs() < f32::EPSILON);
+        assert_eq!(applied.ir_cut_filter, IrCutFilterMode::ON);
         assert_eq!(applied.white_balance.mode, WhiteBalanceMode::MANUAL);
         assert!((applied.white_balance.cr_gain - 1.8).abs() < f32::EPSILON);
         assert!((applied.white_balance.cb_gain - 2.2).abs() < f32::EPSILON);

@@ -27,7 +27,7 @@ soap() { # $1 = mode  $2 = cr  $3 = cb  (omit cr/cb for AUTO)
   cat > /tmp/wb.xml <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope" xmlns:timg="http://www.onvif.org/ver20/imaging/wsdl" xmlns:tt="http://www.onvif.org/ver10/schema">
-<s:Body><timg:SetImagingSettings><timg:VideoSourceToken>VideoSource_1</tt:VideoSourceToken><tt:ImagingSettings><tt:WhiteBalance>$wb</tt:WhiteBalance></tt:ImagingSettings></s:Body>
+<s:Body><timg:SetImagingSettings><tt:VideoSourceToken>VideoSource_1</tt:VideoSourceToken><tt:ImagingSettings><tt:WhiteBalance>$wb</tt:WhiteBalance></tt:ImagingSettings></timg:SetImagingSettings></s:Body>
 </s:Envelope>
 EOF
   local resp rc

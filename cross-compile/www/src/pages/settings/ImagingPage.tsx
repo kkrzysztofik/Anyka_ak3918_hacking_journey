@@ -90,6 +90,11 @@ export default function ImagingPage() {
     mutationFn: (patch: Partial<AdvancedImaging>) => putAdvancedImaging(patch),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['advancedImaging'] });
+      // A successful write makes the server the source of truth: drop the
+      // local shadow now so it can't outrank the refetched value (e.g. if
+      // the server normalizes the written value, the UI must show the
+      // normalized one, not the pre-write local).
+      setAdvancedLocal(null);
     },
     onError: (error) => {
       toast.error('Failed to save advanced imaging', {
