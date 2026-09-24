@@ -646,7 +646,12 @@ export default function ImagingPage() {
                   <div className="pointer-events-none space-y-[12px] opacity-60">
                     <div className="flex items-center justify-between">
                       <Label className="text-[#e5e5e5]">WDR Mode</Label>
-                      <span className="text-[13px] text-[#a1a1a6]">Unavailable on this ISP</span>
+                      <span
+                        className="text-[13px] text-[#a1a1a6]"
+                        data-testid="imaging-wdr-unavailable"
+                      >
+                        Unavailable on this ISP
+                      </span>
                     </div>
                     <select
                       value="off"

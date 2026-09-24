@@ -341,11 +341,13 @@ export async function getImagingOptions(
   // Parse Exposure options (mode list + advertised gain range, if any)
   const exposureOptions = options.Exposure as Record<string, unknown> | undefined;
   if (exposureOptions) {
-    const modes = Array.isArray(exposureOptions.Mode)
-      ? (exposureOptions.Mode as unknown[])
-          .map(String)
-          .filter((m): m is ExposureMode => m === 'AUTO' || m === 'MANUAL')
-      : [];
+    // ONVIF models Mode as a repeated element, but a server with one mode
+    // serializes it as a bare scalar — normalize both shapes to a list.
+    const rawModes = exposureOptions.Mode;
+    const modeList = Array.isArray(rawModes) ? rawModes : rawModes !== undefined ? [rawModes] : [];
+    const modes = modeList
+      .map(String)
+      .filter((m): m is ExposureMode => m === 'AUTO' || m === 'MANUAL');
     result.exposure = {
       modes,
       gainRange: parseRange(exposureOptions.Gain as Record<string, unknown> | undefined),

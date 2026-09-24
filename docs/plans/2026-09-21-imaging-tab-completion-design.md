@@ -1,7 +1,7 @@
 # The Imaging tab's sliders have never worked
 
 Date: 2026-09-21
-Status: design approved, implementation not started
+Status: implemented — landed in PR #121 (implement/imaging-tab-completion), hardware DoD gates passed on the AK3918
 
 ## Problem
 

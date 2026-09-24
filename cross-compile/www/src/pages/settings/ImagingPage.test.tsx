@@ -126,14 +126,14 @@ describe('ImagingPage', () => {
     expect(selects.length).toBeGreaterThan(0);
   });
 
-  it('stubs the WDR control — writes fault on this ISP (Task 18 finding)', async () => {
+  it('should stub the WDR control and mark it unavailable on this ISP', async () => {
     renderWithProviders(<ImagingPage />);
 
     const select = await screen.findByTestId('imaging-wdr-mode-select');
     expect(select).toBeDisabled();
     // The level slider the mode used to reveal is gone with it.
     expect(screen.queryByTestId('imaging-wdr-level-label')).not.toBeInTheDocument();
-    expect(screen.getByText('Unavailable on this ISP')).toBeInTheDocument();
+    expect(screen.getByTestId('imaging-wdr-unavailable')).toBeInTheDocument();
   });
 
   it('should show backlight level slider when backlight compensation is ON', async () => {
@@ -558,7 +558,7 @@ describe('ImagingPage', () => {
       expect(irCutFilterSelect).toHaveValue('ON');
     });
 
-    it('stubs the WDR mode select — the level slider it reveals is gone', async () => {
+    it('should stub the WDR mode select and hide the level slider it would reveal', async () => {
       renderWithProviders(<ImagingPage />);
 
       await waitFor(() => {
@@ -665,14 +665,14 @@ describe('ImagingPage', () => {
   });
 
   describe('illumination card', () => {
-    it('renders the illumination card with both lamp switches', async () => {
+    it('should render the illumination card with both lamp switches', async () => {
       renderWithProviders(<ImagingPage />);
 
       expect(await screen.findByTestId('imaging-ir-lamp-switch')).toBeInTheDocument();
       expect(screen.getByTestId('imaging-white-light-switch')).toBeInTheDocument();
     });
 
-    it('sends the IR lamp on command when the switch is enabled', async () => {
+    it('should send the IR lamp on command when the switch is enabled', async () => {
       const user = userEvent.setup();
       renderWithProviders(<ImagingPage />);
 
@@ -687,7 +687,7 @@ describe('ImagingPage', () => {
       });
     });
 
-    it('sends the white light off command when the switch is toggled twice', async () => {
+    it('should send the white light off command when the switch is toggled twice', async () => {
       const user = userEvent.setup();
       renderWithProviders(<ImagingPage />);
 
@@ -707,7 +707,7 @@ describe('ImagingPage', () => {
       });
     });
 
-    it('hides the IR cut card when the backend reports no filter modes', async () => {
+    it('should hide the IR cut card when the backend reports no filter modes', async () => {
       vi.mocked(getImagingOptions).mockResolvedValue({
         ...MOCK_DATA.imaging.options,
         irCutFilterModes: [],
@@ -800,7 +800,7 @@ describe('ImagingPage', () => {
     });
   });
 
-  it('renders the advanced card with hue slider and both selects', async () => {
+  it('should render the advanced card with hue slider and both selects', async () => {
     renderWithProviders(<ImagingPage />);
 
     await waitFor(() => {
@@ -811,7 +811,7 @@ describe('ImagingPage', () => {
     expect(screen.getByTestId('imaging-style-select')).toBeInTheDocument();
   });
 
-  it('saves the mains frequency when the select changes', async () => {
+  it('should save the mains frequency when the select changes', async () => {
     const user = userEvent.setup();
     renderWithProviders(<ImagingPage />);
 
@@ -825,7 +825,7 @@ describe('ImagingPage', () => {
     });
   });
 
-  it('seeds the lamp switches from the diagnostics snapshot', async () => {
+  it('should seed the lamp switches from the diagnostics snapshot', async () => {
     vi.mocked(getDiagnostics).mockResolvedValue({
       vision: { ir_led: true, white_led: true },
     } as never);
@@ -837,7 +837,7 @@ describe('ImagingPage', () => {
     expect(white).toBeChecked();
   });
 
-  it('mounts the live preview beside the cards', async () => {
+  it('should mount the live preview beside the cards', async () => {
     renderWithProviders(<ImagingPage />);
 
     await waitFor(() => {
@@ -845,17 +845,17 @@ describe('ImagingPage', () => {
     });
   });
 
-  it('writes once per hue commit and never on intermediate steps', async () => {
+  it('should not write on intermediate hue steps', async () => {
     renderWithProviders(<ImagingPage />);
 
     await waitFor(() => {
       expect(screen.getByTestId('imaging-hue-slider')).toBeInTheDocument();
     });
 
-    // Radix renders one thumb per value; it is the element that takes focus.
+    // Radix renders one thumb per value; the wrapper tags it with a testid.
     const thumb = document
       .querySelector('[data-testid="imaging-hue-slider"]')
-      ?.querySelector('[role="slider"]') as HTMLElement | null;
+      ?.querySelector('[data-testid="slider-thumb"]') as HTMLElement | null;
     expect(thumb).not.toBeNull();
     fireEvent.focusIn(thumb!);
 
@@ -880,7 +880,7 @@ describe('ImagingPage', () => {
     // intermediate value — is the one asserted above.
   });
 
-  it('saves the picture style when the select changes', async () => {
+  it('should save the picture style when the select changes', async () => {
     const user = userEvent.setup();
     renderWithProviders(<ImagingPage />);
 
