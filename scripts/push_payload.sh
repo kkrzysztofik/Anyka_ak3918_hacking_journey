@@ -323,7 +323,7 @@ push_live_wifi() {
   local rc=0
   set +e
   lftp -u "${FTP_USER},${FTP_PASS}" ftp://${host_esc} -e \
-    "set ftp:ssl-allow no; set net:timeout 20; set cmd:fail-exit on; put -O ${remote_hack}/anyka.toml ${final_esc}/anyka.toml; bye" \
+    "set ftp:ssl-allow no; set net:timeout 20; set cmd:fail-exit on; put -O ${remote_hack} ${final_esc}/anyka.toml; bye" \
     >/dev/null 2>&1
   rc=$?
   set -e

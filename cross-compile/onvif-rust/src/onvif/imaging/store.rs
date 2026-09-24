@@ -330,6 +330,12 @@ impl ImagingSettingsStore {
         // Validate settings against options
         self.validate_settings(video_source_token, settings).await?;
 
+        // Serialize the read–merge–write (and cache update) against every
+        // other writer to this control (ONVIF, REST, startup apply): a
+        // concurrent partial save merging against the pre-merge state would
+        // restore the other save's old value (lost update).
+        let _write_lock = crate::platform::common::traits::imaging_write_lock().await;
+
         // Apply to platform if available
         let mut cache_entry = settings.clone();
         if let Some(ref control) = self.platform_control {
@@ -1688,6 +1694,54 @@ mod tests {
             .expect("BLC must be in the cached state");
         assert!(blc.mode == BacklightCompensationMode::ON);
         assert!((blc.level.unwrap_or_default() - 40.0).abs() < 1e-6);
+    }
+
+    #[tokio::test]
+    async fn test_concurrent_partial_sets_do_not_lose_updates() {
+        use crate::onvif::types::common::ImagingSettings20;
+        use crate::platform::Platform;
+        use crate::platform::common::traits::ImagingSettings;
+        use crate::platform::stub::StubPlatformBuilder;
+
+        // Two writers saving different fields at the same time. Without
+        // read–merge–write serialization, the second writer merges against
+        // the state read before the first writer's write and restores the
+        // first writer's field to its old value (lost update).
+        let platform: Arc<dyn Platform> =
+            Arc::new(StubPlatformBuilder::new().imaging_supported(true).build());
+        let control = platform
+            .imaging_control()
+            .expect("stub platform exposes an imaging control");
+        let seeded = ImagingSettings {
+            contrast: 70.0,
+            ..Default::default()
+        };
+        control.set_settings(&seeded).await.unwrap();
+
+        let store = Arc::new(ImagingSettingsStore::with_platform(Arc::clone(&control)));
+
+        let a = ImagingSettings20 {
+            brightness: Some(60.0),
+            ..Default::default()
+        };
+        let b = ImagingSettings20 {
+            contrast: Some(80.0),
+            ..Default::default()
+        };
+        let store_a = Arc::clone(&store);
+        let store_b = Arc::clone(&store);
+        let (ra, rb) = tokio::join!(
+            store_a.set_settings("VideoSource_1", &a, false),
+            store_b.set_settings("VideoSource_1", &b, false),
+        );
+        ra.unwrap();
+        rb.unwrap();
+
+        // Both writes must be present in the platform state: no field may
+        // have been restored to its pre-write value by the other writer.
+        let applied = control.get_settings().await.unwrap();
+        assert!((applied.brightness - 60.0).abs() < f32::EPSILON);
+        assert!((applied.contrast - 80.0).abs() < f32::EPSILON);
     }
 
     #[tokio::test]

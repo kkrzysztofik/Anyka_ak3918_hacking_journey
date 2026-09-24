@@ -103,6 +103,10 @@ pub(crate) async fn handle_put_advanced_imaging(
     Json(patch): Json<AdvancedImagingPatch>,
 ) -> Result<Json<AdvancedImagingView>, ApiError> {
     let control = imaging_control(&state).await?;
+    // Serialize read–merge–write against the other imaging writers (ONVIF
+    // partial saves, startup apply): without it, a concurrent save merging
+    // against the pre-merge state would restore our old values.
+    let _write_lock = crate::platform::common::traits::imaging_write_lock().await;
     let current = control.get_settings().await.map_err(|e| {
         tracing::warn!(error = %e, "PUT /api/imaging: reading settings failed");
         platform_error_to_api(e)

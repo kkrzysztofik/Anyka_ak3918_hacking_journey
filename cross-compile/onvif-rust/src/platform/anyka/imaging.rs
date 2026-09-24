@@ -426,7 +426,11 @@ impl ImagingControl for AnykaImagingControl {
         // rejects (60 Hz is known to be one on this SDK build) is logged and
         // the cache falls back to the SDK default — boot must never fail on
         // an imaging knob, and the cache must hold what the ISP actually
-        // holds.
+        // holds. Hold the imaging write lock: this is one of the writers in
+        // the read–merge–write serialization (an early REST save racing the
+        // startup apply must not be merged against a state this call then
+        // overwrites).
+        let _write_lock = crate::platform::common::traits::imaging_write_lock().await;
         let s = self.settings.read().clone();
         if s.hue != 50.0 {
             match crate::hal::common::imaging::imaging_set_hue(s.hue, self.ffi.as_ref()).await {

@@ -1055,6 +1055,24 @@ pub trait Platform: Send + Sync {
     }
 }
 
+/// Serializes imaging read–merge–write sequences (ONVIF partial saves, the
+/// REST advanced-knob save, and the startup apply) so concurrent writers
+/// cannot merge against a state the other writer has already replaced.
+///
+/// # ponytail: one process-wide lock — this device runs a single ISP pipeline
+/// in a single daemon, so per-control locking buys nothing; key locks by
+/// control if multi-pipeline support ever appears.
+static IMAGING_WRITE_LOCK: std::sync::OnceLock<tokio::sync::Mutex<()>> = std::sync::OnceLock::new();
+
+/// Acquire the imaging write lock. Hold the returned guard from before the
+/// platform read, through the merge, to after the platform write.
+pub async fn imaging_write_lock() -> tokio::sync::MutexGuard<'static, ()> {
+    IMAGING_WRITE_LOCK
+        .get_or_init(Default::default)
+        .lock()
+        .await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
