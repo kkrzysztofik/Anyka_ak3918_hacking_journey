@@ -5,12 +5,33 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { apiClient } from '@/services/api';
 import {
+  addAudioEncoderConfiguration,
+  addAudioSourceConfiguration,
+  addMetadataConfiguration,
+  addPTZConfiguration,
+  addVideoEncoderConfiguration,
+  addVideoSourceConfiguration,
   createProfile,
   deleteProfile,
+  getAudioEncoderConfiguration,
+  getAudioEncoderConfigurationOptions,
+  getCompatibleAudioEncoderConfigurations,
+  getCompatibleAudioSourceConfigurations,
+  getCompatibleMetadataConfigurations,
+  getCompatiblePTZConfigurations,
+  getCompatibleVideoEncoderConfigurations,
+  getCompatibleVideoSourceConfigurations,
   getProfiles,
   getVideoEncoderConfiguration,
   getVideoEncoderConfigurationOptions,
   getVideoSourceConfiguration,
+  removeAudioEncoderConfiguration,
+  removeAudioSourceConfiguration,
+  removeMetadataConfiguration,
+  removePTZConfiguration,
+  removeVideoEncoderConfiguration,
+  removeVideoSourceConfiguration,
+  setAudioEncoderConfiguration,
   setVideoEncoderConfiguration,
   setVideoSourceConfiguration,
 } from '@/services/profileService';
@@ -25,6 +46,160 @@ vi.mock('@/services/api', () => ({
     media: '/onvif/media_service',
   },
 }));
+
+describe('profile configuration attach/detach/compatible', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const families = [
+    {
+      type: 'VideoSource',
+      add: addVideoSourceConfiguration,
+      remove: removeVideoSourceConfiguration,
+      getCompatible: getCompatibleVideoSourceConfigurations,
+    },
+    {
+      type: 'VideoEncoder',
+      add: addVideoEncoderConfiguration,
+      remove: removeVideoEncoderConfiguration,
+      getCompatible: getCompatibleVideoEncoderConfigurations,
+    },
+    {
+      type: 'AudioSource',
+      add: addAudioSourceConfiguration,
+      remove: removeAudioSourceConfiguration,
+      getCompatible: getCompatibleAudioSourceConfigurations,
+    },
+    {
+      type: 'AudioEncoder',
+      add: addAudioEncoderConfiguration,
+      remove: removeAudioEncoderConfiguration,
+      getCompatible: getCompatibleAudioEncoderConfigurations,
+    },
+    {
+      type: 'PTZ',
+      add: addPTZConfiguration,
+      remove: removePTZConfiguration,
+      getCompatible: getCompatiblePTZConfigurations,
+    },
+    {
+      type: 'Metadata',
+      add: addMetadataConfiguration,
+      remove: removeMetadataConfiguration,
+      getCompatible: getCompatibleMetadataConfigurations,
+    },
+  ];
+
+  for (const family of families) {
+    describe(family.type, () => {
+      it(`add emits Add${family.type}Configuration with the profile and config refs`, async () => {
+        vi.mocked(apiClient.post).mockResolvedValueOnce(
+          createMockSOAPResponse(`<Add${family.type}ConfigurationResponse />`),
+        );
+        await family.add('P_1', 'C_9');
+        const body = vi.mocked(apiClient.post).mock.calls[0][1] as string;
+        expect(body).toContain(`<trt:Add${family.type}Configuration>`);
+        expect(body).toContain('<trt:ProfileToken>P_1</trt:ProfileToken>');
+        expect(body).toContain('<trt:ConfigurationToken>C_9</trt:ConfigurationToken>');
+      });
+
+      it(`remove emits Remove${family.type}Configuration with the profile ref`, async () => {
+        vi.mocked(apiClient.post).mockResolvedValueOnce(
+          createMockSOAPResponse(`<Remove${family.type}ConfigurationResponse />`),
+        );
+        await family.remove('P_1');
+        const body = vi.mocked(apiClient.post).mock.calls[0][1] as string;
+        expect(body).toContain(`<trt:Remove${family.type}Configuration>`);
+        expect(body).toContain('<trt:ProfileToken>P_1</trt:ProfileToken>');
+      });
+
+      it(`getCompatible emits the request and parses the config tokens`, async () => {
+        vi.mocked(apiClient.post).mockResolvedValueOnce(
+          createMockSOAPResponse(
+            `<GetCompatible${family.type}ConfigurationsResponse>` +
+              `<trt:Configurations token="C_1" />` +
+              `<trt:Configurations token="C_2" />` +
+              `</GetCompatible${family.type}ConfigurationsResponse>`,
+          ),
+        );
+        const tokens = await family.getCompatible('P_1');
+        const body = vi.mocked(apiClient.post).mock.calls[0][1] as string;
+        expect(body).toContain(`<trt:GetCompatible${family.type}Configurations>`);
+        expect(body).toContain('<trt:ProfileToken>P_1</trt:ProfileToken>');
+        expect(tokens).toEqual(['C_1', 'C_2']);
+      });
+    });
+  }
+});
+
+describe('audio encoder configuration', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('get parses the audio encoder configuration', async () => {
+    vi.mocked(apiClient.post).mockResolvedValueOnce(
+      createMockSOAPResponse(`
+        <GetAudioEncoderConfigurationResponse>
+          <Configuration token="AudioEncoderConfig_0">
+            <Name>Audio</Name>
+            <UseCount>1</UseCount>
+            <Encoding>G711</Encoding>
+            <Bitrate>32</Bitrate>
+            <SampleRate>8</SampleRate>
+            <SessionTimeout>PT60S</SessionTimeout>
+          </Configuration>
+        </GetAudioEncoderConfigurationResponse>
+      `),
+    );
+    const result = await getAudioEncoderConfiguration('AudioEncoderConfig_0');
+    expect(result).not.toBeNull();
+    expect(result?.token).toBe('AudioEncoderConfig_0');
+    expect(result?.encoding).toBe('G711');
+    expect(result?.bitrate).toBe(32);
+    expect(result?.sampleRate).toBe(8);
+  });
+
+  it('set sends every field back (wholesale replace)', async () => {
+    vi.mocked(apiClient.post).mockResolvedValueOnce(
+      createMockSOAPResponse('<SetAudioEncoderConfigurationResponse />'),
+    );
+    await setAudioEncoderConfiguration({
+      token: 'AudioEncoderConfig_0',
+      name: 'Audio',
+      useCount: 1,
+      encoding: 'G726',
+      bitrate: 16,
+      sampleRate: 16,
+      sessionTimeout: 'PT60S',
+    });
+    const body = vi.mocked(apiClient.post).mock.calls[0][1] as string;
+    expect(body).toContain('<tt:Encoding>G726</tt:Encoding>');
+    expect(body).toContain('<tt:Bitrate>16</tt:Bitrate>');
+    expect(body).toContain('<tt:SampleRate>16</tt:SampleRate>');
+    expect(body).toContain('<tt:SessionTimeout>PT60S</tt:SessionTimeout>');
+  });
+
+  it('get options parses per-encoding bitrate and sample-rate lists', async () => {
+    vi.mocked(apiClient.post).mockResolvedValueOnce(
+      createMockSOAPResponse(`
+        <GetAudioEncoderConfigurationOptionsResponse>
+          <Options>
+            <Options>
+              <Encoding>G711</Encoding>
+              <BitrateList><Items>0</Items><Items>32</Items></BitrateList>
+              <SampleRateList><Items>8</Items></SampleRateList>
+            </Options>
+          </Options>
+        </GetAudioEncoderConfigurationOptionsResponse>
+      `),
+    );
+    const result = await getAudioEncoderConfigurationOptions('AudioEncoderConfig_0');
+    expect(result).not.toBeNull();
+    expect(result?.options).toEqual([{ encoding: 'G711', bitrates: [0, 32], sampleRates: [8] }]);
+  });
+});
 
 describe('profileService', () => {
   beforeEach(() => {

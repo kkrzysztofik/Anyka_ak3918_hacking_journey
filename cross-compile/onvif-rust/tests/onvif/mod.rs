@@ -10,6 +10,7 @@ mod media_service;
 mod memory_management;
 mod namespace_parsing;
 mod network_info;
+mod profiles_service;
 mod ptz_service;
 mod soap_contract;
 mod user_management;

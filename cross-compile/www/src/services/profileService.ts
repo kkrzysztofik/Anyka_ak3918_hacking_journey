@@ -103,6 +103,32 @@ export interface VideoEncoderConfigurationOptions {
   };
 }
 
+/** ONVIF audio encoder configuration (single-encoder AK3918). */
+export interface AudioEncoderConfiguration {
+  token: string;
+  name: string;
+  useCount: number;
+  /** G711, G726, or AAC, as advertised by the device. */
+  encoding: string;
+  /** Bitrate in kbps. */
+  bitrate: number;
+  /** Sample rate in kHz. */
+  sampleRate: number;
+  sessionTimeout: string;
+}
+
+/**
+ * Audio encoder options, honestly reflecting what the device advertises: a
+ * per-encoding list of available bitrates and sample rates.
+ */
+export interface AudioEncoderConfigurationOptions {
+  options: Array<{
+    encoding: string;
+    bitrates: number[];
+    sampleRates: number[];
+  }>;
+}
+
 /**
  * Get all media profiles
  */
@@ -402,12 +428,127 @@ export async function setVideoSourceConfiguration(
   await soapRequest(ENDPOINTS.media, body, 'SetVideoSourceConfigurationResponse');
 }
 
+// ---------------------------------------------------------------------------
+// Attach / detach / compatible-config operations for the six profile
+// configuration families. These map onto the ONVIF Media profile operations
+// (AddXConfiguration, RemoveXConfiguration, GetCompatibleXConfigurations). The
+// device has one instance of each kind; the picker lists whatever it advertises
+// as compatible and attaching is a profile-field update.
+// ---------------------------------------------------------------------------
+
+// The response carries repeated `<trt:Configurations token="...">` elements —
+// each a full configuration object, not a bare reference.
+export type ConfigurationReference = { '@_token': string };
+
+export async function addConfiguration(
+  profileToken: string,
+  configType: string,
+  configToken: string,
+): Promise<void> {
+  const body = `<trt:Add${configType}Configuration>
+    <trt:ProfileToken>${escapeXml(profileToken)}</trt:ProfileToken>
+    <trt:ConfigurationToken>${escapeXml(configToken)}</trt:ConfigurationToken>
+  </trt:Add${configType}Configuration>`;
+  await soapRequest(ENDPOINTS.media, body, `Add${configType}ConfigurationResponse`);
+}
+
+export async function removeConfiguration(profileToken: string, configType: string): Promise<void> {
+  const body = `<trt:Remove${configType}Configuration>
+    <trt:ProfileToken>${escapeXml(profileToken)}</trt:ProfileToken>
+  </trt:Remove${configType}Configuration>`;
+  await soapRequest(ENDPOINTS.media, body, `Remove${configType}ConfigurationResponse`);
+}
+
+export async function getCompatibleConfigurations(
+  profileToken: string,
+  configType: string,
+): Promise<string[]> {
+  const body = `<trt:GetCompatible${configType}Configurations>
+    <trt:ProfileToken>${escapeXml(profileToken)}</trt:ProfileToken>
+  </trt:GetCompatible${configType}Configurations>`;
+  const data = await soapRequest<Record<string, unknown>>(
+    ENDPOINTS.media,
+    body,
+    `GetCompatible${configType}ConfigurationsResponse`,
+  );
+  const refs = data?.Configurations as
+    Array<ConfigurationReference> | ConfigurationReference | undefined;
+  if (!refs) return [];
+  const list = Array.isArray(refs) ? refs : [refs];
+  return list.map((r) => safeString(r['@_token'], ''));
+}
+
+export function addVideoSourceConfiguration(profileToken: string, configToken: string) {
+  return addConfiguration(profileToken, 'VideoSource', configToken);
+}
+export function removeVideoSourceConfiguration(profileToken: string) {
+  return removeConfiguration(profileToken, 'VideoSource');
+}
+export function getCompatibleVideoSourceConfigurations(profileToken: string) {
+  return getCompatibleConfigurations(profileToken, 'VideoSource');
+}
+
+export function addVideoEncoderConfiguration(profileToken: string, configToken: string) {
+  return addConfiguration(profileToken, 'VideoEncoder', configToken);
+}
+export function removeVideoEncoderConfiguration(profileToken: string) {
+  return removeConfiguration(profileToken, 'VideoEncoder');
+}
+export function getCompatibleVideoEncoderConfigurations(profileToken: string) {
+  return getCompatibleConfigurations(profileToken, 'VideoEncoder');
+}
+
+export function addAudioSourceConfiguration(profileToken: string, configToken: string) {
+  return addConfiguration(profileToken, 'AudioSource', configToken);
+}
+export function removeAudioSourceConfiguration(profileToken: string) {
+  return removeConfiguration(profileToken, 'AudioSource');
+}
+export function getCompatibleAudioSourceConfigurations(profileToken: string) {
+  return getCompatibleConfigurations(profileToken, 'AudioSource');
+}
+
+export function addAudioEncoderConfiguration(profileToken: string, configToken: string) {
+  return addConfiguration(profileToken, 'AudioEncoder', configToken);
+}
+export function removeAudioEncoderConfiguration(profileToken: string) {
+  return removeConfiguration(profileToken, 'AudioEncoder');
+}
+export function getCompatibleAudioEncoderConfigurations(profileToken: string) {
+  return getCompatibleConfigurations(profileToken, 'AudioEncoder');
+}
+
+export function addPTZConfiguration(profileToken: string, configToken: string) {
+  return addConfiguration(profileToken, 'PTZ', configToken);
+}
+export function removePTZConfiguration(profileToken: string) {
+  return removeConfiguration(profileToken, 'PTZ');
+}
+export function getCompatiblePTZConfigurations(profileToken: string) {
+  return getCompatibleConfigurations(profileToken, 'PTZ');
+}
+
+export function addMetadataConfiguration(profileToken: string, configToken: string) {
+  return addConfiguration(profileToken, 'Metadata', configToken);
+}
+export function removeMetadataConfiguration(profileToken: string) {
+  return removeConfiguration(profileToken, 'Metadata');
+}
+export function getCompatibleMetadataConfigurations(profileToken: string) {
+  return getCompatibleConfigurations(profileToken, 'Metadata');
+}
+
+/**
+ * fast-xml-parser renders a repeated element as an array and a single one as a
+ * scalar, so a parsed child is one, many, or absent.
+ */
+type XmlNodeList = Array<Record<string, unknown>> | Record<string, unknown> | undefined;
+
 /**
  * Helper function to parse H264 options
  */
 function parseH264Options(h264: Record<string, unknown>): VideoEncoderConfigurationOptions['h264'] {
-  const resolutions = h264.ResolutionsAvailable as
-    Array<Record<string, unknown>> | Record<string, unknown> | undefined;
+  const resolutions = h264.ResolutionsAvailable as XmlNodeList;
   const frameRateRange = h264.FrameRateRange as Record<string, unknown> | undefined;
   const encodingIntervalRange = h264.EncodingIntervalRange as Record<string, unknown> | undefined;
   const bitrateRange = h264.BitrateRange as Record<string, unknown> | undefined;
@@ -452,8 +593,7 @@ function parseH264Options(h264: Record<string, unknown>): VideoEncoderConfigurat
  * Helper function to parse JPEG options
  */
 function parseJpegOptions(jpeg: Record<string, unknown>): VideoEncoderConfigurationOptions['jpeg'] {
-  const resolutions = jpeg.ResolutionsAvailable as
-    Array<Record<string, unknown>> | Record<string, unknown> | undefined;
+  const resolutions = jpeg.ResolutionsAvailable as XmlNodeList;
   const frameRateRange = jpeg.FrameRateRange as Record<string, unknown> | undefined;
   const encodingIntervalRange = jpeg.EncodingIntervalRange as Record<string, unknown> | undefined;
 
@@ -532,4 +672,125 @@ export async function getVideoEncoderConfigurationOptions(
   }
 
   return result;
+}
+
+/**
+ * Get an audio encoder configuration.
+ *
+ * Returns null if the device has no such configuration.
+ */
+export async function getAudioEncoderConfiguration(
+  token: string,
+): Promise<AudioEncoderConfiguration | null> {
+  // NOSONAR - Token comes from device response (trusted source), not user input
+  const body = `<trt:GetAudioEncoderConfiguration>
+    <trt:ConfigurationToken>${token}</trt:ConfigurationToken>
+  </trt:GetAudioEncoderConfiguration>`;
+
+  try {
+    const data = await soapRequest<Record<string, unknown>>(
+      ENDPOINTS.media,
+      body,
+      'GetAudioEncoderConfigurationResponse',
+    );
+    const config = data?.Configuration as Record<string, unknown> | undefined;
+
+    if (!config) {
+      return null;
+    }
+
+    return {
+      token: safeString(config['@_token'], ''),
+      name: safeString(config.Name, ''),
+      useCount: Number(config.UseCount || 0),
+      encoding: safeString(config.Encoding, ''),
+      bitrate: Number(config.Bitrate || 0),
+      sampleRate: Number(config.SampleRate || 0),
+      sessionTimeout: safeString(config.SessionTimeout, ''),
+    };
+  } catch (error) {
+    console.warn('Failed to get audio encoder configuration:', error);
+    return null;
+  }
+}
+
+/**
+ * Set audio encoder configuration.
+ *
+ * The device replaces the stored configuration wholesale, so every field is
+ * sent back — fetch the current config with `getAudioEncoderConfiguration`,
+ * change only what you mean to change, and pass the whole thing here.
+ */
+export async function setAudioEncoderConfiguration(
+  config: AudioEncoderConfiguration,
+  forcePersistence: boolean = true,
+): Promise<void> {
+  // NOSONAR - Token from device, but escaping for defense-in-depth
+  const escapedToken = escapeXml(config.token);
+  const escapedName = escapeXml(config.name);
+  const body = `<trt:SetAudioEncoderConfiguration>
+    <trt:Configuration token="${escapedToken}">
+      <tt:Name>${escapedName}</tt:Name>
+      <tt:UseCount>${config.useCount}</tt:UseCount>
+      <tt:Encoding>${config.encoding}</tt:Encoding>
+      <tt:Bitrate>${config.bitrate}</tt:Bitrate>
+      <tt:SampleRate>${config.sampleRate}</tt:SampleRate>
+      <tt:SessionTimeout>${config.sessionTimeout}</tt:SessionTimeout>
+    </trt:Configuration>
+    <trt:ForcePersistence>${forcePersistence}</trt:ForcePersistence>
+  </trt:SetAudioEncoderConfiguration>`;
+
+  await soapRequest(ENDPOINTS.media, body, 'SetAudioEncoderConfigurationResponse');
+}
+
+/**
+ * Get audio encoder configuration options.
+ *
+ * The device is single-sensor with one audio encoder, so the options are
+ * identical regardless of the requested token.
+ */
+export async function getAudioEncoderConfigurationOptions(
+  token: string,
+): Promise<AudioEncoderConfigurationOptions | null> {
+  // NOSONAR - Token comes from device response (trusted source), not user input
+  const body = `<trt:GetAudioEncoderConfigurationOptions>
+    <trt:ConfigurationToken>${token}</trt:ConfigurationToken>
+  </trt:GetAudioEncoderConfigurationOptions>`;
+
+  try {
+    const data = await soapRequest<Record<string, unknown>>(
+      ENDPOINTS.media,
+      body,
+      'GetAudioEncoderConfigurationOptionsResponse',
+    );
+    const outer = data?.Options as Record<string, unknown> | undefined;
+    const raw = outer?.Options as XmlNodeList;
+
+    if (!raw) {
+      return { options: [] };
+    }
+
+    // fast-xml-parser renders repeated <tt:Items> as an array and a single one
+    // as a scalar; normalize both to number[].
+    const intList = (value: unknown): number[] => {
+      if (value == null) return [];
+      const arr = Array.isArray(value) ? value : [value];
+      return arr.map(Number);
+    };
+
+    return {
+      options: (Array.isArray(raw) ? raw : [raw]).map((o) => {
+        const bitrateList = o.BitrateList as Record<string, unknown> | undefined;
+        const sampleRateList = o.SampleRateList as Record<string, unknown> | undefined;
+        return {
+          encoding: safeString(o.Encoding, ''),
+          bitrates: intList(bitrateList?.Items),
+          sampleRates: intList(sampleRateList?.Items),
+        };
+      }),
+    };
+  } catch (error) {
+    console.warn('Failed to get audio encoder configuration options:', error);
+    return null;
+  }
 }

@@ -9,8 +9,9 @@
 
 use onvif_rust::onvif::media::MediaService;
 use onvif_rust::onvif::types::common::{
-    AudioEncoding, H264Configuration, H264Profile, Name, ReferenceToken, StreamSetup, StreamType,
-    Transport, TransportProtocol, VideoEncoding, VideoRateControl, VideoResolution,
+    AudioEncoding, H264Configuration, H264Profile, MetadataConfiguration, Name, ReferenceToken,
+    StreamSetup, StreamType, Transport, TransportProtocol, VideoEncoding, VideoRateControl,
+    VideoResolution,
 };
 use onvif_rust::onvif::types::media::{
     AddAudioEncoderConfiguration, AddAudioSourceConfiguration, AddVideoEncoderConfiguration,
@@ -22,7 +23,7 @@ use onvif_rust::onvif::types::media::{
     GetServiceCapabilities, GetSnapshotUri, GetStreamUri, GetVideoEncoderConfiguration,
     GetVideoEncoderConfigurationOptions, GetVideoEncoderConfigurations,
     GetVideoSourceConfiguration, GetVideoSourceConfigurations, GetVideoSources,
-    MetadataConfiguration, RemoveAudioEncoderConfiguration, RemoveAudioSourceConfiguration,
+    RemoveAudioEncoderConfiguration, RemoveAudioSourceConfiguration,
     RemoveVideoEncoderConfiguration, RemoveVideoSourceConfiguration, SetAudioSourceConfiguration,
     SetMetadataConfiguration, SetVideoEncoderConfiguration, SetVideoSourceConfiguration,
     StartMulticastStreaming, StopMulticastStreaming,
@@ -795,7 +796,8 @@ fn test_metadata_handlers_return_expected_results() {
     let configurations = service
         .handle_get_metadata_configurations(GetMetadataConfigurations {})
         .unwrap();
-    assert!(configurations.configurations.is_empty());
+    assert_eq!(configurations.configurations.len(), 1);
+    assert_eq!(configurations.configurations[0].token, "MetadataConfig_0");
 
     let result = service.handle_set_metadata_configuration(SetMetadataConfiguration {
         configuration: MetadataConfiguration {
@@ -806,6 +808,7 @@ fn test_metadata_handlers_return_expected_results() {
             analytics: None,
             multicast: None,
             session_timeout: "PT60S".to_string(),
+            extension: None,
         },
         force_persistence: Some(false),
     });
@@ -853,7 +856,15 @@ fn test_complete_media_workflow() {
         .unwrap();
     assert!(!sources.video_sources.is_empty());
 
-    // 4. Get stream URI for the new profile
+    // 4. Get stream URI for a profile that carries a video encoder. A freshly
+    //    created profile has no encoder, and such a profile cannot be streamed
+    //    (GetStreamUri faults rather than hand out a dead path), so use a
+    //    default profile which does have one.
+    let streamable = profiles
+        .profiles
+        .iter()
+        .find(|p| p.video_encoder_configuration.is_some())
+        .expect("at least one default profile carries a video encoder");
     let stream_uri = service
         .handle_get_stream_uri(GetStreamUri {
             stream_setup: StreamSetup {
@@ -863,7 +874,7 @@ fn test_complete_media_workflow() {
                     tunnel: None,
                 },
             },
-            profile_token: new_profile.profile.token.clone(),
+            profile_token: streamable.token.clone(),
         })
         .unwrap();
     assert!(!stream_uri.media_uri.uri.is_empty());

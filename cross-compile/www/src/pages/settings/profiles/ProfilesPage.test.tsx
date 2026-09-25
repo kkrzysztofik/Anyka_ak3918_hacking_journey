@@ -6,13 +6,22 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  type AudioEncoderConfiguration,
+  type AudioEncoderConfigurationOptions,
+  type MediaProfile,
   type VideoEncoderConfiguration,
   type VideoEncoderConfigurationOptions,
+  addConfiguration,
   createProfile,
   deleteProfile,
+  getAudioEncoderConfiguration,
+  getAudioEncoderConfigurationOptions,
+  getCompatibleConfigurations,
   getProfiles,
   getVideoEncoderConfiguration,
   getVideoEncoderConfigurationOptions,
+  removeConfiguration,
+  setAudioEncoderConfiguration,
   setVideoEncoderConfiguration,
 } from '@/services/profileService';
 import {
@@ -35,6 +44,12 @@ vi.mock('@/services/profileService', () => ({
   getVideoEncoderConfiguration: vi.fn(),
   getVideoEncoderConfigurationOptions: vi.fn(),
   setVideoEncoderConfiguration: vi.fn(),
+  getAudioEncoderConfiguration: vi.fn(),
+  getAudioEncoderConfigurationOptions: vi.fn(),
+  setAudioEncoderConfiguration: vi.fn(),
+  getCompatibleConfigurations: vi.fn(),
+  addConfiguration: vi.fn(),
+  removeConfiguration: vi.fn(),
 }));
 
 describe('ProfilesPage', () => {
@@ -303,6 +318,22 @@ describe('ProfilesPage', () => {
     expect(getVideoEncoderConfigurationOptions).toHaveBeenCalled();
   });
 
+  it('should associate every video encoder control with its label', async () => {
+    const user = userEvent.setup();
+    await expandProfileAndOpenVideoEncoderDialog(user);
+
+    for (const label of [
+      'Resolution',
+      'Quality',
+      'Frame Rate Limit',
+      'Bitrate Limit',
+      'H.264 Profile',
+      'GOP Length',
+    ]) {
+      expect(screen.getByLabelText(label)).toBeInTheDocument();
+    }
+  });
+
   it('should handle VideoEncoderEditDialog loading state', async () => {
     vi.mocked(getVideoEncoderConfiguration).mockImplementation(
       () => new Promise(() => {}), // Never resolves
@@ -441,5 +472,174 @@ describe('ProfilesPage', () => {
       },
       { timeout: 10000 },
     );
+  });
+});
+
+describe('ProfilesPage config tiles (attach/detach)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const expandProfileCard = async (user: ReturnType<typeof userEvent.setup>, token: string) => {
+    renderWithProviders(<ProfilesPage />);
+    await waitForPageLoad('profiles-title');
+    await user.click(await screen.findByTestId(`profile-expand-${token}`));
+  };
+
+  const tiles: Array<{ family: string; prefix: string }> = [
+    { family: 'VideoSource', prefix: 'video-source-config' },
+    { family: 'VideoEncoder', prefix: 'video-encoder-config' },
+    { family: 'AudioSource', prefix: 'audio-source-config' },
+    { family: 'AudioEncoder', prefix: 'audio-encoder-config' },
+  ];
+
+  it.each(tiles)('attaches a configuration from its tile', async ({ family, prefix }) => {
+    vi.mocked(getProfiles).mockResolvedValue([
+      { token: 'ProfileBare', name: 'Bare', fixed: false } as MediaProfile,
+    ]);
+    vi.mocked(getCompatibleConfigurations).mockResolvedValue([`${family}Config_0`]);
+    vi.mocked(addConfiguration).mockResolvedValue(undefined);
+
+    const user = userEvent.setup();
+    await expandProfileCard(user, 'ProfileBare');
+
+    await user.click(await screen.findByTestId(`${prefix}-ProfileBare-add-button`));
+    await user.click(await screen.findByTestId(`config-picker-option-${family}Config_0`));
+    await user.click(await screen.findByTestId('config-picker-attach'));
+
+    await waitFor(() =>
+      expect(addConfiguration).toHaveBeenCalledWith('ProfileBare', family, `${family}Config_0`),
+    );
+  });
+
+  it('detaches a configured audio source from its tile', async () => {
+    vi.mocked(getProfiles).mockResolvedValue([
+      {
+        token: 'ProfileAudio',
+        name: 'Audio',
+        fixed: false,
+        audioSourceConfiguration: { token: 'AudioSourceConfig_0', name: 'Mic' },
+      } as MediaProfile,
+    ]);
+    vi.mocked(removeConfiguration).mockResolvedValue(undefined);
+
+    const user = userEvent.setup();
+    await expandProfileCard(user, 'ProfileAudio');
+
+    await user.click(await screen.findByTestId('audio-source-config-ProfileAudio-remove-button'));
+
+    await waitFor(() =>
+      expect(removeConfiguration).toHaveBeenCalledWith('ProfileAudio', 'AudioSource'),
+    );
+  });
+
+  it('shows the empty state in the PTZ picker when the device has no PTZ config', async () => {
+    vi.mocked(getProfiles).mockResolvedValue([
+      { token: 'ProfileNoPtz', name: 'NoPtz', fixed: false } as MediaProfile,
+    ]);
+    vi.mocked(getCompatibleConfigurations).mockResolvedValue([]);
+
+    const user = userEvent.setup();
+    await expandProfileCard(user, 'ProfileNoPtz');
+    await user.click(await screen.findByTestId('ptz-config-ProfileNoPtz-add-button'));
+
+    expect(await screen.findByTestId('config-picker-empty')).toBeInTheDocument();
+  });
+
+  it('flags an attached metadata config as having no metadata stream', async () => {
+    vi.mocked(getProfiles).mockResolvedValue([
+      {
+        token: 'ProfileMeta',
+        name: 'Meta',
+        fixed: false,
+        metadataConfiguration: { token: 'MetadataConfig_0', name: 'Analytics' },
+      } as MediaProfile,
+    ]);
+
+    const user = userEvent.setup();
+    await expandProfileCard(user, 'ProfileMeta');
+
+    expect(screen.getByTestId('metadata-config-ProfileMeta')).toHaveTextContent(
+      'config only — no metadata stream',
+    );
+  });
+
+  it('gates video encoder removal behind a confirmation', async () => {
+    vi.mocked(getProfiles).mockResolvedValue([
+      {
+        token: 'ProfileEnc',
+        name: 'Enc',
+        fixed: false,
+        videoEncoderConfiguration: {
+          token: 'VideoEncoderConfig_0',
+          name: 'H264',
+          encoding: 'H264',
+        },
+      } as MediaProfile,
+    ]);
+    vi.mocked(removeConfiguration).mockResolvedValue(undefined);
+
+    const user = userEvent.setup();
+    await expandProfileCard(user, 'ProfileEnc');
+
+    // Clicking Remove opens the confirmation; the service is not called yet.
+    await user.click(await screen.findByTestId('video-encoder-config-ProfileEnc-remove-button'));
+    expect(await screen.findByTestId('remove-config-dialog')).toHaveTextContent('no stream');
+    expect(removeConfiguration).not.toHaveBeenCalled();
+
+    // Confirming fires the remove.
+    await user.click(screen.getByTestId('remove-config-dialog-confirm'));
+    await waitFor(() =>
+      expect(removeConfiguration).toHaveBeenCalledWith('ProfileEnc', 'VideoEncoder'),
+    );
+  });
+
+  const openAudioEncoderDialog = async (
+    user: ReturnType<typeof userEvent.setup>,
+    token = 'ProfileAudioEnc',
+  ) => {
+    vi.mocked(getProfiles).mockResolvedValue([
+      {
+        token,
+        name: 'AudioEnc',
+        fixed: false,
+        audioEncoderConfiguration: { token: 'AudioEncoderConfig_0', name: 'G711' },
+      } as MediaProfile,
+    ]);
+    vi.mocked(getAudioEncoderConfiguration).mockResolvedValue(
+      MOCK_DATA.audioEncoder.configuration as unknown as AudioEncoderConfiguration,
+    );
+    vi.mocked(getAudioEncoderConfigurationOptions).mockResolvedValue(
+      MOCK_DATA.audioEncoder.options as unknown as AudioEncoderConfigurationOptions,
+    );
+
+    await expandProfileCard(user, token);
+    await user.click(await screen.findByTestId(`audio-encoder-config-${token}-edit-button`));
+  };
+
+  it('edits the audio encoder from its tile', async () => {
+    vi.mocked(setAudioEncoderConfiguration).mockResolvedValue(undefined);
+
+    const user = userEvent.setup();
+    await openAudioEncoderDialog(user);
+
+    // A different encoding lands on the bitrate/sample rate it advertises.
+    await user.selectOptions(await screen.findByTestId('audio-encoder-encoding-select'), 'G726');
+    await user.click(screen.getByTestId('audio-encoder-edit-dialog-save'));
+
+    await waitFor(() =>
+      expect(setAudioEncoderConfiguration).toHaveBeenCalledWith(
+        expect.objectContaining({ encoding: 'G726', bitrate: 16, sampleRate: 16 }),
+      ),
+    );
+  });
+
+  it('associates every audio encoder control with its label', async () => {
+    const user = userEvent.setup();
+    await openAudioEncoderDialog(user);
+
+    for (const label of ['Encoding', 'Bitrate', 'Sample Rate']) {
+      expect(await screen.findByLabelText(label)).toBeInTheDocument();
+    }
   });
 });

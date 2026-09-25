@@ -81,6 +81,13 @@ pub enum OnvifError {
     #[error("Configuration conflict: {0}")]
     ConfigurationConflict(String),
 
+    /// The device's configuration for the requested operation is incomplete.
+    ///
+    /// Maps to `env:Receiver/ter:Action/ter:IncompleteConfiguration` (ONVIF
+    /// Media Service Specification 24.12, 5.15.1 `GetStreamUri`).
+    #[error("Incomplete configuration: {0}")]
+    IncompleteConfiguration(String),
+
     /// Internal server error (not a standard ONVIF code).
     #[error("Internal error: {0}")]
     Internal(String),
@@ -105,6 +112,8 @@ impl OnvifError {
             OnvifError::NotAuthorized(_) => StatusCode::UNAUTHORIZED,
             OnvifError::MaxUsers => StatusCode::FORBIDDEN,
             OnvifError::ConfigurationConflict(_) => StatusCode::CONFLICT,
+            // Receiver-side fault: the device cannot serve the request, not the client.
+            OnvifError::IncompleteConfiguration(_) => StatusCode::INTERNAL_SERVER_ERROR,
             OnvifError::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
             OnvifError::NotFound(_) => StatusCode::NOT_FOUND,
         }

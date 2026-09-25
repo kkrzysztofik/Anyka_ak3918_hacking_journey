@@ -14,13 +14,14 @@ use parking_lot::RwLock;
 
 use crate::config::profiles::{
     ProfilesFile, StoredAudioEncoderConfig, StoredAudioSource, StoredAudioSourceConfig,
-    StoredProfile, StoredVideoEncoderConfig, StoredVideoSource, StoredVideoSourceConfig,
+    StoredMetadataConfig, StoredProfile, StoredVideoEncoderConfig, StoredVideoSource,
+    StoredVideoSourceConfig,
 };
 use crate::config::{ConfigRuntime, PersistenceHandle, ProfileStorage};
 use crate::onvif::error::{OnvifError, OnvifResult};
 use crate::onvif::types::common::{
     AudioEncoderConfiguration, AudioSource, AudioSourceConfiguration, IntRange, IntRectangle,
-    MulticastConfiguration, Name, PTZConfiguration, Profile, ReferenceToken,
+    MetadataConfiguration, Name, PTZConfiguration, PTZFilter, Profile, ReferenceToken,
     VideoEncoderConfiguration, VideoRateControl, VideoResolution, VideoSource,
     VideoSourceConfiguration,
 };
@@ -36,8 +37,8 @@ use super::faults::{
 };
 use super::types::{
     AUDIO_ENCODER_CONFIG_PREFIX, AUDIO_SOURCE_CONFIG_PREFIX, DEFAULT_AUDIO_SOURCE_TOKEN,
-    DEFAULT_VIDEO_SOURCE_TOKEN, MAX_PROFILES, PROFILE_TOKEN_PREFIX, VIDEO_ENCODER_CONFIG_PREFIX,
-    VIDEO_SOURCE_CONFIG_PREFIX,
+    DEFAULT_VIDEO_SOURCE_TOKEN, MAX_PROFILES, METADATA_CONFIG_PREFIX, PROFILE_TOKEN_PREFIX,
+    PTZ_CONFIG_PREFIX, VIDEO_ENCODER_CONFIG_PREFIX, VIDEO_SOURCE_CONFIG_PREFIX,
 };
 
 /// Profile Manager for managing media profiles.
@@ -58,6 +59,8 @@ pub struct ProfileManager {
     audio_source_configs: RwLock<HashMap<ReferenceToken, AudioSourceConfiguration>>,
     /// Audio encoder configurations.
     audio_encoder_configs: RwLock<HashMap<ReferenceToken, AudioEncoderConfiguration>>,
+    /// Metadata configurations.
+    metadata_configs: RwLock<HashMap<ReferenceToken, MetadataConfiguration>>,
     /// Profile counter for generating unique tokens.
     profile_counter: AtomicU32,
     /// Maximum sensor resolution for profile validation.
@@ -178,6 +181,7 @@ impl ProfileManager {
             video_encoder_configs: RwLock::new(HashMap::new()),
             audio_source_configs: RwLock::new(HashMap::new()),
             audio_encoder_configs: RwLock::new(HashMap::new()),
+            metadata_configs: RwLock::new(HashMap::new()),
             profile_counter: AtomicU32::new(0),
             max_sensor_resolution,
             config,
@@ -208,6 +212,10 @@ impl ProfileManager {
         self.audio_source_configs.write().insert(
             format!("{}0", AUDIO_SOURCE_CONFIG_PREFIX),
             default_sources.audio_source_config,
+        );
+        self.metadata_configs.write().insert(
+            format!("{}0", METADATA_CONFIG_PREFIX),
+            defaults::create_default_metadata_configuration(),
         );
 
         // Initialize profiles from configuration (stream_profile_1..4 always exist with defaults).
@@ -993,6 +1001,147 @@ impl ProfileManager {
         Ok(())
     }
 
+    // ========================================================================
+    // Metadata Configuration Operations
+    // ========================================================================
+
+    /// Get all metadata configurations.
+    pub fn get_metadata_configurations(&self) -> Vec<MetadataConfiguration> {
+        self.metadata_configs.read().values().cloned().collect()
+    }
+
+    /// Get a metadata configuration by token.
+    pub fn get_metadata_configuration(
+        &self,
+        token: &ReferenceToken,
+    ) -> OnvifResult<MetadataConfiguration> {
+        self.metadata_configs
+            .read()
+            .get(token)
+            .cloned()
+            .ok_or_else(|| no_config_error(token))
+    }
+
+    /// Replace a metadata configuration.
+    pub fn set_metadata_configuration(&self, config: MetadataConfiguration) -> OnvifResult<()> {
+        {
+            let mut configs = self.metadata_configs.write();
+            if !configs.contains_key(&config.token) {
+                return Err(no_config_error(&config.token));
+            }
+            configs.insert(config.token.clone(), config);
+        }
+        self.persist_all();
+        Ok(())
+    }
+
+    /// Attach a metadata configuration to a profile.
+    pub fn add_metadata_configuration(
+        &self,
+        profile_token: &ReferenceToken,
+        config_token: &ReferenceToken,
+    ) -> OnvifResult<()> {
+        let config = self.get_metadata_configuration(config_token)?;
+        {
+            let mut profiles = self.profiles.write();
+            let profile = profiles
+                .get_mut(profile_token)
+                .ok_or_else(|| no_profile_error(profile_token))?;
+            profile.metadata_configuration = Some(config);
+        }
+        self.persist_all();
+        Ok(())
+    }
+
+    /// Remove the metadata configuration from a profile.
+    pub fn remove_metadata_configuration(&self, profile_token: &ReferenceToken) -> OnvifResult<()> {
+        {
+            let mut profiles = self.profiles.write();
+            let profile = profiles
+                .get_mut(profile_token)
+                .ok_or_else(|| no_profile_error(profile_token))?;
+            profile.metadata_configuration = None;
+        }
+        self.persist_all();
+        Ok(())
+    }
+
+    /// Get compatible metadata configurations for a profile.
+    pub fn get_compatible_metadata_configurations(
+        &self,
+        _profile_token: &ReferenceToken,
+    ) -> Vec<MetadataConfiguration> {
+        // All metadata configurations are compatible.
+        self.get_metadata_configurations()
+    }
+
+    // ========================================================================
+    // PTZ Configuration Operations
+    // ========================================================================
+
+    /// Attach the device's default PTZ configuration to a profile.
+    ///
+    /// The AK3918 has a single default PTZ configuration; `config_token` must
+    /// match it or the request faults.
+    pub fn add_ptz_configuration(
+        &self,
+        profile_token: &ReferenceToken,
+        config_token: &ReferenceToken,
+    ) -> OnvifResult<()> {
+        let expected = format!("{}0", PTZ_CONFIG_PREFIX);
+        if *config_token != expected {
+            return Err(no_config_error(config_token));
+        }
+        // When PTZ is disabled there is no attachable PTZ configuration, so
+        // reject the attach rather than re-enabling a disabled feature.
+        if !self.ptz_enabled() {
+            return Err(no_config_error(config_token));
+        }
+        let config = Self::create_default_ptz_configuration();
+        {
+            let mut profiles = self.profiles.write();
+            let profile = profiles
+                .get_mut(profile_token)
+                .ok_or_else(|| no_profile_error(profile_token))?;
+            profile.ptz_configuration = Some(config);
+        }
+        self.persist_all();
+        Ok(())
+    }
+
+    /// Remove the PTZ configuration from a profile.
+    ///
+    /// Sets `ptz_configuration` to `None`; `profile_to_stored` records
+    /// `ptz_detached` when ptz is enabled, so the removal survives a reload.
+    pub fn remove_ptz_configuration(&self, profile_token: &ReferenceToken) -> OnvifResult<()> {
+        {
+            let mut profiles = self.profiles.write();
+            let profile = profiles
+                .get_mut(profile_token)
+                .ok_or_else(|| no_profile_error(profile_token))?;
+            profile.ptz_configuration = None;
+        }
+        self.persist_all();
+        Ok(())
+    }
+
+    /// Get PTZ configurations compatible with a profile.
+    ///
+    /// Returns the single default PTZ configuration when `ptz.enabled` is
+    /// true, and an empty list otherwise. The empty case is what makes the
+    /// WebUI picker show "No compatible configurations" instead of an
+    /// attachable-but-broken entry when PTZ is disabled.
+    pub fn get_compatible_ptz_configurations(
+        &self,
+        _profile_token: &ReferenceToken,
+    ) -> Vec<PTZConfiguration> {
+        if self.ptz_enabled() {
+            vec![Self::create_default_ptz_configuration()]
+        } else {
+            Vec::new()
+        }
+    }
+
     /// Persist the current profile state to storage if available.
     ///
     /// Snapshots the in-memory state into `profile_storage` (cheap, under lock)
@@ -1040,9 +1189,14 @@ impl ProfileManager {
         let video_encoder_configs = self.video_encoder_configs.read();
         let audio_source_configs = self.audio_source_configs.read();
         let audio_encoder_configs = self.audio_encoder_configs.read();
+        let metadata_configs = self.metadata_configs.read();
+        let ptz_enabled = self.ptz_enabled();
 
         ProfilesFile {
-            profiles: profiles.values().map(Self::profile_to_stored).collect(),
+            profiles: profiles
+                .values()
+                .map(|p| Self::profile_to_stored(p, ptz_enabled))
+                .collect(),
             video_sources: video_sources
                 .values()
                 .map(Self::video_source_to_stored)
@@ -1066,6 +1220,10 @@ impl ProfileManager {
             audio_encoder_configs: audio_encoder_configs
                 .values()
                 .map(Self::audio_encoder_config_to_stored)
+                .collect(),
+            metadata_configs: metadata_configs
+                .values()
+                .map(Self::metadata_to_stored)
                 .collect(),
         }
     }
@@ -1121,6 +1279,20 @@ impl ProfileManager {
                 }
             }
         }
+        {
+            let mut mdc = self.metadata_configs.write();
+            for stored in &data.metadata_configs {
+                mdc.insert(
+                    stored.token.clone(),
+                    Self::stored_to_metadata_config(stored),
+                );
+            }
+            // A persisted file may predate metadata configs; ensure the default
+            // exists so Get/SetMetadataConfiguration still work after a reload.
+            let default_token = format!("{}0", METADATA_CONFIG_PREFIX);
+            mdc.entry(default_token)
+                .or_insert_with(defaults::create_default_metadata_configuration);
+        }
 
         // Load profiles last (they reference configs)
         {
@@ -1138,7 +1310,7 @@ impl ProfileManager {
 
     // --- Individual converters: ONVIF → Stored ---
 
-    fn profile_to_stored(profile: &Profile) -> StoredProfile {
+    fn profile_to_stored(profile: &Profile, ptz_enabled: bool) -> StoredProfile {
         StoredProfile {
             token: profile.token.clone(),
             name: profile.name.clone(),
@@ -1160,6 +1332,11 @@ impl ProfileManager {
                 .as_ref()
                 .map(|c| c.token.clone()),
             ptz_config: profile.ptz_configuration.as_ref().map(|c| c.token.clone()),
+            ptz_detached: ptz_enabled && profile.ptz_configuration.is_none(),
+            metadata_config: profile
+                .metadata_configuration
+                .as_ref()
+                .map(|c| c.token.clone()),
         }
     }
 
@@ -1342,16 +1519,7 @@ impl ProfileManager {
                 gov_length: s.gov_length.unwrap_or(30) as i32,
                 h264_profile: profile,
             }),
-            multicast: Some(MulticastConfiguration {
-                address: crate::onvif::types::common::IpAddress {
-                    address_type: crate::onvif::types::common::IpType::IPv4,
-                    ipv4_address: Some("0.0.0.0".to_string()),
-                    ipv6_address: None,
-                },
-                port: 0,
-                ttl: 0,
-                auto_start: false,
-            }),
+            multicast: Some(defaults::default_multicast_configuration()),
             session_timeout: s
                 .session_timeout
                 .clone()
@@ -1385,21 +1553,51 @@ impl ProfileManager {
             encoding,
             bitrate: s.bitrate.unwrap_or(64) as i32,
             sample_rate: s.sample_rate.unwrap_or(8000) as i32,
-            multicast: Some(MulticastConfiguration {
-                address: crate::onvif::types::common::IpAddress {
-                    address_type: crate::onvif::types::common::IpType::IPv4,
-                    ipv4_address: Some("0.0.0.0".to_string()),
-                    ipv6_address: None,
-                },
-                port: 0,
-                ttl: 0,
-                auto_start: false,
-            }),
+            multicast: Some(defaults::default_multicast_configuration()),
             session_timeout: s
                 .session_timeout
                 .clone()
                 .unwrap_or_else(|| "PT60S".to_string()),
         })
+    }
+
+    fn stored_to_metadata_config(s: &StoredMetadataConfig) -> MetadataConfiguration {
+        MetadataConfiguration {
+            token: s.token.clone(),
+            name: s.name.clone(),
+            use_count: s.use_count as i32,
+            ptz_status: Some(PTZFilter {
+                status: s.ptz_status,
+                position: s.ptz_position,
+            }),
+            analytics: Some(s.analytics),
+            multicast: Some(defaults::default_multicast_configuration()),
+            session_timeout: s
+                .session_timeout
+                .clone()
+                .unwrap_or_else(|| "PT60S".to_string()),
+            extension: None,
+        }
+    }
+
+    fn metadata_to_stored(config: &MetadataConfiguration) -> StoredMetadataConfig {
+        StoredMetadataConfig {
+            token: config.token.clone(),
+            name: config.name.clone(),
+            use_count: config.use_count as u32,
+            ptz_status: config
+                .ptz_status
+                .as_ref()
+                .map(|f| f.status)
+                .unwrap_or(false),
+            ptz_position: config
+                .ptz_status
+                .as_ref()
+                .map(|f| f.position)
+                .unwrap_or(false),
+            analytics: config.analytics.unwrap_or(false),
+            session_timeout: Some(config.session_timeout.clone()),
+        }
     }
 
     fn stored_to_profile(&self, stored: &StoredProfile, file: &ProfilesFile) -> Option<Profile> {
@@ -1436,16 +1634,23 @@ impl ProfileManager {
             .as_ref()
             .map(|c| c.read().ptz.enabled)
             .unwrap_or(true);
-        // Match the config path: when PTZ is enabled, every profile gets the default
-        // PTZ configuration, even if a persisted `profiles.toml` (seeded while the
-        // feature was off, or written by an older build) has no `ptz_config` token.
-        // Requiring the stored token would permanently strand profiles without PTZ
-        // after re-enabling, and the storage path short-circuits the config path.
-        let ptz_configuration = if ptz_enabled {
-            Some(Self::create_default_ptz_configuration())
-        } else {
+        // A recorded `ptz_detached` means the profile explicitly had its PTZ
+        // configuration removed while ptz was enabled, so it must stay detached.
+        // Any other absent token (seeded while ptz.enabled was false, or a file
+        // written before detachment could be recorded) means "unknown", so we
+        // re-attach the default to avoid stranding profiles without PTZ.
+        let ptz_configuration = if !ptz_enabled || stored.ptz_detached {
             None
+        } else {
+            Some(Self::create_default_ptz_configuration())
         };
+
+        let metadata_configuration = stored.metadata_config.as_ref().and_then(|token| {
+            file.metadata_configs
+                .iter()
+                .find(|c| c.token == *token)
+                .map(Self::stored_to_metadata_config)
+        });
 
         Some(Profile {
             token: stored.token.clone(),
@@ -1456,7 +1661,7 @@ impl ProfileManager {
             video_encoder_configuration,
             audio_encoder_configuration,
             ptz_configuration,
-            metadata_configuration: None,
+            metadata_configuration,
             extension: None,
         })
     }
@@ -1470,6 +1675,7 @@ impl ProfileManager {
         self.video_encoder_configs.write().clear();
         self.audio_source_configs.write().clear();
         self.audio_encoder_configs.write().clear();
+        self.metadata_configs.write().clear();
     }
 
     // ========================================================================
@@ -1512,6 +1718,16 @@ impl ProfileManager {
         self.get_audio_encoder_configurations()
     }
 
+    /// Whether PTZ is enabled in the current configuration.
+    ///
+    /// An absent configuration means "no opinion", so PTZ defaults to enabled.
+    fn ptz_enabled(&self) -> bool {
+        self.config
+            .as_ref()
+            .map(|c| c.read().ptz.enabled)
+            .unwrap_or(true)
+    }
+
     /// Create default PTZ configuration for profiles.
     ///
     /// This provides a standard PTZ configuration that ODM and other clients expect
@@ -1542,6 +1758,42 @@ mod tests {
         let manager = ProfileManager::new();
         let profiles = manager.get_profiles();
         assert_eq!(profiles.len(), 2);
+    }
+
+    #[test]
+    fn metadata_configuration_is_available_and_attachable() {
+        let manager = ProfileManager::new();
+
+        let configs = manager.get_metadata_configurations();
+        assert_eq!(
+            configs.len(),
+            1,
+            "expected exactly one default metadata config"
+        );
+
+        let token = configs[0].token.clone();
+        manager
+            .add_metadata_configuration(&"Profile_MainStream".to_string(), &token)
+            .expect("attach should succeed");
+
+        let profile = manager
+            .get_profile(&"Profile_MainStream".to_string())
+            .unwrap();
+        assert_eq!(
+            profile
+                .metadata_configuration
+                .as_ref()
+                .map(|c| c.token.clone()),
+            Some(token)
+        );
+
+        manager
+            .remove_metadata_configuration(&"Profile_MainStream".to_string())
+            .expect("detach should succeed");
+        let profile = manager
+            .get_profile(&"Profile_MainStream".to_string())
+            .unwrap();
+        assert!(profile.metadata_configuration.is_none());
     }
 
     #[test]
@@ -1836,6 +2088,138 @@ mod tests {
                  even if the stored file lacks a token"
             );
         }
+    }
+
+    /// A profile with an attached PTZ and metadata configuration must keep both
+    /// across a restart: save `profiles.toml`, then load it into a fresh storage
+    /// and manager.
+    #[test]
+    fn test_ptz_and_metadata_persist_across_restart() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("profiles.toml");
+        let config = Arc::new(ConfigRuntime::new(Default::default()));
+        let profile = ReferenceToken::from("Profile_Test");
+        let ptz = ReferenceToken::from("PTZConfig_0");
+        let meta = ReferenceToken::from("MetadataConfig_0");
+
+        // First boot: create a profile, attach the default PTZ + metadata configs
+        // (with a detach/re-attach in between), then flush to disk.
+        {
+            let storage = Arc::new(ProfileStorage::new(path.clone()));
+            let first = ProfileManager::with_storage(
+                Arc::clone(&config),
+                Arc::clone(&storage),
+                Resolution::new(1920, 1080),
+            );
+            first
+                .create_profile("TestCam".into(), Some(profile.clone()))
+                .unwrap();
+            first.add_ptz_configuration(&profile, &ptz).unwrap();
+            first.add_metadata_configuration(&profile, &meta).unwrap();
+            first.remove_ptz_configuration(&profile).unwrap();
+            first.add_ptz_configuration(&profile, &ptz).unwrap();
+            // Modify the metadata config so the reload proves it restores the
+            // persisted value, not a freshly-seeded default.
+            let mut meta_config = first.get_metadata_configuration(&meta).unwrap();
+            meta_config.name = "RenamedMetadata".into();
+            first.set_metadata_configuration(meta_config).unwrap();
+            storage.save().unwrap();
+        }
+
+        // Restart: a brand-new storage instance that reloads the same file.
+        let storage = Arc::new(ProfileStorage::new(path));
+        storage.load().unwrap();
+        let restarted =
+            ProfileManager::with_storage(Arc::clone(&config), storage, Resolution::new(1920, 1080));
+        let restored = restarted.get_profile(&profile).unwrap();
+        assert_eq!(
+            restored
+                .ptz_configuration
+                .as_ref()
+                .map(|c| c.token.as_str()),
+            Some("PTZConfig_0"),
+            "PTZ configuration must survive a restart"
+        );
+        assert_eq!(
+            restored
+                .metadata_configuration
+                .as_ref()
+                .map(|c| c.token.as_str()),
+            Some("MetadataConfig_0"),
+            "metadata configuration must survive a restart"
+        );
+        // The metadata config STORE (backing GetMetadataConfiguration) must be
+        // repopulated from disk with the persisted, modified value.
+        let restored_meta = restarted.get_metadata_configuration(&meta).unwrap();
+        assert_eq!(
+            restored_meta.name.as_str(),
+            "RenamedMetadata",
+            "a modified metadata configuration must survive a restart"
+        );
+    }
+
+    /// Build a ProfileManager that loads a pre-seeded `ProfilesFile` from storage.
+    /// Config defaults to `ptz.enabled = true`.
+    fn manager_with_stored(file: ProfilesFile) -> ProfileManager {
+        let dir = tempfile::tempdir().unwrap();
+        let storage = Arc::new(ProfileStorage::new(dir.path().join("profiles.toml")));
+        storage.replace(file);
+        storage.save().unwrap();
+        let config = Arc::new(ConfigRuntime::new(Default::default()));
+        ProfileManager::with_storage(config, storage, Resolution::new(1920, 1080))
+    }
+
+    /// A stored profile with no PTZ token and no recorded detachment.
+    fn stored_profile_without_ptz() -> StoredProfile {
+        StoredProfile {
+            token: "Profile_MainStream".to_string(),
+            name: "MainStream".to_string(),
+            fixed: true,
+            video_source_config: None,
+            video_encoder_config: None,
+            audio_source_config: None,
+            audio_encoder_config: None,
+            ptz_config: None,
+            ptz_detached: false,
+            metadata_config: None,
+        }
+    }
+
+    #[test]
+    fn explicit_ptz_detachment_survives_a_reload() {
+        // A profile whose PTZ was removed while ptz was enabled records
+        // `ptz_detached`, so a reload must not silently re-attach it.
+        let mut profile = stored_profile_without_ptz();
+        profile.ptz_detached = true;
+        let manager = manager_with_stored(ProfilesFile {
+            profiles: vec![profile],
+            ..Default::default()
+        });
+        let profile = manager
+            .get_profile(&"Profile_MainStream".to_string())
+            .unwrap();
+        assert!(
+            profile.ptz_configuration.is_none(),
+            "an explicit RemovePTZConfiguration must survive a reload"
+        );
+    }
+
+    #[test]
+    fn non_detached_profile_without_token_reattaches_when_enabled() {
+        // A profile with no token but no recorded detachment (seeded while
+        // ptz.enabled was false, or written before detachment could be recorded)
+        // must regain the default PTZ configuration when ptz is enabled.
+        let manager = manager_with_stored(ProfilesFile {
+            profiles: vec![stored_profile_without_ptz()],
+            ..Default::default()
+        });
+        let profile = manager
+            .get_profile(&"Profile_MainStream".to_string())
+            .unwrap();
+        assert!(
+            profile.ptz_configuration.is_some(),
+            "a non-detached profile must regain PTZ when ptz.enabled is true"
+        );
     }
 
     #[test]

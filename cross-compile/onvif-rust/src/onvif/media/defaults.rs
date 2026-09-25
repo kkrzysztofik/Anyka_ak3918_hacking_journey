@@ -1,17 +1,19 @@
 use crate::config::ConfigRuntime;
 use crate::onvif::types::common::{
     AudioEncoderConfiguration, AudioEncoding, AudioSource, AudioSourceConfiguration, FloatRange,
-    H264Configuration, H264Profile, IntRectangle, IpAddress, IpType, MulticastConfiguration,
-    PTZConfiguration, PTZSpeed, PanTiltLimits, Profile, Space1DDescription, Space2DDescription,
-    Vector1D, Vector2D, VideoEncoderConfiguration, VideoEncoding, VideoRateControl,
-    VideoResolution, VideoSource, VideoSourceConfiguration, ZoomLimits,
+    H264Configuration, H264Profile, IntRectangle, IpAddress, IpType, MetadataConfiguration,
+    MulticastConfiguration, PTZConfiguration, PTZFilter, PTZSpeed, PanTiltLimits, Profile,
+    Space1DDescription, Space2DDescription, Vector1D, Vector2D, VideoEncoderConfiguration,
+    VideoEncoding, VideoRateControl, VideoResolution, VideoSource, VideoSourceConfiguration,
+    ZoomLimits,
 };
 use crate::platform::Resolution;
 
 use super::types::{
     AUDIO_ENCODER_CONFIG_PREFIX, AUDIO_SOURCE_CONFIG_PREFIX, DEFAULT_AUDIO_SOURCE_TOKEN,
-    DEFAULT_PTZ_NODE_TOKEN, DEFAULT_VIDEO_SOURCE_TOKEN, PROFILE_TOKEN_PREFIX, PTZ_CONFIG_PREFIX,
-    VIDEO_ENCODER_CONFIG_PREFIX, VIDEO_SOURCE_CONFIG_PREFIX,
+    DEFAULT_PTZ_NODE_TOKEN, DEFAULT_VIDEO_SOURCE_TOKEN, METADATA_CONFIG_PREFIX,
+    PROFILE_TOKEN_PREFIX, PTZ_CONFIG_PREFIX, VIDEO_ENCODER_CONFIG_PREFIX,
+    VIDEO_SOURCE_CONFIG_PREFIX,
 };
 
 #[derive(Debug, Clone)]
@@ -323,7 +325,7 @@ pub(crate) fn create_default_ptz_configuration() -> PTZConfiguration {
     }
 }
 
-fn default_multicast_configuration() -> MulticastConfiguration {
+pub(crate) fn default_multicast_configuration() -> MulticastConfiguration {
     MulticastConfiguration {
         address: IpAddress {
             address_type: IpType::IPv4,
@@ -333,6 +335,29 @@ fn default_multicast_configuration() -> MulticastConfiguration {
         port: 0,
         ttl: 0,
         auto_start: false,
+    }
+}
+
+/// The device's single metadata configuration.
+///
+/// ponytail: config-only. The camera advertises and persists this, and NVRs
+/// that query it are satisfied, but no metadata RTP track is ever emitted --
+/// a client that attaches this and waits for PTZ-status metadata gets
+/// silence. Emitting one means a metadata track in the RTSP session; see
+/// docs/plans/2026-09-21-profile-management-design.md.
+pub(crate) fn create_default_metadata_configuration() -> MetadataConfiguration {
+    MetadataConfiguration {
+        token: format!("{}0", METADATA_CONFIG_PREFIX),
+        name: "MetadataConfig".to_string(),
+        use_count: 1,
+        ptz_status: Some(PTZFilter {
+            status: true,
+            position: true,
+        }),
+        analytics: Some(false),
+        multicast: Some(default_multicast_configuration()),
+        session_timeout: "PT60S".to_string(),
+        extension: None,
     }
 }
 

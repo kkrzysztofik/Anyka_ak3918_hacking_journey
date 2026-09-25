@@ -161,6 +161,13 @@ fn build_auth_requirements() -> AuthMap {
     map.insert(("media", "GetOSDs"), AuthLevel::User);
     map.insert(("media", "GetOSD"), AuthLevel::User);
     map.insert(("media", "GetOSDOptions"), AuthLevel::User);
+    map.insert(("media", "GetMetadataConfigurations"), AuthLevel::User);
+    map.insert(("media", "GetMetadataConfiguration"), AuthLevel::User);
+    map.insert(("media", "GetCompatiblePTZConfigurations"), AuthLevel::User);
+    map.insert(
+        ("media", "GetCompatibleMetadataConfigurations"),
+        AuthLevel::User,
+    );
 
     // Operator level - media configuration
     map.insert(("media", "CreateProfile"), AuthLevel::Operator);
@@ -214,6 +221,14 @@ fn build_auth_requirements() -> AuthMap {
     );
     map.insert(
         ("media", "RemoveAudioEncoderConfiguration"),
+        AuthLevel::Operator,
+    );
+    map.insert(("media", "SetMetadataConfiguration"), AuthLevel::Operator);
+    map.insert(("media", "AddPTZConfiguration"), AuthLevel::Operator);
+    map.insert(("media", "RemovePTZConfiguration"), AuthLevel::Operator);
+    map.insert(("media", "AddMetadataConfiguration"), AuthLevel::Operator);
+    map.insert(
+        ("media", "RemoveMetadataConfiguration"),
         AuthLevel::Operator,
     );
 

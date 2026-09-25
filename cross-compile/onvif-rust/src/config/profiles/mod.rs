@@ -55,6 +55,8 @@ pub struct ProfilesFile {
     pub audio_source_configs: Vec<StoredAudioSourceConfig>,
     #[serde(default)]
     pub audio_encoder_configs: Vec<StoredAudioEncoderConfig>,
+    #[serde(default)]
+    pub metadata_configs: Vec<StoredMetadataConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -68,6 +70,16 @@ pub struct StoredProfile {
     pub audio_source_config: Option<String>,
     pub audio_encoder_config: Option<String>,
     pub ptz_config: Option<String>,
+    /// True only when PTZ was enabled at write time AND the profile has no PTZ
+    /// configuration -- i.e. an explicit RemovePTZConfiguration. A `ptz_config`
+    /// absent for any other reason (seeded while ptz.enabled was false, or a
+    /// pre-detachment file) is false, so `stored_to_profile` re-attaches the
+    /// default on re-enable instead of honouring a "detachment" that never
+    /// happened.
+    #[serde(default)]
+    pub ptz_detached: bool,
+    #[serde(default)]
+    pub metadata_config: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -139,6 +151,21 @@ pub struct StoredAudioEncoderConfig {
     pub encoding: String,
     pub bitrate: Option<u32>,
     pub sample_rate: Option<u32>,
+    pub session_timeout: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StoredMetadataConfig {
+    pub token: String,
+    pub name: String,
+    #[serde(default)]
+    pub use_count: u32,
+    #[serde(default)]
+    pub ptz_status: bool,
+    #[serde(default)]
+    pub ptz_position: bool,
+    #[serde(default)]
+    pub analytics: bool,
     pub session_timeout: Option<String>,
 }
 
@@ -253,6 +280,8 @@ mod tests {
                 audio_source_config: None,
                 audio_encoder_config: None,
                 ptz_config: Some("PTZ_0".to_string()),
+                ptz_detached: false,
+                metadata_config: None,
             }],
             video_sources: vec![StoredVideoSource {
                 token: "VS_0".to_string(),
@@ -289,6 +318,8 @@ mod tests {
                 audio_source_config: None,
                 audio_encoder_config: None,
                 ptz_config: None,
+                ptz_detached: false,
+                metadata_config: None,
             }],
             video_encoder_configs: vec![StoredVideoEncoderConfig {
                 token: "VEC_0".to_string(),
@@ -345,6 +376,8 @@ mod tests {
                 audio_source_config: Some("ASC_0".to_string()),
                 audio_encoder_config: Some("AEC_0".to_string()),
                 ptz_config: Some("PTZ_0".to_string()),
+                ptz_detached: false,
+                metadata_config: None,
             }],
             video_sources: vec![StoredVideoSource {
                 token: "VS_0".to_string(),
@@ -395,6 +428,15 @@ mod tests {
                 sample_rate: Some(8000),
                 session_timeout: Some("PT60S".to_string()),
             }],
+            metadata_configs: vec![StoredMetadataConfig {
+                token: "MetadataConfig_0".to_string(),
+                name: "MetadataConfig".to_string(),
+                use_count: 1,
+                ptz_status: true,
+                ptz_position: true,
+                analytics: false,
+                session_timeout: Some("PT60S".to_string()),
+            }],
         };
 
         let storage = ProfileStorage::new(&path);
@@ -424,6 +466,10 @@ mod tests {
             loaded.audio_encoder_configs.len(),
             original.audio_encoder_configs.len()
         );
+        assert_eq!(
+            loaded.metadata_configs.len(),
+            original.metadata_configs.len()
+        );
 
         // Verify detailed fields
         assert_eq!(loaded.video_sources[0].framerate, 25.0);
@@ -434,6 +480,8 @@ mod tests {
             Some("Main".to_string())
         );
         assert_eq!(loaded.audio_encoder_configs[0].bitrate, Some(64));
+        assert_eq!(loaded.metadata_configs[0].token, "MetadataConfig_0");
+        assert!(loaded.metadata_configs[0].ptz_position);
     }
 
     #[test]

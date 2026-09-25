@@ -3,7 +3,7 @@
  *
  * Manage media profiles and their configurations (Video/Audio Sources, Encoders, PTZ, Analytics, Metadata).
  */
-import React, { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -52,18 +52,18 @@ import {
   FormMessage,
 } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import {
   type MediaProfile,
-  type VideoEncoderConfiguration,
-  type VideoEncoderConfigurationOptions,
   createProfile,
   deleteProfile,
   getProfiles,
-  getVideoEncoderConfiguration,
-  getVideoEncoderConfigurationOptions,
-  setVideoEncoderConfiguration,
+  removeConfiguration,
 } from '@/services/profileService';
+
+import { AudioEncoderDialog } from './AudioEncoderDialog';
+import { ConfigPickerDialog } from './ConfigPickerDialog';
+import { ConfigSection } from './ConfigSection';
+import { VideoEncoderDialog } from './VideoEncoderDialog';
 
 // Schema for creating a profile
 const createProfileSchema = z.object({
@@ -72,13 +72,31 @@ const createProfileSchema = z.object({
 
 type CreateProfileData = z.infer<typeof createProfileSchema>;
 
+type ConfigFamily =
+  'VideoSource' | 'VideoEncoder' | 'AudioSource' | 'AudioEncoder' | 'PTZ' | 'Metadata';
+
+const FAMILY_TITLES: Record<ConfigFamily, string> = {
+  VideoSource: 'Video source',
+  VideoEncoder: 'Video encoder',
+  AudioSource: 'Audio source',
+  AudioEncoder: 'Audio encoder',
+  PTZ: 'PTZ',
+  Metadata: 'Metadata',
+};
+
 export default function ProfilesPage() {
   const queryClient = useQueryClient();
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [profileToDelete, setProfileToDelete] = useState<MediaProfile | null>(null);
-  const [editingEncoder, setEditingEncoder] = useState<{
+  const [editingEncoder, setEditingEncoder] = useState<string | null>(null);
+  const [editingAudioEncoder, setEditingAudioEncoder] = useState<string | null>(null);
+  const [picker, setPicker] = useState<{
     profileToken: string;
-    encoderToken: string;
+    family: ConfigFamily;
+  } | null>(null);
+  const [pendingRemove, setPendingRemove] = useState<{
+    profileToken: string;
+    family: ConfigFamily;
   } | null>(null);
 
   // Track open state for each profile card
@@ -120,6 +138,21 @@ export default function ProfilesPage() {
     },
     onError: (error) => {
       toast.error('Failed to delete profile', {
+        description: error instanceof Error ? error.message : 'An error occurred',
+      });
+    },
+  });
+
+  // Detach a configuration from a profile (a profile-field update, not a delete).
+  const removeMutation = useMutation({
+    mutationFn: (args: { profileToken: string; family: ConfigFamily }) =>
+      removeConfiguration(args.profileToken, args.family),
+    onSuccess: () => {
+      toast.success('Configuration removed');
+      queryClient.invalidateQueries({ queryKey: ['profiles'] });
+    },
+    onError: (error) => {
+      toast.error('Failed to remove configuration', {
         description: error instanceof Error ? error.message : 'An error occurred',
       });
     },
@@ -273,6 +306,15 @@ export default function ProfilesPage() {
                         active={!!profile.videoSourceConfiguration}
                         token={profile.videoSourceConfiguration?.token}
                         details={profile.videoSourceConfiguration?.name}
+                        onAdd={() =>
+                          setPicker({ profileToken: profile.token, family: 'VideoSource' })
+                        }
+                        onRemove={() =>
+                          removeMutation.mutate({
+                            profileToken: profile.token,
+                            family: 'VideoSource',
+                          })
+                        }
                         testId={`video-source-config-${profile.token}`}
                       />
 
@@ -290,11 +332,17 @@ export default function ProfilesPage() {
                         onEdit={
                           profile.videoEncoderConfiguration
                             ? () =>
-                                setEditingEncoder({
-                                  profileToken: profile.token,
-                                  encoderToken: profile.videoEncoderConfiguration?.token ?? '',
-                                })
+                                setEditingEncoder(profile.videoEncoderConfiguration?.token ?? '')
                             : undefined
+                        }
+                        onAdd={() =>
+                          setPicker({ profileToken: profile.token, family: 'VideoEncoder' })
+                        }
+                        onRemove={() =>
+                          setPendingRemove({
+                            profileToken: profile.token,
+                            family: 'VideoEncoder',
+                          })
                         }
                         testId={`video-encoder-config-${profile.token}`}
                       />
@@ -306,6 +354,16 @@ export default function ProfilesPage() {
                         active={!!profile.audioSourceConfiguration}
                         token={profile.audioSourceConfiguration?.token}
                         details={profile.audioSourceConfiguration?.name}
+                        onAdd={() =>
+                          setPicker({ profileToken: profile.token, family: 'AudioSource' })
+                        }
+                        onRemove={() =>
+                          removeMutation.mutate({
+                            profileToken: profile.token,
+                            family: 'AudioSource',
+                          })
+                        }
+                        testId={`audio-source-config-${profile.token}`}
                       />
 
                       {/* Audio Encoder Config */}
@@ -315,6 +373,24 @@ export default function ProfilesPage() {
                         active={!!profile.audioEncoderConfiguration}
                         token={profile.audioEncoderConfiguration?.token}
                         details={profile.audioEncoderConfiguration?.name}
+                        onEdit={
+                          profile.audioEncoderConfiguration
+                            ? () =>
+                                setEditingAudioEncoder(
+                                  profile.audioEncoderConfiguration?.token ?? '',
+                                )
+                            : undefined
+                        }
+                        onAdd={() =>
+                          setPicker({ profileToken: profile.token, family: 'AudioEncoder' })
+                        }
+                        onRemove={() =>
+                          removeMutation.mutate({
+                            profileToken: profile.token,
+                            family: 'AudioEncoder',
+                          })
+                        }
+                        testId={`audio-encoder-config-${profile.token}`}
                       />
 
                       {/* PTZ Config */}
@@ -324,15 +400,35 @@ export default function ProfilesPage() {
                         active={!!profile.ptzConfiguration}
                         token={profile.ptzConfiguration?.token}
                         details={profile.ptzConfiguration?.name}
+                        onAdd={() => setPicker({ profileToken: profile.token, family: 'PTZ' })}
+                        onRemove={() =>
+                          removeMutation.mutate({
+                            profileToken: profile.token,
+                            family: 'PTZ',
+                          })
+                        }
+                        testId={`ptz-config-${profile.token}`}
                       />
 
                       {/* Metadata/Analytics */}
                       <ConfigSection
                         title="Metadata & Analytics"
                         icon={<FileText className="size-4 text-[#64d2ff]" />}
-                        active={!!profile.metadataConfiguration} // Assuming metadata implies analytics for now
+                        active={!!profile.metadataConfiguration}
                         token={profile.metadataConfiguration?.token}
-                        details={profile.metadataConfiguration?.name}
+                        details={
+                          profile.metadataConfiguration
+                            ? `${profile.metadataConfiguration.name} · config only — no metadata stream`
+                            : undefined
+                        }
+                        onAdd={() => setPicker({ profileToken: profile.token, family: 'Metadata' })}
+                        onRemove={() =>
+                          removeMutation.mutate({
+                            profileToken: profile.token,
+                            family: 'Metadata',
+                          })
+                        }
+                        testId={`metadata-config-${profile.token}`}
                       />
                     </div>
                   </div>
@@ -437,342 +533,75 @@ export default function ProfilesPage() {
           </AlertDialogContent>
         </AlertDialog>
 
-        {/* Video Encoder Edit Dialog */}
+        {/* Encoder edit dialogs */}
         {editingEncoder && (
-          <VideoEncoderEditDialog
-            encoderToken={editingEncoder.encoderToken}
+          <VideoEncoderDialog
+            encoderToken={editingEncoder}
             onClose={() => setEditingEncoder(null)}
           />
         )}
-      </div>
-    </div>
-  );
-}
+        {editingAudioEncoder && (
+          <AudioEncoderDialog
+            encoderToken={editingAudioEncoder}
+            onClose={() => setEditingAudioEncoder(null)}
+          />
+        )}
 
-function ConfigSection({
-  title,
-  icon,
-  active,
-  token,
-  details,
-  onEdit,
-  testId,
-}: {
-  readonly title: string;
-  readonly icon: React.ReactNode;
-  readonly active: boolean;
-  readonly token?: string;
-  readonly details?: string;
-  readonly onEdit?: () => void;
-  readonly testId?: string;
-}) {
-  return (
-    <div
-      className={`rounded-[8px] border p-[12px] ${active ? 'border-[#3a3a3c] bg-[#1c1c1e]' : 'border-[#3a3a3c]/50 bg-[#1c1c1e]/50 opacity-50'}`}
-      data-testid={testId}
-    >
-      <div className="mb-[8px] flex items-center gap-[8px]">
-        {icon}
-        <span className="text-[13px] font-medium text-white">{title}</span>
-      </div>
-      {active ? (
-        <div className="space-y-[2px]">
-          {details && <div className="truncate text-[12px] text-[#a1a1a6]">{details}</div>}
-          <div className="truncate font-mono text-[10px] text-[#636366]">{token}</div>
-        </div>
-      ) : (
-        <div className="text-[12px] text-[#636366] italic">Not configured</div>
-      )}
-      <Button
-        variant="link"
-        className={`mt-[8px] h-auto p-0 text-[11px] ${active ? 'text-[#0a84ff]' : 'text-[#a1a1a6]'}`}
-        onClick={onEdit}
-        disabled={!onEdit}
-        data-testid={testId ? `${testId}-edit-button` : undefined}
-      >
-        {active ? 'Edit' : 'Add (Coming Soon)'}
-      </Button>
-    </div>
-  );
-}
+        {/* Configuration picker (attach a device config to this profile) */}
+        {picker && (
+          <ConfigPickerDialog
+            open
+            onOpenChange={(o) => {
+              if (!o) setPicker(null);
+            }}
+            title={FAMILY_TITLES[picker.family]}
+            profileToken={picker.profileToken}
+            configType={picker.family}
+            onAttached={() => queryClient.invalidateQueries({ queryKey: ['profiles'] })}
+          />
+        )}
 
-function VideoEncoderEditDialog({
-  encoderToken,
-  onClose,
-}: {
-  readonly encoderToken: string;
-  readonly onClose: () => void;
-}) {
-  const queryClient = useQueryClient();
-  const [config, setConfig] = useState<VideoEncoderConfiguration | null>(null);
-  const [options, setOptions] = useState<VideoEncoderConfigurationOptions | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-
-  // Stabilize onClose so it doesn't cause re-fetches when the parent re-renders
-  const onCloseRef = useRef(onClose);
-  useEffect(() => {
-    onCloseRef.current = onClose;
-  }, [onClose]);
-
-  // Fetch encoder configuration and options
-  useEffect(() => {
-    const controller = new AbortController();
-    const loadData = async () => {
-      try {
-        const [encoderConfig, encoderOptions] = await Promise.all([
-          getVideoEncoderConfiguration(encoderToken),
-          getVideoEncoderConfigurationOptions(encoderToken),
-        ]);
-        if (controller.signal.aborted) return;
-        if (encoderConfig) {
-          setConfig(encoderConfig);
-        }
-        setOptions(encoderOptions);
-      } catch (error) {
-        if (controller.signal.aborted) return;
-        toast.error('Failed to load encoder configuration', {
-          description: error instanceof Error ? error.message : 'An error occurred',
-        });
-        onCloseRef.current();
-      } finally {
-        if (!controller.signal.aborted) {
-          setIsLoading(false);
-        }
-      }
-    };
-    loadData();
-    return () => controller.abort();
-  }, [encoderToken]);
-
-  const updateMutation = useMutation({
-    mutationFn: (updatedConfig: VideoEncoderConfiguration) =>
-      setVideoEncoderConfiguration(updatedConfig, false),
-    onSuccess: () => {
-      toast.success('Video encoder configuration updated');
-      queryClient.invalidateQueries({ queryKey: ['profiles'] });
-      onClose();
-    },
-    onError: (error) => {
-      toast.error('Failed to update encoder configuration', {
-        description: error instanceof Error ? error.message : 'An error occurred',
-      });
-    },
-  });
-
-  const handleSave = () => {
-    if (config) {
-      updateMutation.mutate(config);
-    }
-  };
-
-  if (isLoading || !config || !options) {
-    return (
-      <Dialog open onOpenChange={onClose}>
-        <DialogContent
-          className="border-[#3a3a3c] bg-[#1c1c1e] text-white sm:max-w-[600px]"
-          data-testid="video-encoder-edit-dialog"
+        {/* Remove confirmation — dropping the video encoder makes the profile unstreamable */}
+        <AlertDialog
+          open={!!pendingRemove}
+          onOpenChange={(o) => {
+            if (!o) setPendingRemove(null);
+          }}
         >
-          <DialogHeader>
-            <DialogTitle className="sr-only">Loading Video Encoder Configuration</DialogTitle>
-            <DialogDescription className="sr-only">
-              Loading encoder settings dialog content
-            </DialogDescription>
-          </DialogHeader>
-          <div
-            className="py-8 text-center text-[#a1a1a6]"
-            data-testid="video-encoder-edit-dialog-loading"
+          <AlertDialogContent
+            className="border-[#3a3a3c] bg-[#1c1c1e] text-white"
+            data-testid="remove-config-dialog"
           >
-            Loading...
-          </div>
-        </DialogContent>
-      </Dialog>
-    );
-  }
-
-  const h264Options = options.h264;
-  const availableResolutions = h264Options?.resolutionsAvailable || [];
-
-  return (
-    <Dialog open onOpenChange={onClose}>
-      <DialogContent
-        className="border-[#3a3a3c] bg-[#1c1c1e] text-white sm:max-w-[600px]"
-        data-testid="video-encoder-edit-dialog"
-      >
-        <DialogHeader>
-          <DialogTitle className="text-white" data-testid="video-encoder-edit-dialog-title">
-            Edit Video Encoder Configuration
-          </DialogTitle>
-          <DialogDescription className="text-[#a1a1a6]">
-            Configure video encoding settings for this profile
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="space-y-4 py-4">
-          {/* Resolution */}
-          <div className="space-y-2">
-            <Label className="text-[#e5e5e5]">Resolution</Label>
-            <select
-              value={`${config.resolution.width}x${config.resolution.height}`}
-              onChange={(e) => {
-                const [width, height] = e.target.value.split('x').map(Number);
-                setConfig({ ...config, resolution: { width, height } });
-              }}
-              className="h-10 w-full appearance-none rounded-md border border-[#3a3a3c] bg-[#2c2c2e] px-3 py-2 text-sm text-white focus:border-[#0a84ff] focus:outline-none"
-              data-testid="video-encoder-resolution-select"
-            >
-              {availableResolutions.map((res) => (
-                <option key={`${res.width}x${res.height}`} value={`${res.width}x${res.height}`}>
-                  {res.width} × {res.height}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* Quality */}
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <Label className="text-[#e5e5e5]">Quality</Label>
-              <span className="text-sm text-[#a1a1a6] tabular-nums">{config.quality}</span>
-            </div>
-            <input
-              type="range"
-              min={options.qualityRange.min}
-              max={options.qualityRange.max}
-              value={config.quality}
-              onChange={(e) => setConfig({ ...config, quality: Number(e.target.value) })}
-              className="w-full"
-              data-testid="video-encoder-quality-slider"
-            />
-          </div>
-
-          {/* Frame Rate */}
-          {config.rateControl && h264Options && (
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <Label className="text-[#e5e5e5]">Frame Rate Limit</Label>
-                <span className="text-sm text-[#a1a1a6] tabular-nums">
-                  {config.rateControl.frameRateLimit} fps
-                </span>
-              </div>
-              <input
-                type="range"
-                min={h264Options.frameRateRange.min}
-                max={h264Options.frameRateRange.max}
-                value={config.rateControl.frameRateLimit}
-                onChange={(e) =>
-                  setConfig({
-                    ...config,
-                    rateControl: {
-                      ...config.rateControl!,
-                      frameRateLimit: Number(e.target.value),
-                    },
-                  })
-                }
-                className="w-full"
-                data-testid="video-encoder-framerate-slider"
-              />
-            </div>
-          )}
-
-          {/* Bitrate */}
-          {config.rateControl && h264Options && (
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <Label className="text-[#e5e5e5]">Bitrate Limit</Label>
-                <span className="text-sm text-[#a1a1a6] tabular-nums">
-                  {config.rateControl.bitrateLimit} kbps
-                </span>
-              </div>
-              <input
-                type="range"
-                min={h264Options.bitrateRange.min}
-                max={h264Options.bitrateRange.max}
-                value={config.rateControl.bitrateLimit}
-                onChange={(e) =>
-                  setConfig({
-                    ...config,
-                    rateControl: {
-                      ...config.rateControl!,
-                      bitrateLimit: Number(e.target.value),
-                    },
-                  })
-                }
-                className="w-full"
-                data-testid="video-encoder-bitrate-slider"
-              />
-            </div>
-          )}
-
-          {/* H.264 Profile */}
-          {config.h264 && h264Options && (
-            <div className="space-y-2">
-              <Label className="text-[#e5e5e5]">H.264 Profile</Label>
-              <select
-                value={config.h264.h264Profile}
-                onChange={(e) =>
-                  setConfig({
-                    ...config,
-                    h264: { ...config.h264!, h264Profile: e.target.value },
-                  })
-                }
-                className="h-10 w-full appearance-none rounded-md border border-[#3a3a3c] bg-[#2c2c2e] px-3 py-2 text-sm text-white focus:border-[#0a84ff] focus:outline-none"
-                data-testid="video-encoder-h264-profile-select"
+            <AlertDialogHeader>
+              <AlertDialogTitle className="text-white" data-testid="remove-config-dialog-title">
+                Remove video encoder?
+              </AlertDialogTitle>
+              <AlertDialogDescription className="text-[#a1a1a6]">
+                Removing the video encoder leaves this profile with no stream. Clients requesting
+                its stream URI will receive an error until an encoder is attached again.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel
+                className="border-[#3a3a3c] bg-transparent text-white hover:bg-[#2c2c2e]"
+                data-testid="remove-config-dialog-cancel"
               >
-                {h264Options.h264ProfilesSupported.map((profile) => (
-                  <option key={profile} value={profile}>
-                    {profile}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
-
-          {/* GOP Length */}
-          {config.h264 && h264Options && (
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <Label className="text-[#e5e5e5]">GOP Length</Label>
-                <span className="text-sm text-[#a1a1a6] tabular-nums">{config.h264.govLength}</span>
-              </div>
-              <input
-                type="range"
-                min={h264Options.govLengthRange.min}
-                max={h264Options.govLengthRange.max}
-                value={config.h264.govLength}
-                onChange={(e) =>
-                  setConfig({
-                    ...config,
-                    h264: { ...config.h264!, govLength: Number(e.target.value) },
-                  })
-                }
-                className="w-full"
-                data-testid="video-encoder-gop-slider"
-              />
-            </div>
-          )}
-        </div>
-
-        <DialogFooter>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={onClose}
-            className="border-[#3a3a3c] text-white hover:bg-[#2c2c2e]"
-            data-testid="video-encoder-edit-dialog-cancel"
-          >
-            Cancel
-          </Button>
-          <Button
-            type="button"
-            onClick={handleSave}
-            disabled={updateMutation.isPending}
-            className="bg-[#0a84ff] text-white hover:bg-[#0077ed]"
-            data-testid="video-encoder-edit-dialog-save"
-          >
-            {updateMutation.isPending ? 'Saving...' : 'Save Changes'}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+                Cancel
+              </AlertDialogCancel>
+              <AlertDialogAction
+                onClick={() => {
+                  if (pendingRemove) removeMutation.mutate(pendingRemove);
+                  setPendingRemove(null);
+                }}
+                className="bg-[#dc2626] text-white hover:bg-[#ef4444]"
+                data-testid="remove-config-dialog-confirm"
+              >
+                Remove
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      </div>
+    </div>
   );
 }
