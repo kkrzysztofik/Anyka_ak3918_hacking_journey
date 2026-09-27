@@ -1,0 +1,23 @@
+{
+	"Bound":	true,
+	"PowerFrequency":	0,
+	"NetworkMode":	"Auto",
+	"DataLimit":	false,
+	"SoftProbe":	{
+		"UploadHealth":	{
+			"Enabled":	true,
+			"UploadPeriod":	3600
+		},
+		"UploadEvent":	{
+			"Enabled":	true,
+			"UploadPeriod":	3600
+		}
+	},
+	"WorkMode":	{
+		"Mode":	2,
+		"AliveDuration":	10,
+		"SleepDuration":	0,
+		"DelayedWakeUp":	0
+	},
+	"LowBatAlarmLv":	20
+}

@@ -1,0 +1,63 @@
+{
+	"Enabled":	true,
+	"MsgToApp":	{
+		"Enabled":	true,
+		"Interval":	120,
+		"Event":	["MotionDetect", "HumanDetect", "FaceDetect"],
+		"Sch":	[{
+				"Weekday":	"0,1,2,3,4,5,6",
+				"BeginTime":	"00:00:00",
+				"EndTime":	"23:59:59"
+			}, {
+				"Weekday":	"0,1,2,3,4,5,6",
+				"BeginTime":	"00:00:00",
+				"EndTime":	"23:59:59"
+			}, {
+				"Weekday":	"0,1,2,3,4,5,6",
+				"BeginTime":	"00:00:00",
+				"EndTime":	"23:59:59"
+			}, {
+				"Weekday":	"0,1,2,3,4,5,6",
+				"BeginTime":	"00:00:00",
+				"EndTime":	"23:59:59"
+			}]
+	},
+	"AlarmSound":	{
+		"Enabled":	false,
+		"DurSec":	10,
+		"SoundType":	0,
+		"EncType":	1,
+		"SampleRate":	8000
+	},
+	"AlarmLight":	{
+		"Enabled":	false,
+		"DurSec":	10,
+		"Mode":	0
+	},
+	"AlarmWhiteLight":	{
+		"Enabled":	false,
+		"DurSec":	10,
+		"Mode":	0
+	},
+	"Sch":	{
+		"Type":	1,
+		"Bit":	[16777215, 16777215, 16777215, 16777215, 16777215, 16777215, 16777215],
+		"TRange":	[{
+				"Weekday":	"0,1,2,3,4,5,6",
+				"BeginTime":	"00:00:00",
+				"EndTime":	"23:59:59"
+			}, {
+				"Weekday":	"0,1,2,3,4,5,6",
+				"BeginTime":	"00:00:00",
+				"EndTime":	"23:59:59"
+			}, {
+				"Weekday":	"0,1,2,3,4,5,6",
+				"BeginTime":	"00:00:00",
+				"EndTime":	"23:59:59"
+			}, {
+				"Weekday":	"0,1,2,3,4,5,6",
+				"BeginTime":	"00:00:00",
+				"EndTime":	"23:59:59"
+			}]
+	}
+}

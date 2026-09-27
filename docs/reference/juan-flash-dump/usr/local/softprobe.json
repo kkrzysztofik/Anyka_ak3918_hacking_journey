@@ -1,0 +1,134 @@
+{
+	"SoftProbe": [{
+		"Sys": {
+			"FwVersion": "",
+			"DeviceID": "",
+			"SubDeviceID" : "",
+			"Uptime": "",
+			"CpuUsr": "20.0",
+			"CpuSys": "30.0",
+			"CpuIdel": "50.0",
+			"CpuHigh": "90.0",
+			"MemFree": "1024 kB",
+			"MemAvail": "1024 kB",
+			"IotdPid" : "",
+			"AppRSS" : "",
+			"AppVMSize" : "",
+			"FdNum" : "",
+			"MemLow": "1024 kB",
+			"Reboot": "",
+			"RebootType": "",
+			"RebootCnt": "10",
+			"Reset": "",
+			"ResetType": "",
+			"KeyModError": "",
+			"NetMode": "",
+			"WorkMode": "",
+			"DataBlock" : "",
+			"IoctlBlock" : "",
+			"NetworkCableDisconnect" : "",
+			"DhcpFailed" : "",
+			"DayToNight": "",
+			"NightToDay": "",
+			"Temperature": "60 C",
+			"SensorType": "",
+			"DefModel": ""
+		},
+		"Gsm": {
+			"GsmVersion": "",
+			"GsmNetErrorCnt": "5",
+			"GsmSignal": "20",
+			"IMEI": "",
+			"ICCID": "",
+			"Lacode": "",
+			"CellId": "",
+			"GsmSimErrCnt": "5",
+			"GsmRecover": "",
+			"Imsi": ""
+		},
+		"Wifi": {
+			"Signal": "",
+			"WifiVersion": "",
+			"Wlan0Reset" : "10"
+		},
+		"Record": {
+			"RecWriteFail": "10",
+			"RecOverWriteFail": "5",
+			"RecDeviceError": "1",
+			"RecReadFail": "5",
+			"RecDeviceTotal": "",
+			"RecDeviceUsed": "",
+			"RecCurTotalSize": "",
+			"RecCurTotalTime": "",
+			"RecCurLoseTime": "",
+			"RecCurTime": "",
+			"RecLastDaySize": "",
+			"RecLastDayLoseTime": ""
+		},
+		"Format": {
+			"FormatFail": "1",
+			"FormatCnt": "5"
+		},
+		"Alarm": {
+			"SnapFail": "20",
+			"PushCnt": "200",
+			"PushFailCnt": "20"
+		},
+		"Video": {
+			"FrameOverSize": "20",
+			"FrameOverInt": "20",
+			"ViError": "5",
+			"VideoDualCnt": "",
+			"Video0DmaOverCnt": "",
+			"Video1DmaOverCnt": ""
+		},
+		"User" : {
+			"AuthFail" : "10",
+			"PasswdChange" : "10"
+		},
+		"Protocol": {
+			"NTPFail": "5",
+			"DNSFail": "5",
+			"NGWFail": "10",
+			"OnlineFail": "5",
+			"TurnFail" : "10",
+			"LoginFail": "5",
+			"P2POfflineCnt": "10"
+		},
+		"Battery":{
+			"Battery": "",
+			"ChargingState" : "",
+			"PirWakeupCnt" : "",
+			"PirFalseWakeupCnt" : "",
+			"SocRun" : "",
+			"McuRun" : "",
+			"McuResetCnt" : "",
+			"SendStreamTime" : "",
+			"BcamOnline" : "",
+			"HwCode" : "",
+			"WakeUpSum" : "",
+			"WakeUpFailedSum" : "",
+			"WakeUpStreamOkSum" : "",
+			"WifiOfflineCnt": "",
+			"WifiOfflineTime" : "",
+			"WifiOnlineTime" : "",
+			"McuRbReason" : "",
+			"WakeUpHist": ""
+		},
+		"NetworkWifi": {
+			"WiFiRecoverCnt": "5",
+			"WiFiRecover" : "",
+			"ConnectTimeoutCnt" : "",
+			"ConnectPasswderrCnt" : ""
+	        },
+		"Kmsg":
+		{
+			"KmsgEmerg": "",
+			"KmsgAlert": "",
+			"KmsgCrit": "",
+			"KmsgErr": "",
+			"KmsgWarning": "",
+			"KmsgNotice": ""
+		}
+	}]
+}

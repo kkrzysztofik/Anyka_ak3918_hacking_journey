@@ -1,0 +1,401 @@
+{
+	"strChannelName":	"HDIPC",
+	"videoQuality":	2,
+	"stVideolist":	[{
+			"bEnable":	true,
+			"enProfileType":	0,
+			"enEncodeType":	2,
+			"enResolution":	0,
+			"nWidth":	1280,
+			"nHeight":	720,
+			"enBitrateType":	1,
+			"enQuality":	0,
+			"nBitrate":	1024,
+			"nFrameRate":	15,
+			"nMinFrameRate":	1,
+			"nMaxFrameRate":	15,
+			"nFrameGop":	150,
+			"nFrameInterval":	10,
+			"nFrameDepth":	2,
+			"nMinQp":	28,
+			"nMaxQp":	50,
+			"nIFrameMinQp":	32,
+			"nIFrameMaxQp":	40,
+			"nIFrameMaxSize":	100,
+			"nSmartMode":	0,
+			"nSmartGoplen":	150,
+			"nSmartQuality":	20,
+			"nSmartStaticValue":	550
+		}, {
+			"bEnable":	true,
+			"enProfileType":	0,
+			"enEncodeType":	2,
+			"enResolution":	0,
+			"nWidth":	640,
+			"nHeight":	360,
+			"enBitrateType":	1,
+			"enQuality":	0,
+			"nBitrate":	128,
+			"nFrameRate":	15,
+			"nMinFrameRate":	1,
+			"nMaxFrameRate":	15,
+			"nFrameGop":	150,
+			"nFrameInterval":	10,
+			"nFrameDepth":	2,
+			"nMinQp":	20,
+			"nMaxQp":	38,
+			"nIFrameMinQp":	25,
+			"nIFrameMaxQp":	40,
+			"nIFrameMaxSize":	100,
+			"nSmartMode":	0,
+			"nSmartGoplen":	150,
+			"nSmartQuality":	20,
+			"nSmartStaticValue":	550
+		}],
+	"stMasklist":	[{
+			"bEnableMask":	false,
+			"bEnableMaskAlarm":	true,
+			"enMaskAlarmLevel":	30,
+			"stArmTimelist":	[{
+					"bEnable":	true,
+					"nWeekday":	127,
+					"nStartTime":	0,
+					"nStopTime":	86399
+				}, {
+					"bEnable":	true,
+					"nWeekday":	127,
+					"nStartTime":	0,
+					"nStopTime":	86399
+				}],
+			"stMaskArealist":	[{
+					"stregionX":	0,
+					"stregionY":	0,
+					"stregionWidth":	0,
+					"stregionHeight":	0,
+					"stregionColor":	0
+				}],
+			"stHandleType":	{
+				"enHandleType":	0,
+				"bSendeMail":	false,
+				"bAlarmOut":	false,
+				"bAudioOut":	false,
+				"bSanpshot":	false,
+				"bRecord":	false,
+				"enSoundType":	0
+			}
+		}, {
+			"bEnableMask":	false,
+			"bEnableMaskAlarm":	true,
+			"enMaskAlarmLevel":	30,
+			"stArmTimelist":	[{
+					"bEnable":	true,
+					"nWeekday":	127,
+					"nStartTime":	0,
+					"nStopTime":	86399
+				}, {
+					"bEnable":	true,
+					"nWeekday":	127,
+					"nStartTime":	0,
+					"nStopTime":	86399
+				}],
+			"stMaskArealist":	[{
+					"stregionX":	0,
+					"stregionY":	0,
+					"stregionWidth":	0,
+					"stregionHeight":	0,
+					"stregionColor":	0
+				}],
+			"stHandleType":	{
+				"enHandleType":	0,
+				"bSendeMail":	false,
+				"bAlarmOut":	false,
+				"bAudioOut":	false,
+				"bSanpshot":	false,
+				"bRecord":	false,
+				"enSoundType":	0
+			}
+		}, {
+			"bEnableMask":	false,
+			"bEnableMaskAlarm":	true,
+			"enMaskAlarmLevel":	30,
+			"stArmTimelist":	[{
+					"bEnable":	true,
+					"nWeekday":	127,
+					"nStartTime":	0,
+					"nStopTime":	86399
+				}, {
+					"bEnable":	true,
+					"nWeekday":	127,
+					"nStartTime":	0,
+					"nStopTime":	86399
+				}],
+			"stMaskArealist":	[{
+					"stregionX":	0,
+					"stregionY":	0,
+					"stregionWidth":	0,
+					"stregionHeight":	0,
+					"stregionColor":	0
+				}],
+			"stHandleType":	{
+				"enHandleType":	0,
+				"bSendeMail":	false,
+				"bAlarmOut":	false,
+				"bAudioOut":	false,
+				"bSanpshot":	false,
+				"bRecord":	false,
+				"enSoundType":	0
+			}
+		}, {
+			"bEnableMask":	false,
+			"bEnableMaskAlarm":	true,
+			"enMaskAlarmLevel":	30,
+			"stArmTimelist":	[{
+					"bEnable":	true,
+					"nWeekday":	127,
+					"nStartTime":	0,
+					"nStopTime":	86399
+				}, {
+					"bEnable":	true,
+					"nWeekday":	127,
+					"nStartTime":	0,
+					"nStopTime":	86399
+				}],
+			"stMaskArealist":	[{
+					"stregionX":	0,
+					"stregionY":	0,
+					"stregionWidth":	0,
+					"stregionHeight":	0,
+					"stregionColor":	0
+				}],
+			"stHandleType":	{
+				"enHandleType":	0,
+				"bSendeMail":	false,
+				"bAlarmOut":	false,
+				"bAudioOut":	false,
+				"bSanpshot":	false,
+				"bRecord":	false,
+				"enSoundType":	0
+			}
+		}],
+	"stCordon":	{
+		"bEnableCordon":	false,
+		"enCordonType":	1,
+		"nMaxColumns":	32,
+		"nMaxRows":	16,
+		"nMaxLines":	4,
+		"stCordonLinelist":	[{
+				"nBeginX":	0,
+				"nBeginY":	0,
+				"nEndX":	0,
+				"nEndY":	0
+			}, {
+				"nBeginX":	0,
+				"nBeginY":	0,
+				"nEndX":	0,
+				"nEndY":	0
+			}, {
+				"nBeginX":	0,
+				"nBeginY":	0,
+				"nEndX":	0,
+				"nEndY":	0
+			}, {
+				"nBeginX":	0,
+				"nBeginY":	0,
+				"nEndX":	0,
+				"nEndY":	0
+			}],
+		"stCordonArealist":	[4294967295, 4294967295, 4294967295, 4294967295, 4294967295, 4294967295, 4294967295, 4294967295, 4294967295, 4294967295, 4294967295, 4294967295, 4294967295, 4294967295, 4294967295, 4294967295, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+	},
+	"stMotdet":	{
+		"bEnableMotDet":	true,
+		"bEnableMotDetAlarm":	false,
+		"enMotDetAlarmLevel":	80,
+		"nWidth":	32,
+		"nHeight":	16,
+		"bEnableMdRecord":	true,
+		"stArmTimelist":	[{
+				"bEnable":	true,
+				"nWeekday":	255,
+				"nStartTime":	0,
+				"nStopTime":	86399
+			}, {
+				"bEnable":	false,
+				"nWeekday":	0,
+				"nStartTime":	0,
+				"nStopTime":	0
+			}],
+		"BitSchedulelist":	[16777215, 16777215, 16777215, 16777215, 16777215, 16777215, 16777215],
+		"stMotionArealist":	[[true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true], [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true], [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true], [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true], [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true], [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true], [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true], [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true], [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true], [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true], [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true], [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true], [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true], [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true], [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true], [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true]],
+		"stHandleType":	{
+			"enHandleType":	1,
+			"bSendeMail":	true,
+			"bAlarmOut":	true,
+			"bAudioOut":	false,
+			"bSanpshot":	true,
+			"bRecord":	true,
+			"enSoundType":	0
+		},
+		"bEnableMT":	false,
+		"bEnableHD":	false,
+		"bHumanDetDraw":	false,
+		"enHdAlarmLevel":	2,
+		"stGuard":	{
+			"bEnableGuard":	false,
+			"stayTimeSeconds":	10,
+			"nPresetIndex":	0,
+			"bitSchedule":	[16777215, 16777215, 16777215, 16777215, 16777215, 16777215, 16777215]
+		},
+		"WTType":	"AAC",
+		"WTSample":	8000,
+		"WTSch":	[16777215, 16777215, 16777215, 16777215, 16777215, 16777215, 16777215],
+		"WT2ndEnabled":	true,
+		"WT2ndSch":	[0, 0, 0, 0, 0, 0, 0],
+		"WT3rdEnabled":	true,
+		"WT3rdSch":	[0, 0, 0, 0, 0, 0, 0]
+	},
+	"stSignalLost":	{
+		"bVideoLost":	false,
+		"bNetworkLost":	false,
+		"bAudioLost":	false,
+		"bEnableLostAlarm":	false,
+		"handleType":	{
+			"enHandleType":	0,
+			"bSendeMail":	false,
+			"bAlarmOut":	false,
+			"bAudioOut":	false,
+			"bSanpshot":	false,
+			"bRecord":	false,
+			"enSoundType":	0
+		}
+	},
+	"stIrcut":	{
+		"bEnable":	true,
+		"bReverse":	false,
+		"enIrCutMode":	0,
+		"nDelayTime":	6
+	},
+	"stOsd":	{
+		"stLogo":	{
+			"bShowLogoOsd":	false,
+			"stOsdAttr":	{
+				"enOsdAttrib":	0,
+				"enFontColor":	0,
+				"enBackColor":	0,
+				"nPercent_x":	84,
+				"nPercent_y":	90
+			}
+		},
+		"stTime":	{
+			"enHourType":	0,
+			"bDispDate":	true,
+			"bDispWeek":	false,
+			"bDispEnglish":	true,
+			"enDateOsdType":	0,
+			"stOsdAttr":	{
+				"enOsdAttrib":	0,
+				"enFontColor":	0,
+				"enBackColor":	0,
+				"nPercent_x":	1.1499999761581421,
+				"nPercent_y":	0
+			}
+		},
+		"stChnName":	{
+			"bShowNameOsd":	true,
+			"strText":	"Salon",
+			"stOsdAttr":	{
+				"enOsdAttrib":	0,
+				"enFontColor":	0,
+				"enBackColor":	0,
+				"nPercent_x":	1.1499999761581421,
+				"nPercent_y":	4.4444451332092285
+			}
+		},
+		"stTextList":	[{
+				"bShowNameOsd":	false,
+				"strText":	"",
+				"stOsdAttr":	{
+					"enOsdAttrib":	0,
+					"enFontColor":	0,
+					"enBackColor":	0,
+					"nPercent_x":	0,
+					"nPercent_y":	0
+				}
+			}, {
+				"bShowNameOsd":	false,
+				"strText":	"",
+				"stOsdAttr":	{
+					"enOsdAttrib":	0,
+					"enFontColor":	0,
+					"enBackColor":	0,
+					"nPercent_x":	0,
+					"nPercent_y":	0
+				}
+			}, {
+				"bShowNameOsd":	false,
+				"strText":	"",
+				"stOsdAttr":	{
+					"enOsdAttrib":	0,
+					"enFontColor":	0,
+					"enBackColor":	0,
+					"nPercent_x":	0,
+					"nPercent_y":	0
+				}
+			}]
+	},
+	"stVisp":	{
+		"enCtrlIruct":	0,
+		"bFlipVertical":	false,
+		"bFlipHorizontal":	false,
+		"bFlipV2":	false,
+		"bFlipH2":	false,
+		"enFreqPower":	50,
+		"nAntiflicker":	0,
+		"nBackLight":	0,
+		"bAwebEnable":	false,
+		"bIspTools":	false,
+		"bCloseQRActive":	false,
+		"strSensorId":	"0x1346",
+		"stBrightness":	{
+			"nValue":	50,
+			"nDefult":	50,
+			"nMin":	0,
+			"nMax":	100
+		},
+		"stContrast":	{
+			"nValue":	50,
+			"nDefult":	50,
+			"nMin":	0,
+			"nMax":	100
+		},
+		"stTonality":	{
+			"nValue":	50,
+			"nDefult":	50,
+			"nMin":	0,
+			"nMax":	100
+		},
+		"stSaturation":	{
+			"nValue":	50,
+			"nDefult":	50,
+			"nMin":	0,
+			"nMax":	100
+		},
+		"stSharpness":	{
+			"nValue":	50,
+			"nDefult":	50,
+			"nMin":	0,
+			"nMax":	100
+		},
+		"stImgStyle":	{
+			"nValue":	1,
+			"nDefult":	1,
+			"nMin":	1,
+			"nMax":	3
+		},
+		"stImgLsc":	{
+			"nXref":	0,
+			"nYref":	0,
+			"nRange":	0
+		}
+	},
+	"SensorIndex":	[0, 1]
+}

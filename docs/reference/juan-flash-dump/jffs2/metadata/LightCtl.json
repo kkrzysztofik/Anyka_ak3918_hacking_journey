@@ -1,0 +1,6 @@
+{
+	"NightMode":	"auto",
+	"LedIndicator":	true,
+	"PwmMode":	"auto",
+	"PwmBrightness":	100
+}

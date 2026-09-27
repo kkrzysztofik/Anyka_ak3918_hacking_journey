@@ -1,0 +1,52 @@
+{
+	"PromptSound":	{
+		"Enable":	true,
+		"enType":	1,
+		"enFileFormat":	1
+	},
+	"ConvenientSetting":	{
+		"Enable":	true,
+		"enType":	0
+	},
+	"SystemMaintenance":	{
+		"Enable":	true,
+		"nInterval":	604800,
+		"enType":	0
+	},
+	"UlinkToken":	"ulinktoken",
+	"SuccessWifi":	true,
+	"enNetMode":	0,
+	"bPrompt":	true,
+	"bReboot":	false,
+	"enWifiMode":	0,
+	"bPirEnabled":	false,
+	"nPirLv":	1,
+	"bAlexa":	false,
+	"strRebootMsg":	"00-00-00",
+	"stMonoply":	{
+		"bMonopoly":	true,
+		"strDevicePsk":	"f328f1"
+	},
+	"bInitOnvif":	false,
+	"nAlarmDurSec":	5,
+	"bPrivateMode":	false,
+	"LedEnabled":	true,
+	"stRtmpUrl":	"",
+	"bRtmpEnable":	false,
+	"4GStressTest":	{
+		"bStart":	false,
+		"nTestTotalCnt":	0,
+		"nType":	0,
+		"nTestCurCnt":	0,
+		"strStartTime":	"",
+		"strEndTime":	"",
+		"nRebootCnt":	0,
+		"nUsbDetectErrCnt":	0,
+		"nAtErrCnt":	0,
+		"nSimDetectErrCnt":	0,
+		"nPingErrCnt":	0,
+		"nWkReasonExceptionCnt":	0
+	},
+	"isDbgMode":	false,
+	"DbgAlarm":	0
+}

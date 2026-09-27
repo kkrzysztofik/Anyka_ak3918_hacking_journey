@@ -1,0 +1,25 @@
+{
+	"bEnable":	1,
+	"nTimeUtc":	1760381735,
+	"nZoneIndex":	100,
+	"stDst":	{
+		"bEnableDst":	false,
+		"szCountry":	"",
+		"nOffset":	0,
+		"Week":	[{
+				"type":	"start",
+				"month":	1,
+				"week":	0,
+				"weekday":	0,
+				"hour":	0,
+				"minute":	0
+			}, {
+				"type":	"end",
+				"month":	1,
+				"week":	0,
+				"weekday":	0,
+				"hour":	0,
+				"minute":	0
+			}]
+	}
+}

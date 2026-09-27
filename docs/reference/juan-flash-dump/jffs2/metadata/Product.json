@@ -1,0 +1,236 @@
+{
+	"default":	{
+		"LensCtrl/Magnification/Max":	0,
+		"Protocol/GB28181":	{
+			"Enabled":	false,
+			"SipServerIp":	"",
+			"SipServerPort":	5060,
+			"SipServerId":	"",
+			"LoginDomain":	"",
+			"AliveTime":	3600,
+			"HeartBeatTime":	20,
+			"RegisterInterval":	60,
+			"MaXHeartBeatTimeOutTimes":	3,
+			"UserName":	"IPCAM",
+			"UserId":	"",
+			"UserPwd":	"12345678",
+			"DevPort":	5060,
+			"StreamId":	0,
+			"VideoId":	"",
+			"AudioId":	"",
+			"AlarmId":	"",
+			"SipTransType":	0,
+			"BroadCastType":	0,
+			"SetGuard":	false
+		},
+		"LensCtrl/LensLinkageCtrl":	{
+			"Centre":	{
+				"X":	0.000,
+				"Y":	0.000
+			}
+		}
+	},
+	"odm":	{
+		"LensCtrl":	{
+			"Index":	[0, 0, 0],
+			"Centre":	[{
+					"X":	0.000,
+					"Y":	0.000
+				}, {
+					"X":	0.000,
+					"Y":	0.000
+				}, {
+					"X":	0.000,
+					"Y":	0.000
+				}],
+			"SwitchPosition":	[{
+					"Magnification":	0.0,
+					"MaxMagnification":	0.0,
+					"X":	0.000,
+					"Y":	0.000
+				}, {
+					"Magnification":	0.0,
+					"MaxMagnification":	0.0,
+					"X":	0.000,
+					"Y":	0.000
+				}, {
+					"Magnification":	0.0,
+					"MaxMagnification":	0.0,
+					"X":	0.000,
+					"Y":	0.000
+				}],
+			"LensLinkageCtrl":	{
+				"MaxAngle":	{
+					"AngleVertical":	0,
+					"AngleHorizontal":	0
+				}
+			}
+		},
+		"System":	{
+			"nPowerFrequency":	0,
+			"DmpSetting":	{
+				"Enabled":	false,
+				"UploadInterval":	60,
+				"Login":	{
+					"ProductKey":	"",
+					"ProductSecret":	""
+				}
+			}
+		},
+		"SmartPwm":	{
+			"Enabled":	false,
+			"MaxTemperature":	80,
+			"Ir":	{
+				"DefBrightness":	60,
+				"MaxBrightness":	100
+			},
+			"Light":	{
+				"DefBrightness":	60,
+				"MaxBrightness":	100
+			}
+		},
+		"Splicing":	{
+			"SplicingDir":	"",
+			"Stream":	[{
+					"W":	0,
+					"H":	0,
+					"Channel":	[{
+							"X":	0,
+							"Y":	0,
+							"W":	0,
+							"H":	0,
+							"Type":	""
+						}, {
+							"X":	0,
+							"Y":	0,
+							"W":	0,
+							"H":	0,
+							"Type":	""
+						}]
+				}, {
+					"W":	0,
+					"H":	0,
+					"Channel":	[{
+							"X":	0,
+							"Y":	0,
+							"W":	0,
+							"H":	0,
+							"Type":	""
+						}, {
+							"X":	0,
+							"Y":	0,
+							"W":	0,
+							"H":	0,
+							"Type":	""
+						}]
+				}]
+		},
+		"Blend":	{
+			"InnerParamFH":	{
+				"Lut2dLTabNum":	0,
+				"Lut2dRTabNum":	0,
+				"MergeWidth":	0,
+				"ShadowLWidth":	0,
+				"ShadowRWidth":	0
+			},
+			"InnerParam":	{
+				"TransNum":	0,
+				"TransX":	[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+				"TransY":	[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+				"TransXd":	[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+				"TransYd":	[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+				"TransCoor1":	0,
+				"TransCoor2":	0,
+				"TransMrkW":	0,
+				"TransMrkH":	0
+			},
+			"Stream":	[{
+					"CorrParam":	{
+						"BlendWidth":	0,
+						"BlendWeight":	0,
+						"Bent":	0,
+						"CorrectW":	0,
+						"CorrectH":	0
+					},
+					"Img":	{
+						"Output":	{
+							"W":	0,
+							"H":	0
+						},
+						"Input":	[{
+								"W":	0,
+								"H":	0,
+								"Rotate":	0,
+								"TransX":	0,
+								"TransY":	0,
+								"CenterX":	0,
+								"CenterY":	0,
+								"PosInfo":	{
+									"Left":	0,
+									"Top":	0,
+									"W":	0,
+									"H":	0
+								}
+							}, {
+								"W":	0,
+								"H":	0,
+								"Rotate":	0,
+								"TransX":	0,
+								"TransY":	0,
+								"CenterX":	0,
+								"CenterY":	0,
+								"PosInfo":	{
+									"Left":	0,
+									"Top":	0,
+									"W":	0,
+									"H":	0
+								}
+							}]
+					}
+				}, {
+					"CorrParam":	{
+						"BlendWidth":	0,
+						"BlendWeight":	0,
+						"Bent":	0,
+						"CorrectW":	0,
+						"CorrectH":	0
+					},
+					"Img":	{
+						"Output":	{
+							"W":	0,
+							"H":	0
+						},
+						"Input":	[{
+								"W":	0,
+								"H":	0,
+								"Rotate":	0,
+								"TransX":	0,
+								"TransY":	0,
+								"CenterX":	0,
+								"CenterY":	0,
+								"PosInfo":	{
+									"Left":	0,
+									"Top":	0,
+									"W":	0,
+									"H":	0
+								}
+							}, {
+								"W":	0,
+								"H":	0,
+								"Rotate":	0,
+								"TransX":	0,
+								"TransY":	0,
+								"CenterX":	0,
+								"CenterY":	0,
+								"PosInfo":	{
+									"Left":	0,
+									"Top":	0,
+									"W":	0,
+									"H":	0
+								}
+							}]
+					}
+				}]
+		}
+	}
+}

@@ -45,6 +45,12 @@ uvx jefferson -d $W/cfg $W/cfg.jffs2
 The kernel is an xz stream at offset `0x3868` past the 64-byte uImage header;
 `lzma.LZMADecompressor()` unpacks it to a 4.4 MB `vmlinux`.
 
+The unpacked filesystems are committed under `juan-flash-dump/` as `rootfs/`, `usr/`
+and `jffs2/`, produced by the commands above. Git doesn't store empty directories
+(the mount points) or permission bits beyond the executable bit. Three files were
+deleted after extraction: `usr/local/rsa_private_key.pem`, `jffs2/shadow` and
+`jffs2/sn.bin`. They still exist inside `juan-flash-dump.bin`.
+
 ## Differences from our stock firmware
 
 | Area | Ours (`orig/`) | Dump |

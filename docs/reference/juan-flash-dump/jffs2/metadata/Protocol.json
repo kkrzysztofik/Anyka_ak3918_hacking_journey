@@ -1,0 +1,24 @@
+{
+	"GB28181":	{
+		"Enabled":	false,
+		"SipServerIp":	"",
+		"SipServerPort":	5060,
+		"SipServerId":	"",
+		"LoginDomain":	"",
+		"AliveTime":	3600,
+		"HeartBeatTime":	20,
+		"RegisterInterval":	60,
+		"MaXHeartBeatTimeOutTimes":	3,
+		"UserName":	"IPCAM",
+		"UserId":	"",
+		"UserPwd":	"12345678",
+		"DevPort":	5060,
+		"StreamId":	0,
+		"VideoId":	"",
+		"AudioId":	"",
+		"AlarmId":	"",
+		"SipTransType":	0,
+		"BroadCastType":	0,
+		"SetGuard":	false
+	}
+}
