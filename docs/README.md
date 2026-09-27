@@ -53,6 +53,7 @@ deliberately — renaming for symmetry is churn with no reader benefit.
 | `docs/reference/rtp-send-latency-investigation.md` | Why RTP sends stall on the AK3918 |
 | `docs/reference/video-flow.md` | Video path from sensor to client |
 | `docs/reference/hack-process.md` | Reverse-engineering narrative for the camera |
+| `docs/reference/juan-flash-dump.md` | Stock JUAN AK3918EV200 flash dump (`juan-flash-dump.bin`) vs. our firmware; V500 `ak_motor.ko` ABI |
 
 ## Design
 
