@@ -27,7 +27,9 @@ All read off the live camera, not the dump.
 | Wifi power GPIO | `/sys/user-gpio/wifi_en` | `/sys/user-gpio/gpio-wifi_power` |
 | Night GPIOs | `ircut_a`, `ircut_b`, … | `gpio-ircut_a`, `gpio-ircut_b`, `gpio-ir`, `gpio-light` |
 | Motor | built-in, `/dev/ak-motor{0,1}`, legacy ioctls | `ak_motor.ko`, `/dev/motor{0,1}`, V500 ioctls, 24/36-byte structs |
-| Busybox | `nc`, `tar`, `ftpd` | no `nc`/`tar`/FTP; has `wget`, `tftp`, `ftpget`, `md5sum` |
+| Busybox | `nc`, `tar`, `ftpd` | v1.24.1: no `nc`/`tar`; `ftpd` exists but anonymous login gets 530 and the root password is unknown; has `wget`, `md5sum` |
+| Vendor wifi fallback | `wifi_manage.sh` works | `wifi_manage.sh` is a stale rtl8188/`wext` script; `anyka_ipc` loads the ATBM itself (`wifi_bt_comb=1`) |
+| Supplicant | untarred to `/tmp/wpa_supplicant` | real binary at `/usr/bin/wpa_supplicant`, `-Dnl80211` |
 | RAM | 36 MB | 36 MB; ~2.7 MB free with our stack running |
 
 ## Phase 0 result (2026-09-28)
@@ -67,18 +69,18 @@ device reports), and a forked JUAN payload (a permanent maintenance tax).
 ### 1. Boot chain
 
 - **Hook** (`SD_card_contents/juan/anyka_ipc_nostrip`, replacing the phase 0
-  recon script). Steps:
-  - start `telnetd -p 24`
+  recon script). It does three prep lines:
   - symlink `/mnt/anyka_hack` and `/mnt/logs` into `/mnt/tf`
-  - kill the IOTDaemon loop
   - `rmmod ak39_top_wdt`
-  - `umount -l /usr/bin/anyka_ipc`
-  - exec `anyka-init`
 
-  If `anyka-init.bin` is missing, exec the real `anyka_ipc` instead, so a bad
-  card still boots stock. That's the equivalent of the fleet's
-  `config.sh.gerge.bak`. The kill switch stays the stock
-  `/mnt/tf/do_not_debug.ini`.
+  Then it runs the fleet's own `Factory/config.sh` unchanged, which covers
+  telnet 24, slot choice, the respawn loop and the deadman. Env overrides aim
+  the deadman's restore at `anyka_ipc_nostrip.stock`, a stock passthrough (the
+  equivalent of `config.sh.gerge.bak`), and make its vendor-wifi stage a no-op.
+  The kill switch stays the stock `/mnt/tf/do_not_debug.ini`.
+- **Supervised supplicant.** `wire_kill_shim` replaces the service `exec` with
+  `kill-wpa.sh`, which hardcodes `/tmp/wpa_supplicant`. It needs the same
+  `/usr/bin` fallback as bring-up does.
 - **Wifi.** Changes:
   - add an `atbm6031x` row to `wifi::Chip::ALL` with
     `module = /usr/modules/atbm6031x.ko`
@@ -89,9 +91,9 @@ device reports), and a forked JUAN payload (a permanent maintenance tax).
   `sensor_module` unset. Both keys already exist. The install step copies SSID
   and password from `network.json`.
 - **Unknown:** does the ATBM driver come up without `anyka_ipc`? The stock app
-  loaded it, so our bring-up has never run on this chip. Keep
-  `fallback_to_vendor` in mind: the "vendor chain" here is `anyka_ipc`, not
-  `wifi_run.sh`.
+  loaded it, so our bring-up has never run on this chip. `fallback_to_vendor =
+  false`, because the vendor script is stale. The real fallback is the
+  deadman's restore to stock.
 
 ### 2. Video parity
 
@@ -111,7 +113,7 @@ device reports), and a forked JUAN payload (a permanent maintenance tax).
 
 ## Deploy path
 
-With no `nc`/`tar`/FTP, the path is a temporary `python3 -m http.server` bound to the dev box
+With no `nc`/`tar` and no usable FTP login, the path is a temporary `python3 -m http.server` bound to the dev box
 LAN IP, serving an md5 `MANIFEST`. The camera runs a `fetch.sh` that `wget`s
 each entry and runs `md5sum -c`. `push_bundle.sh`/`PUT /api/update` take over
 once anyka-init runs, because onvif-rust's update endpoint needs none of those
