@@ -1,0 +1,28 @@
+#!/bin/sh
+# JUAN (Juanvision) AK3918EV200 entry point. See docs/reference/juan-flash-dump.md.
+#
+# The stock /usr/sbin/anyka_ipc.sh mounts the card at /mnt/tf and, when
+# /mnt/tf/debug.ini exists, bind-mounts this file over /usr/bin/anyka_ipc and
+# runs it as root. Remove debug.ini (or the card) and the camera boots stock.
+#
+# Phase 1, recon only: open telnet, record the board, then hand over to the real
+# vendor app so wifi and the /dev/watchdog feed behave exactly as stock.
+
+T=/mnt/tf
+telnetd -p 24 -l /bin/sh &
+
+R=$T/recon
+mkdir -p $R
+dmesg > $R/dmesg.txt
+{
+  uname -a; cat /proc/cmdline /proc/meminfo /proc/cpuinfo
+  lsmod; ps; mount; df
+  ls -l /dev /sys/user-gpio /usr/local
+  cat /sys/ak_info_dump/board_version
+  grep -E 'akv200_board_version|ak39_timer|motor|aw9523' /proc/kallsyms
+} > $R/system.txt 2>&1
+sync
+
+# The shell holds this file open, so a plain umount is EBUSY.
+umount -l /usr/bin/anyka_ipc && exec /usr/bin/anyka_ipc
+echo "juan: umount failed, vendor app not started" >&2
