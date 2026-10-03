@@ -914,32 +914,29 @@ pub(super) fn plan(target: DayNight, pol: Polarity, ircut: bool) -> Vec<Step> {
     steps
 }
 
-/// Rewrite `steps` so every `IrLed` write is followed by the same write to
-/// `WhiteLed`.
+/// Follow the `IrLed` write in `steps` with the same write to `WhiteLed`.
 ///
-/// Inserting each mirror directly after its source preserves `plan()`'s
+/// Inserting the mirror directly after its source preserves `plan()`'s
 /// ordering guarantee — the lamp turns on before the ISP switches to night and
 /// off after it switches to day, so no frame is captured dark.
 fn mirror_lamp_to_white(steps: &mut Vec<Step>) {
     // `plan()` emits exactly one IrLed write in either direction.
-    let mut out = Vec::with_capacity(steps.len() + 1);
-    for step in steps.drain(..) {
-        let mirrored = match &step {
+    let ir = steps.iter().enumerate().find_map(|(i, s)| match s {
+        Step::Write {
+            node: Node::IrLed,
+            value,
+        } => Some((i, *value)),
+        _ => None,
+    });
+    if let Some((i, value)) = ir {
+        steps.insert(
+            i + 1,
             Step::Write {
-                node: Node::IrLed,
-                value,
-            } => Some(*value),
-            _ => None,
-        };
-        out.push(step);
-        if let Some(value) = mirrored {
-            out.push(Step::Write {
                 node: Node::WhiteLed,
                 value,
-            });
-        }
+            },
+        );
     }
-    *steps = out;
 }
 
 #[cfg(test)]
@@ -2374,7 +2371,10 @@ mod tests {
         );
 
         let isp_at = steps.iter().position(|s| *s == Step::IspMode).unwrap();
-        assert!(ir_at + 1 < isp_at, "lamp on before the ISP switches to night");
+        assert!(
+            ir_at + 1 < isp_at,
+            "lamp on before the ISP switches to night"
+        );
     }
 
     #[test]
