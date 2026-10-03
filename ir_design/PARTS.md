@@ -561,6 +561,102 @@ that does not connect.
 - **R1a/R1b** → `C17615` (3.9 Ω, 46 416 stock) for volume, at +1.9 % on full
   power. See the thermal caveat under "R1a / R1b values".
 - **R3** → `C11702` (1 kΩ, Basic) — recommended, recovers 9 % of gate drive.
+- **Hand-built boards from TME** → see the next section.
+
+### TME substitutes for hand-built boards — 2026-09-24
+
+The JLCPCB BOM is unchanged; these are for boards assembled or reworked by
+hand from TME stock. Datasheet numbers are **verified** (`pdftotext` of the
+PDF). TME stock and prices are not: its catalogue loads them with JavaScript,
+so check them in a browser.
+
+Design points used below, all at the 5.3 V rail: L1 peak **~0.36 A** typical
+string, **~0.49 A** worst-case high-Vf bin; input **0.27 A** typical,
+**0.43 A** worst (table under "One consequence of halving the current").
+
+#### L1 — 33 µH, 4 × 4 mm, drops onto `L_Sunlord_SWPA4030S`
+
+| Part | Isat (30 % drop) | Irms (40 °C) | DCR | H | Verdict |
+|---|---|---|---|---|---|
+| *SWPA4030S330MT (fitted)* | *1.10 A* | *0.84 A* | *0.43 Ω max* | *3.0* | — |
+| **Taiyo Yuden NRS4018T330MDGJ** | **0.70 A** min, 0.83 typ | 0.55 A min | 0.46 Ω ±20 % | 1.8 | **use** — in stock at TME 2026-09-24 |
+| FERROCORE DJNR4018-330-S | 0.70 A | 0.55 A | 0.46 Ω ±20 % | 1.8 | same part — second source |
+
+- **Margin drops** from ~3× to **1.9× typical / 1.4× worst-bin** on
+  saturation, and 1.3× on heating at the worst-bin input. Adequate, not
+  generous. SY7200A's 2 A switch limit saturates every candidate on a fault,
+  the fitted part included, so fault behaviour does not get worse.
+- **Pads fit unchanged.** Recommended land for both is 1.2 × 3.7 mm pads at
+  **2.8 mm centre to centre** (Taiyo's `B` is between the dashed centrelines,
+  not a gap). Electrodes (`e` 1.1 ± 0.2 on a 4.0 ± 0.2 body) sit at
+  ±0.9–2.0 mm; our pads cover ±0.95–2.05 mm, which is ≥ 0.85 mm of electrode on
+  copper at worst-case tolerance. Details under L1 in `FOOTPRINTS.md`.
+- The DJNR4018-S datasheet (`ir_design/djnr4018-s.pdf`) is Taiyo's table and
+  land drawing reproduced digit for digit, reel quantity included. Taiyo's NR
+  catalogue is `https://www.tme.eu/Document/ec067c5c1bf15cb727090f8ed2d0ca68/NR.pdf`
+  (92 pages, NRS4018 on the dimension page and the parts-number table).
+- **Better on paper, unchecked:** Taiyo LBXND4040TKL330MDG (TME lists 0.83 A,
+  0.46 Ω, 4 × 4), TDK VLCF4028T-330MR61-2 (0.74 A, 0.35 Ω), Murata
+  LQH44PH330MPRL (0.74 A, 0.55 Ω). Land patterns and current definitions
+  not read.
+- **Step up in size:** Taiyo LCXND5050YKL330MMG (4.9 × 4.9, 1.39 A, 0.18 Ω)
+  needs a new footprint and C1 moved (`09_place.py` puts C1 directly over L1).
+
+**Rejected:** Taiyo NRS6028T330MMGJ, FERROCORE DJNR6028-330-S, Viking
+SDIA0628MT330A (6 × 6 × 2.8 — electrically fine, collide with U1 and C1);
+Bourns SRN4026-330M (0.5 A, sold only in 3 000s). Not stocked by TME:
+SWPA4030S330MT itself, Würth 74404043330 / 74438357330, Coilcraft
+XAL4030-333, Abracon ASPI-4030S-330M, Bourns SRR4028-330Y. TME's filter
+`p1481645_33nh` is **33 nH** — RF chip inductors, 1 000× too small;
+`p1438423_33mh` is the 33 µH one (TME slugs µ as `m`).
+
+#### R1a / R1b — higher values are safe with SY7200A
+
+Higher resistance lowers LED current, the direction the `Tj` budget wants
+(contrast 3.9 Ω above, which errs high). 0805, ~10 mW each.
+
+| R1a = R1b | Half (Q1 off) | Full (Q1 on) | vs 4.02 Ω |
+|---|---|---|---|
+| 4.02 Ω | 49.75 mA | 98.92 mA | — |
+| 4.22 Ω | 47.39 mA | 94.26 mA | −4.7 % |
+| 4.3 Ω | 46.51 mA | 92.51 mA | −6.5 % |
+| 4.22 + 4.3 mixed | 47.39 mA | 93.39 mA | −5.6 % |
+
+Even 5 % parts cannot exceed 100 mA (4.22 Ω − 5 % → 99.7 mA). **These values
+are for SY7200A only** — with TS19371 (below) they give ~22 mA.
+
+#### U1 — TS19371CX6-RFG is the only pin-compatible TME part
+
+Survey: all 217 in-stock SMD LED drivers on TME, 2026-09-24. Two are boost
+converters in SOT-23-6; the rest are buck, linear, or another package.
+
+**Taiwan Semiconductor TS19371CX6-RFG** (`ir_design/ts19371cx6.pdf`, J1708) —
+pins SW, GND, FB, CTRL, OVP, VIN: **identical order**, drops onto U1.
+
+| | SY7200A | TS19371 | |
+|---|---|---|---|
+| `VIN` | 2.8–30 V | 2.5–18 V | ✅ |
+| SW abs max / OVP | 33 V / 30 V | 36 V / 30 V, **latches off** | ✅ |
+| Enable | 1.5 V rising | full current > 1.8 V, off < 0.4 V, 65 µA | ✅ 3.3 V GPIO |
+| **`VFB`** | **200 mV ± 2 %** | **95 mV, 80–110 (± 16 %)** | ⚠️ R1a/R1b change |
+| **Switch limit** | 2 A min | **650 mA typ, no min** | ⚠️ worst-bin peak ~0.48 A at 1.2 MHz |
+| Switch | 200 mΩ FET | NPN, VCESAT 350 mV @ 250 mA | ~+10 °C on U1 |
+| `FSW` / inductor | 1 MHz | 1.2 MHz, **recommends 10 µH** | ⚠️ 33 µH untested |
+
+- **R1a = R1b = 2.2 Ω** with TS19371: full 85.4 mA typ, **72–99 mA** over
+  the `VFB` spread; half 43 mA. 2.0 Ω gives 94 mA typ but reaches 109 mA —
+  over the `Tj` budget. Brightness now varies unit to unit.
+- Loop compensation is internal and characterised around 10 µH. 33 µH should
+  be tolerable in current mode but is not covered by the datasheet: scope
+  TP1/TP2 on the first board, and fall back to 10–15 µH on the same pads if it
+  rings.
+- Verdict: **acceptable for a hand-built prototype, not for the JLCPCB run.**
+
+**Rejected:** Diodes AP5724WG-7 (`VIN` max 5.5 V, see "Other candidates");
+StarChips SCT2001ASIG — a 3-channel **linear** current sink (10–45 mA/ch,
+different pinout), cannot lift 5.3 V to the 12–19 V string. From 5.3 V it
+would drive at most 2 emitters per channel. The remaining SOT-23-6 parts
+(onsemi FAN5622, Infineon BCR431U / BCR602, Nexperia NCR401U) are linear too.
 
 ---
 

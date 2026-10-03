@@ -40,6 +40,13 @@ KiCad ships no SWPA footprint. `ir-ring:L_Sunlord_SWPA4030S` is drawn from
 Table 4-1's recommended reflow pattern: pads 1.10 x 3.70 mm with a 1.90 mm
 inner gap, 3.00 mm centre to centre. Verified against the spec to 0.01 mm.
 
+**Also fits (2026-09-24):** Taiyo Yuden NRS4018T330MDGJ and its clone
+FERROCORE DJNR4018-330-S solder onto this footprint unchanged. Their
+recommended land is 1.2 × 3.7 mm pads at 2.8 mm centre to centre; with
+electrodes of 1.1 ± 0.2 mm on a 4.0 ± 0.2 mm body, our 3.0 mm pitch still puts
+≥ 0.85 mm of each electrode on copper at worst-case tolerance. Ratings and
+margins: "TME substitutes" in `PARTS.md`.
+
 ## U2 — custom footprint, not generic 0805
 
 `ir-ring:TEMT6200_0805` follows Vishay's recommended solder pad
