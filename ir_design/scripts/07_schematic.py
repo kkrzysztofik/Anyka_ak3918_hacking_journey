@@ -8,9 +8,9 @@ where three or more things meet, and every non-power net carries one label so it
 KiCad name (/SW, /FB, ...) matches the PCB. 08_verify_netlist.py then diffs the
 netlist KiCad computes from this drawing against NETS.
 """
-import uuid, os, sys, json
+import uuid, os, json
 HERE = os.path.dirname(os.path.abspath(__file__))
-exec(open(os.path.join(HERE, "sexp.py")).read())
+from sexp import parse, dump, find_sym, pins, extends
 
 # Deterministic UUIDs: the PCB links footprints to symbols by UUID.
 NS = uuid.UUID("6b1f0c8e-2d4a-4b5e-9c1d-7a3e5f2b8c90")
@@ -241,7 +241,6 @@ labelled = {n for n, *_ in LABELS}
 assert labelled >= (set(NETS) - POWER), f"nets without a naming label: {set(NETS) - POWER - labelled}"
 
 # ---------------------------------------------------------------- emit
-F = "(effects (font (size 1.27 1.27)))"
 def eff(just="center", hide=False):
     j = "" if just == "center" else f" (justify {just})"
     return f"(effects (font (size 1.27 1.27)){j}{' (hide yes)' if hide else ''})"
@@ -276,17 +275,15 @@ for ref, (lid, val, fp, lcsc) in PARTS.items():
       f'(property "MPN" "{mpn}" (at {x} {y} 0) {eff(hide=True)})'
       f'{pl}(instances (project "ir-ring" (path "/{ROOT}" (reference "{ref}") (unit 1)))))')
 
-pwr_n = {"power:+5V": 0, "power:GND": 0, "power:PWR_FLAG": 0}
 for k, (kind, x, y, a) in enumerate(PWR):
-    lid = "power:" + kind; pwr_n[lid] += 1
+    lid = "power:" + kind
     ref = ("#FLG" if kind == "PWR_FLAG" else "#PWR") + f"{k+1:02d}"
-    val = kind
     vdx, vdy = {0: (0, -3.81), 90: (3.81, 0), 180: (0, 3.81), 270: (3.81, 0)}[a]
     if kind == "GND": vdx, vdy = {0: (0, 3.81), 90: (4.445, 0), 180: (0, -3.81), 270: (-4.445, 0)}[a]
     out.append(
       f'(symbol (lib_id "{lid}") (at {x} {y} {a}) (unit 1) (exclude_from_sim no) (in_bom yes) (on_board yes) (dnp no) (uuid "{U(f"pwr:{k}")}")'
       f'(property "Reference" "{ref}" (at {x} {y} 0) {eff(hide=True)})'
-      f'(property "Value" "{val}" (at {x + vdx} {y + vdy} 0) {eff()})'
+      f'(property "Value" "{kind}" (at {x + vdx} {y + vdy} 0) {eff()})'
       f'(property "Footprint" "" (at {x} {y} 0) {eff(hide=True)})'
       f'(property "Datasheet" "" (at {x} {y} 0) {eff(hide=True)})'
       f'(property "Description" "" (at {x} {y} 0) {eff(hide=True)})'

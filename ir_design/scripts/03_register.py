@@ -1,10 +1,8 @@
-from PIL import Image
-from collections import deque
-import math, json
-Image.MAX_IMAGE_PIXELS=None
-exec(open('/tmp/reg.py').read().split('pf,cf,mmf=')[0])
-pf,cf,mmf=profile("ir_design/photos/img20260922_10485355.jpg",0.60,(0.25,0.45,0.45,0.65))
-pb,cb,mmb=profile("ir_design/photos/img20260922_10535866.jpg",0.62,(0.25,0.45,0.45,0.65))
+import math, sys
+from scan import load, profile, regions, centroid, TH
+F="ir_design/photos/img20260922_10485355.jpg"
+pf,cf,mmf,bgf=profile(F,0.60,(0.25,0.45,0.45,0.65))
+pb,cb,mmb,_=profile("ir_design/photos/img20260922_10535866.jpg",0.62,(0.25,0.45,0.45,0.65))
 
 def resid(offset):
     out=[]
@@ -38,37 +36,15 @@ for dia,r,ba in back_holes:
     print(f"  dia {dia:.2f} mm  r {r:.3f} mm  front angle {fa:6.2f} deg")
 
 # now look for them on the front scan
-im=load("ir_design/photos/img20260922_10485355.jpg"); W,H=im.size; px=im.load(); MM=120.3/W; TH=110; XLIM=int(W*0.60)
+px,W,H,MM=load(F); XLIM=int(W*0.60)
 bx,by=cf
-sd=None
-for y in range(0,H,7):
-    for x in range(0,XLIM,7):
-        if px[x,y]>=200: sd=(x,y);break
-    if sd:break
-bg=bytearray(W*H); q=deque([sd]); bg[sd[1]*W+sd[0]]=1
-while q:
-    x,y=q.popleft()
-    for dx,dy in ((1,0),(-1,0),(0,1),(0,-1)):
-        a,b=x+dx,y+dy
-        if 0<=a<W and 0<=b<H and not bg[b*W+a] and px[a,b]>=TH:
-            bg[b*W+a]=1; q.append((a,b))
-seen=bytearray(W*H); found=[]
-for y in range(H):
-    for x in range(XLIM):
-        i=y*W+x
-        if px[x,y]>=TH and not bg[i] and not seen[i]:
-            q=deque([(x,y)]); seen[i]=1; pts=[]
-            while q:
-                a,b=q.popleft(); pts.append((a,b))
-                for dx,dy in ((1,0),(-1,0),(0,1),(0,-1)):
-                    c2,d=a+dx,b+dy; j=d*W+c2
-                    if 0<=c2<XLIM and 0<=d<H and not seen[j] and px[c2,d]>=TH and not bg[j]:
-                        seen[j]=1; q.append((c2,d))
-            if len(pts)>150:
-                cx=sum(p[0] for p in pts)/len(pts); cy=sum(p[1] for p in pts)/len(pts)
-                dd=math.hypot(cx-bx,cy-by)*MM; aa=math.degrees(math.atan2(cy-by,cx-bx))%360
-                ad=2*math.sqrt(len(pts)/math.pi)*MM
-                found.append((ad,dd,aa))
+found=[]
+for pts in regions(px,W,H,XLIM,TH,bgf):
+    if len(pts)>150:
+        cx,cy=centroid(pts)
+        dd=math.hypot(cx-bx,cy-by)*MM; aa=math.degrees(math.atan2(cy-by,cx-bx))%360
+        ad=2*math.sqrt(len(pts)/math.pi)*MM
+        found.append((ad,dd,aa))
 print("\nNearest front-scan feature to each prediction:")
 ok=True
 for dia,r,fa in pred:
@@ -80,3 +56,4 @@ for dia,r,fa in pred:
     if da>=3: ok=False
     print(f"  {fa:6.2f} deg -> found dia {bestf[0]:.2f} r {bestf[1]:.2f} ang {bestf[2]:6.2f}  (off {da:.2f} deg) {flag}")
 print("\nREGISTRATION", "VERIFIED" if ok else "NOT VERIFIED")
+sys.exit(0 if ok else 1)

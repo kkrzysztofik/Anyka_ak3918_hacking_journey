@@ -1,6 +1,6 @@
 import json, math, statistics
 K=190.50   # back_angle = (K - front_angle) mod 360, mirrored
-back=json.load(open("/tmp/back_profile.json"))
+back=json.load(open("ir_design/back_profile.json"))   # written by 02_extract_back.py
 front=json.load(open("ir_design/geometry.json"))
 
 # outline in FRONT frame, from the back scan (clean silhouette)
@@ -36,10 +36,10 @@ def xy(a,r):
 
 geo={
  "frame":"FRONT view (component side). Origin = bore centre. +x right, +y DOWN, matching KiCad.",
- "registration":{"back_to_front":"back_angle = (190.50 - front_angle) mod 360, MIRRORED",
+ "registration":{"back_to_front":f"back_angle = ({K:.2f} - front_angle) mod 360, MIRRORED",
                  "verified":"3/3 mounting holes predicted within 1.81 deg; trimmed mean outline residual 0.268 mm"},
  "bore_dia_mm":bore_dia,
- "outline_polar_front":[[a,round(sm[a],4)] for a in ang],
+ "outline_polar_front_raw":[[a,round(sm[a],4)] for a in ang],   # 05 smooths it into outline_polar_front
  "outline_connector_sector_deg":[86.0,114.5],
  "mounting_holes":[{"dia_mm":d,"r_mm":r,"angle_deg":a,"xy_mm":[round(v,4) for v in xy(a,r)]} for d,r,a in holes],
  "emitters":[{"angle_deg":round(a,2),"r_mm":round(r,3),"xy_mm":[round(v,4) for v in xy(a,r)]} for a,r in emit],
@@ -53,5 +53,5 @@ for h in geo["mounting_holes"]:
 print("emitters (front frame):")
 for e in geo["emitters"]:
     print(f"  x {e['xy_mm'][0]:8.3f}  y {e['xy_mm'][1]:8.3f}  (r {e['r_mm']:.3f} @ {e['angle_deg']:6.2f})")
-rs=[r for a,r in geo["outline_polar_front"]]
+rs=[r for a,r in geo["outline_polar_front_raw"]]
 print(f"\noutline radius min {min(rs):.3f} max {max(rs):.3f} mm")

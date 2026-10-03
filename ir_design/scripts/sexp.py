@@ -11,10 +11,9 @@ def parse(t):
 def dump(x,ind=0):
     if not isinstance(x,list): return x
     if all(not isinstance(e,list) for e in x): return "("+" ".join(x)+")"
-    head=[e for e in x if not isinstance(e,list)]
-    out="("+" ".join(head)
-    for e in x:
-        if isinstance(e,list): out+="\n"+"\t"*(ind+1)+dump(e,ind+1)
+    out="("+x[0]
+    for e in x[1:]:     # one pass, so a token after a sub-list keeps its place
+        out+=("\n"+"\t"*(ind+1)+dump(e,ind+1)) if isinstance(e,list) else " "+e
     return out+")"
 def find_sym(lib,name):
     tree=parse(open(f"/usr/share/kicad/symbols/{lib}.kicad_sym").read())[0]

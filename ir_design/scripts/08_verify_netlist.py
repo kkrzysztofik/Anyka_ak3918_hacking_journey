@@ -6,7 +6,7 @@ connected to the *right* thing. Exits 1 on any difference.
 import json, os, subprocess, sys
 here = os.path.dirname(os.path.abspath(__file__))
 kd = os.path.join(here, "..", "kicad")
-sys.path.insert(0, here); exec(open(os.path.join(here, "sexp.py")).read())
+from sexp import parse
 net_file = "/tmp/ir-ring.net"
 subprocess.run(["kicad-cli", "sch", "export", "netlist", "--format", "kicadsexpr",
                 "-o", net_file, os.path.join(kd, "ir-ring.kicad_sch")], check=True, capture_output=True)

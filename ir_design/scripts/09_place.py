@@ -75,8 +75,12 @@ def kang(dx, dy):                       # KiCad angle of a board vector (y down,
     return math.degrees(math.atan2(-dy, dx))
 def pad(fp, num):
     return [p for p in fp.Pads() if p.GetNumber() == num][0]
-def ppos(fp, num):
-    q = pad(fp, num).GetPosition(); return (tomm(q.x), tomm(q.y))
+def qpos(item):                         # anything with GetPosition(), in mm
+    q = item.GetPosition(); return (tomm(q.x), tomm(q.y))
+def ppos(fp, num): return qpos(pad(fp, num))
+def via(xy, net):
+    v = pcbnew.PCB_VIA(B); v.SetViaType(pcbnew.VIATYPE_THROUGH); v.SetPosition(pcbnew.VECTOR2I(mm(xy[0]), mm(xy[1])))
+    v.SetWidth(mm(0.6)); v.SetDrill(mm(0.3)); v.SetNet(net); B.Add(v)
 
 FP = {}
 def make(ref):
@@ -181,7 +185,7 @@ def zone(points, layers, net=None, priority=0, keepout=False, name=""):
     for x, y in points: o.Append(mm(x), mm(y))
     if keepout:
         z.SetIsRuleArea(True); z.SetDoNotAllowTracks(True); z.SetDoNotAllowVias(True)
-        z.SetDoNotAllowZoneFills(True) if hasattr(z, "SetDoNotAllowZoneFills") else z.SetDoNotAllowCopperPour(True)
+        z.SetDoNotAllowCopperPour(True)
         z.SetDoNotAllowPads(False); z.SetDoNotAllowFootprints(False)
     else:
         z.SetNetCode(net.GetNetCode()); z.SetAssignedPriority(priority)
@@ -221,9 +225,7 @@ for a in STITCH:
     r_st = min(18.2, outline_r[round(a)] - 1.2)            # the outline pulls in to ~18.7 mm near 30/150 deg
     for h in geo["mounting_holes"]:
         assert abs((a - h["angle_deg"] + 180) % 360 - 180) > 8, f"stitch {a} too close to a hole"
-    v = pcbnew.PCB_VIA(B); v.SetViaType(pcbnew.VIATYPE_THROUGH)
-    v.SetPosition(pcbnew.VECTOR2I(*[mm(c) for c in polar(r_st, a)]))
-    v.SetWidth(mm(0.6)); v.SetDrill(mm(0.3)); v.SetNet(NET["GND"]); B.Add(v)
+    via(polar(r_st, a), NET["GND"])
 
 # converter GND pads -> F.Cu plane directly above: one via beside each, the hot-loop return path
 isl = [z for z in B.Zones() if z.GetZoneName().startswith("thermal_")]
@@ -238,9 +240,6 @@ def track(pts, layer, net, w):
     for a, b in zip(pts, pts[1:]):
         t = pcbnew.PCB_TRACK(B); t.SetStart(pcbnew.VECTOR2I(mm(a[0]), mm(a[1]))); t.SetEnd(pcbnew.VECTOR2I(mm(b[0]), mm(b[1])))
         t.SetLayer(layer); t.SetWidth(mm(w)); t.SetNet(net); B.Add(t)
-def via(xy, net):
-    v = pcbnew.PCB_VIA(B); v.SetViaType(pcbnew.VIATYPE_THROUGH); v.SetPosition(pcbnew.VECTOR2I(mm(xy[0]), mm(xy[1])))
-    v.SetWidth(mm(0.6)); v.SetDrill(mm(0.3)); v.SetNet(net); B.Add(v)
 # The power stage is routed here, not by Freerouting: it re-solves this loop differently every
 # run, and it is the one part of a boost converter a person routes by hand. Everything closes
 # on B.Cu: LX -> D1 -> C2 -> GND -> U1 GND, with the GND return running between C2's own pads.
@@ -248,7 +247,7 @@ def via(xy, net):
 # body between its pads, up into the U1-D1 gap, through VOUT_X; the F.Cu leg to D2's island via
 # is added with the pre-routes below. OVP (no current) taps VOUT under the U1 body via OVP_X.
 pp = lambda ref, n: ppos(FP[ref], n)
-d1c = (tomm(FP["D1"].GetPosition().x), tomm(FP["D1"].GetPosition().y))
+d1c = qpos(FP["D1"])
 VOUT_X, OVP_X = L(0.8, -2.85), L(-1.38, -0.44)     # VOUT_X: 0.25 mm below U1's 1.33 mm-long LX pad
 lx, l2 = loc(pp("U1", "1")), loc(pp("L1", "2"))
 PRE = [(pcbnew.B_Cu, [pp("C2", "1"), pp("D1", "1"), d1c, VOUT_X], "VOUT", 0.5),
@@ -285,20 +284,15 @@ for ref, num in [("C2", "2"), ("C1", "2"), ("C3", "2"), ("R1a", "2"), ("Q1", "2"
                  for d in (base + 0.35, base + 0.6, base + 0.9) for a in range(0, 360, 20)
                  if via_free(x + d * math.cos(math.radians(a)), y + d * math.sin(math.radians(a)))), None)
     if spot is None: hot.append(f"{ref}.{num}: no room"); continue
-    v = pcbnew.PCB_VIA(B); v.SetViaType(pcbnew.VIATYPE_THROUGH)
-    v.SetPosition(pcbnew.VECTOR2I(mm(spot[0]), mm(spot[1]))); v.SetWidth(mm(0.6)); v.SetDrill(mm(0.3))
-    v.SetNet(NET["GND"]); B.Add(v); placed_vias.append(spot); hot.append(f"{ref}.{num}")
+    via(spot, NET["GND"]); placed_vias.append(spot); hot.append(f"{ref}.{num}")
 
 # Two connections Freerouting cannot finish, pre-routed so it treats them as fixed:
 #  STR7 D8.K -> D9.A: the J1 signals cut across the D8-D9 gap on F.Cu and the hole keepout
 #  closes the outside, so route the link first, along the ring, and let the signals go round it.
 def nearest_pad(ref, num, target):
     return min((q for q in FP[ref].Pads() if q.GetNumber() == num and q.GetDrillSize().x == 0),
-               key=lambda q: math.dist((tomm(q.GetPosition().x), tomm(q.GetPosition().y)), target))
-def qpos(q): return (tomm(q.GetPosition().x), tomm(q.GetPosition().y))
-d9c = tuple(FP["D9"].GetPosition()); d9c = (tomm(d9c[0]), tomm(d9c[1]))
-d8c = (tomm(FP["D8"].GetPosition().x), tomm(FP["D8"].GetPosition().y))
-k8 = qpos(nearest_pad("D8", "1", d9c)); a9 = qpos(nearest_pad("D9", "2", d8c))
+               key=lambda q: math.dist(qpos(q), target))
+k8 = qpos(nearest_pad("D8", "1", qpos(FP["D9"]))); a9 = qpos(nearest_pad("D9", "2", qpos(FP["D8"])))
 r_link = (math.hypot(*k8) + math.hypot(*a9)) / 2
 th0, th1 = math.degrees(math.atan2(k8[1], k8[0])), math.degrees(math.atan2(a9[1], a9[0]))
 if th1 < th0: th1 += 360
@@ -311,8 +305,7 @@ gap_hole = min(math.dist(pt, hole["xy_mm"]) for pt in arc) - 1.8 - 0.15
 e2 = em[0]; th2 = math.radians(e2["angle_deg"]); c2 = e2["xy_mm"]
 tan2 = (-math.sin(th2), math.cos(th2)); rad2 = (math.cos(th2), math.sin(th2))
 vv = (c2[0] - 2.05 * tan2[0] - 1.2 * rad2[0], c2[1] - 2.05 * tan2[1] - 1.2 * rad2[1])
-v = pcbnew.PCB_VIA(B); v.SetViaType(pcbnew.VIATYPE_THROUGH); v.SetPosition(pcbnew.VECTOR2I(mm(vv[0]), mm(vv[1])))
-v.SetWidth(mm(0.6)); v.SetDrill(mm(0.3)); v.SetNet(NET["VOUT"]); B.Add(v)
+via(vv, NET["VOUT"])
 track([vv, qpos(nearest_pad("D2", "2", vv))], pcbnew.F_Cu, NET["VOUT"], 0.5)   # via -> D2 anode on F.Cu
 track([VOUT_X, vv], pcbnew.F_Cu, NET["VOUT"], 0.5)                                 # across under the SW node to D2's island
 in_island = [z for z in B.Zones() if z.GetZoneName() == "thermal_D2"][0].Outline().Contains(pcbnew.VECTOR2I(mm(vv[0]), mm(vv[1])))
@@ -323,9 +316,8 @@ bad = 0
 def check(cond, msg):
     global bad
     print(("  ok   " if cond else "  FAIL ") + msg); bad += (not cond)
-cx = [c for c in j["contacts_front"]]
 for k, num in enumerate(["5", "4", "3", "2", "1"]):
-    x, y = ppos(FP["J1"], num); dx = math.hypot(x - cx[k][0], y - cy[k][1]) if False else math.hypot(x - cx[k][0], y - cx[k][1])
+    dx = math.dist(ppos(FP["J1"], num), j["contacts_front"][k])
     check(dx < 0.25, f"J1 pad {num} ({pin_net[('J1',num)]}) on stock contact {k+1}: {dx:.3f} mm off")
 bb = FP["J1"].GetBoundingBox(False)
 bcx, bcy = tomm(bb.GetCenter().x), tomm(bb.GetCenter().y)
@@ -366,44 +358,6 @@ onhole = [r for r, c in BK.items() for h in geo["mounting_holes"]
 check(not onhole, f"back parts clear the screw-head keepouts: {onhole or 'all clear'}")
 ks = sorted(BK); tight = sorted((round(pdist(BK[a], BK[b]), 2), a, b) for i, a in enumerate(ks) for b in ks[i + 1:])
 check(tight[0][0] >= 0.29, f"closest back courtyards {tight[0][1]}-{tight[0][2]}: {tight[0][0]} mm (>= 0.3)")
-# ---- render both sides for eyeballing (/tmp/place_front.png, /tmp/place_back.png) ----
-def render(side, path, S=26):
-    from PIL import Image, ImageDraw
-    W = H = int(46 * S); im = Image.new("RGB", (W, H), "white"); dr = ImageDraw.Draw(im)
-    P = lambda x, y: (W / 2 + x * S, H / 2 + y * S)
-    dr.line([P(*q) for q in ring], fill="black", width=2)
-    br = geo["bore_dia_mm"] / 2; dr.ellipse([P(-br, -br), P(br, br)], outline="black", width=2)
-    for h in geo["mounting_holes"]:
-        x, y = h["xy_mm"]; r = h["dia_mm"] / 2; dr.ellipse([P(x - r, y - r), P(x + r, y + r)], outline="black", width=2)
-    col = {}
-    pal = ["#e6194b","#3cb44b","#4363d8","#f58231","#911eb4","#42d4f4","#f032e6","#9a6324","#800000","#469990","#000075","#808000","#ffe119","#aaffc3","#fabed4","#dcbeff","#a9a9a9","#000000"]
-    by_net = {}
-    for ref, fp in FP.items():
-        on = fp.IsFlipped() == (side == "back")
-        for p in fp.Pads():
-            n = p.GetNetname().lstrip("/")
-            if not n: continue
-            x, y = tomm(p.GetPosition().x), tomm(p.GetPosition().y)
-            th = p.GetDrillSize().x > 0
-            if on or th: by_net.setdefault(n, []).append((x, y))
-            if not (on or th): continue
-            c = col.setdefault(n, pal[len(col) % len(pal)])
-            w, h = tomm(p.GetBoundingBox().GetWidth()) / 2, tomm(p.GetBoundingBox().GetHeight()) / 2
-            dr.rectangle([P(x - w, y - h), P(x + w, y + h)], fill=c)
-        if on:
-            bb = fp.GetBoundingBox(False); x0, y0 = tomm(bb.GetX()), tomm(bb.GetY())
-            dr.rectangle([P(x0, y0), P(x0 + tomm(bb.GetWidth()), y0 + tomm(bb.GetHeight()))], outline="#999999")
-            cx, cy = tomm(fp.GetPosition().x), tomm(fp.GetPosition().y); dr.text(P(cx + 0.4, cy - 0.9), ref, fill="black")
-    for n, pts in by_net.items():          # nearest-neighbour ratsnest per net
-        left = pts[1:]; tree = [pts[0]]
-        while left:
-            a, b = min(((a, b) for a in tree for b in left), key=lambda ab: math.dist(*ab))
-            dr.line([P(*a), P(*b)], fill=col.get(n, "gray"), width=1); tree.append(b); left.remove(b)
-    y = 6
-    for n, c in col.items(): dr.rectangle([6, y, 20, y + 12], fill=c); dr.text((24, y), n, fill="black"); y += 16
-    dr.text((W - 260, 8), f"{side.upper()} side, viewed from the FRONT", fill="black")
-    im.save(path)
-render("front", "/tmp/place_front.png"); render("back", "/tmp/place_back.png")
 # reference designators to the fab layer: the silkscreen is too dense for them, JLCPCB
 # does not need them, and they stay in the design. Polarity marks stay on silk.
 for ref, f in FP.items():
@@ -440,8 +394,8 @@ if SES:
     check(ok, f"imported routes from {SES}: {len(B.GetTracks())} track/via items")
     thin = [t for t in B.GetTracks() if t.GetClass() == "PCB_TRACK" and t.GetWidth() < mm(0.16)]
     for t in thin: t.SetWidth(mm(0.16))
-    check(True, f"widened {len(thin)} autorouter neck-downs below the 0.16 mm board minimum")
-pass  # zones filled by 10_fill.py (ZONE_FILLER segfaults on a CreateEmptyBoard board)
+    print(f"  widened {len(thin)} autorouter neck-downs below the 0.16 mm board minimum")
+# zones are filled by 10_fill.py (ZONE_FILLER segfaults on a CreateEmptyBoard board)
 pcbnew.SaveBoard(PCB, B)
 DSN = os.path.join(KD, "ir-ring.dsn")
 if not SES:

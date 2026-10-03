@@ -9,15 +9,16 @@ hook on this machine rejects the former and the latter cannot see the system
 | Script | Does |
 |---|---|
 | `01_extract_front.py` | bore, emitters, outline from the front scan |
-| `02_extract_back.py` | outline from the back scan (clean silhouette) |
-| `03_register.py` | solves the mirror + rotation between the two scans, and **verifies** it by predicting the mounting holes |
-| `04_merge.py` | merges both into one front-frame `geometry.json` |
-| `05_outline_to_kicad.py` | smooths, reconstructs the connector sector, writes `Edge.Cuts` |
-| `06_visual_check.py` | renders `/tmp/check.png` for eyeballing |
+| `02_extract_back.py` | outline from the back scan (clean silhouette), saved as `ir_design/back_profile.json` for 04 |
+| `03_register.py` | solves the mirror + rotation between the two scans, and **verifies** it by predicting the mounting holes; exits 1 if they do not land. Uses `scan.py` |
+| `04_merge.py` | merges both into one front-frame `geometry.json`; the outline goes in as `outline_polar_front_raw` |
+| `05_outline_to_kicad.py` | reconstructs the connector sector and smooths `outline_polar_front_raw` into `outline_polar_front`, which 09 uses. The raw outline is never overwritten, so re-running 05 gives the same result. Writes only `geometry.json`: 09 builds the board, Edge.Cuts included |
 | `07_schematic.py` | writes `ir-ring.kicad_sch` from one `NETS` table, with deterministic UUIDs |
 | `08_verify_netlist.py` | exports KiCad's netlist and diffs it against `NETS` — the check that catches a label on the wrong pin |
 | `09_place.py` | builds the whole board: outline, footprints, zones, pre-routes, stitching; asserts its geometry; exports DSN, or with `--ses` imports routes |
-| `10_fill.py` | fills zones in a separate process (see below) |
+| `10_fill.py` | fills zones in a separate process (see below); exits 1 without saving if any copper zone stays unfilled |
+| `11_fab.py` | JLCPCB order files in `fab/`: gerbers zip, BOM, CPL, `hand_assembly.txt`. Refuses to run unless DRC with schematic parity is clean, then cross-checks BOM, CPL and drill hits against the board. `fab/ORDER.md` is hand-written and kept |
+| `scan.py`, `sexp.py` | helpers: scan tracing for 03, s-expression parse/dump for 07 and 08 |
 
 ## Two things that are easy to get wrong
 
