@@ -8,6 +8,7 @@ paths-ignore:
   - "cross-compile/xiu/**"
   - "toolchain/**"
   - "orig/**"
+  - "docs/reference/juan-flash-dump/**"
   - "**/node_modules/**"
   - "**/dist/**"
   - "**/build/**"

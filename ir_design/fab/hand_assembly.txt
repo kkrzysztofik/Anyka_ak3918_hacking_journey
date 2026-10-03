@@ -1,0 +1,2 @@
+Not placed by JLCPCB (no LCSC number) - solder by hand:
+  none - JLCPCB places every part

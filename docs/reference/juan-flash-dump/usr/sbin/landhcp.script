@@ -1,0 +1,55 @@
+#!/bin/sh
+
+# udhcpc script edited by Tim Riker <Tim@Rikers.org>
+
+[ -z "$1" ] && echo "Error: should be called from udhcpc" && exit 1
+dns_flag=0
+RESOLV_CONF="/etc/resolv.conf"
+DHCP_FLAG_CONF="/tmp/dhcp_flag_${interface}.conf"
+rm -f $DHCP_FLAG_CONF
+[ -n "$broadcast" ] && BROADCAST="broadcast $broadcast"
+[ -n "$subnet" ] && NETMASK="netmask $subnet"
+
+case "$1" in
+	deconfig)
+		echo "Use default IP in dhcp script!"
+		;;
+
+	renew|bound)
+		/sbin/ifconfig $interface 0.0.0.0
+		/sbin/ifconfig $interface $ip $BROADCAST $NETMASK
+		echo "ifconfig "$interface $ip $BROADCAST $NETMASK
+
+		if [ -n "$router" ] ; then
+			echo "deleting routers"
+			while route del default gw 0.0.0.0 dev $interface ; do
+				:
+			done
+
+			metric=0
+			for i in $router ; do
+				route add default gw $i dev $interface metric $((metric++))
+			done
+		fi
+		touch $DHCP_FLAG_CONF
+		echo "udhcpc success"
+		echo -n > $RESOLV_CONF
+		[ -n "$domain" ] && echo search $domain >> $RESOLV_CONF
+		for i in $dns ; do
+			if [ "$i" != "114.114.114.114" ];then
+				echo adding dns $i
+				echo nameserver $i >> $RESOLV_CONF
+				if [[ "$i" == "8.8.8.8" ]]; then
+						dns_flag=1
+				fi
+			fi
+		done
+		if [[ "${dns_flag}" == "0" ]]; then
+				echo "nameserver 8.8.8.8" >> $RESOLV_CONF
+		fi
+		echo nameserver 240C::6666 >> $RESOLV_CONF
+		echo nameserver 240e:1f:1::1 >> $RESOLV_CONF
+		;;
+esac
+
+exit 0

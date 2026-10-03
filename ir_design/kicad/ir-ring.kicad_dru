@@ -1,0 +1,6 @@
+(version 1)
+# JLCPCB fab limits that the board design settings cannot express. Track width and
+# clearance (0.16 mm, 2 oz) are the board minimums set by 09_place.py.
+(rule "PTH annular ring, JLCPCB 2 oz"
+  (condition "A.Pad_Type == 'Through-hole'")
+  (constraint annular_width (min 0.254mm)))

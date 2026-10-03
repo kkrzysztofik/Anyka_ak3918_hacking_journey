@@ -785,6 +785,20 @@ pub struct NightConfig {
     pub lum_night_threshold: i32,
     /// At or below this ISP luminance factor, treat as day.
     pub lum_day_threshold: i32,
+    /// `true` when the `WHITE_LED` line drives an infrared emitter rather than
+    /// a visible lamp. Every day/night transition then mirrors its `IR_LED`
+    /// write onto `WHITE_LED`.
+    ///
+    /// The replacement IR ring wires its half/full-power bypass to `HB`, which
+    /// the kernel exposes as `WHITE_LED`; on that board both lines are IR. On
+    /// a stock `RZ-XHR(08SG)-C4` the same line is a visible floodlight, which
+    /// is why this defaults to `false`.
+    ///
+    /// This does not change the ONVIF white-light control: `set_white_light`
+    /// still writes the line directly, so a client toggling white light off
+    /// drops the ring to half power until the next day/night transition
+    /// rewrites it.
+    pub white_led_is_ir: bool,
 }
 
 impl Default for NightConfig {
@@ -805,6 +819,7 @@ impl Default for NightConfig {
             // `[autoir]` block: day_to_night_lum / night_to_day_lum.
             lum_night_threshold: 6400,
             lum_day_threshold: 2048,
+            white_led_is_ir: false,
         }
     }
 }
@@ -1477,6 +1492,31 @@ file_name = "static"
         assert_eq!(cfg.lock_time_ms, 900_000);
         assert!(cfg.ldr_high_is_day);
         assert!(cfg.ircut_high_is_night);
+    }
+
+    #[test]
+    fn test_night_config_defaults_to_treating_white_led_as_visible() {
+        // A stock ring board's WHITE_LED is a floodlight. Driving it on every
+        // night transition is only correct on the replacement all-IR board, so
+        // the default must be off.
+        let cfg = NightConfig::default();
+        assert!(!cfg.white_led_is_ir);
+    }
+
+    #[test]
+    fn test_night_config_parses_white_led_is_ir_from_toml() {
+        // Pins the wire name against the wiki. NightConfig is `serde(default)`
+        // without `deny_unknown_fields`, so a typo like `white_led_ir = true`
+        // parses, is silently ignored, and leaves the replacement ring stuck at
+        // half power forever. Only a positive parse test catches that.
+        let cfg: ImagingConfig = toml::from_str(
+            r#"
+            [night]
+            white_led_is_ir = true
+            "#,
+        )
+        .unwrap();
+        assert!(cfg.night.white_led_is_ir);
     }
 
     #[test]

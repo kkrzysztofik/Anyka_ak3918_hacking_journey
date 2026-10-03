@@ -13,6 +13,7 @@ pnpm-lock.yaml
 .env
 .env.*
 toolchain/
+docs/reference/juan-flash-dump/
 cross-compile/onvif-rust/target/
 cross-compile/onvif-rust/debug/
 cross-compile/onvif-rust/release/

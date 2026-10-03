@@ -1,0 +1,25 @@
+{
+	"bDebug":	false,
+	"CoreFile":	false,
+	"bRecordOverLoad":	true,
+	"strDevpath":	"/dev/mmcblk0p1",
+	"strMountPath":	"/mnt/tf",
+	"nTotalSpacesize":	4096,
+	"nLeaveSpacesize":	4096,
+	"bTimeRecordEnabled":	true,
+	"bScheduleEnabled":	true,
+	"stRecord":	{
+		"bEnable":	true,
+		"Schedulelist":	[{
+				"bEnable":	true,
+				"nWeekday":	127,
+				"nRecType":	15,
+				"chnMask":	15,
+				"nStartTime":	0,
+				"nStopTime":	86399
+			}]
+	},
+	"bStaticRecordEnabled":	false,
+	"bTFReset":	false,
+	"nTFRebootCnt":	0
+}

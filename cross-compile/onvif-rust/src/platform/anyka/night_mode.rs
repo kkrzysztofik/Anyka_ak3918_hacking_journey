@@ -498,6 +498,19 @@ impl NightModeController {
             });
         }
 
+        // The replacement IR ring drives its bypass from HB, which the kernel
+        // calls WHITE_LED. Gated twice: the node must exist, and the operator
+        // must have declared that this camera's white line is infrared.
+        //
+        // This must stay AFTER the `!caps.ir_led` retain above. Mirroring first
+        // would leave orphan WhiteLed writes on a board with no IR lamp — the
+        // retain only strips IrLed — and the transition would abort with a
+        // HardwareFailure. Swapping the two blocks compiles and passes every
+        // test, so the ordering lives here rather than in a reviewer's memory.
+        if self.cfg.white_led_is_ir && self.caps.white_led {
+            mirror_lamp_to_white(&mut steps);
+        }
+
         // Split the plan around the ISP step. `plan()` orders the GPIO writes
         // around the ISP switch (lamp on before night, off after day) so no
         // frame is captured dark, and the trailing SETTLE sleep belongs after
@@ -829,6 +842,7 @@ impl NightModeController {
             ircut_a: gpio.ircut_a,
             ircut_b: gpio.ircut_b,
             white_led: gpio.white_led,
+            white_led_is_ir: self.cfg.white_led_is_ir,
             supported: VisionSupported {
                 ir_led: self.caps.ir_led,
                 ircut: self.caps.ircut,
@@ -900,6 +914,31 @@ pub(super) fn plan(target: DayNight, pol: Polarity, ircut: bool) -> Vec<Step> {
     }
     steps.push(Step::Sleep(SETTLE));
     steps
+}
+
+/// Follow the `IrLed` write in `steps` with the same write to `WhiteLed`.
+///
+/// Inserting the mirror directly after its source preserves `plan()`'s
+/// ordering guarantee — the lamp turns on before the ISP switches to night and
+/// off after it switches to day, so no frame is captured dark.
+fn mirror_lamp_to_white(steps: &mut Vec<Step>) {
+    // `plan()` emits exactly one IrLed write in either direction.
+    let ir = steps.iter().enumerate().find_map(|(i, s)| match s {
+        Step::Write {
+            node: Node::IrLed,
+            value,
+        } => Some((i, *value)),
+        _ => None,
+    });
+    if let Some((i, value)) = ir {
+        steps.insert(
+            i + 1,
+            Step::Write {
+                node: Node::WhiteLed,
+                value,
+            },
+        );
+    }
 }
 
 #[cfg(test)]
@@ -2307,5 +2346,209 @@ mod tests {
 
         // The successful retry must not clear the newer target.
         assert_eq!(*ctl.isp_pending.lock().await, Some(DayNight::Day));
+    }
+
+    #[test]
+    fn test_mirror_lamp_duplicates_each_ir_write_onto_white() {
+        let mut steps = plan(DayNight::Night, pol(), true);
+        mirror_lamp_to_white(&mut steps);
+
+        let ir_at = steps
+            .iter()
+            .position(|s| {
+                matches!(
+                    s,
+                    Step::Write {
+                        node: Node::IrLed,
+                        value: 1
+                    }
+                )
+            })
+            .expect("night plan writes IrLed=1");
+        assert_eq!(
+            steps[ir_at + 1],
+            Step::Write {
+                node: Node::WhiteLed,
+                value: 1
+            },
+            "the white write must immediately follow the IR write so it keeps \
+             plan()'s ordering around the ISP switch"
+        );
+
+        let isp_at = steps.iter().position(|s| *s == Step::IspMode).unwrap();
+        assert!(
+            ir_at + 1 < isp_at,
+            "lamp on before the ISP switches to night"
+        );
+    }
+
+    #[test]
+    fn test_mirror_lamp_follows_the_ir_value_off_at_day() {
+        let mut steps = plan(DayNight::Day, pol(), true);
+        mirror_lamp_to_white(&mut steps);
+
+        let ir_at = steps
+            .iter()
+            .position(|s| {
+                matches!(
+                    s,
+                    Step::Write {
+                        node: Node::IrLed,
+                        value: 0
+                    }
+                )
+            })
+            .expect("day plan writes IrLed=0");
+        assert_eq!(
+            steps[ir_at + 1],
+            Step::Write {
+                node: Node::WhiteLed,
+                value: 0
+            }
+        );
+
+        let isp_at = steps.iter().position(|s| *s == Step::IspMode).unwrap();
+        assert!(
+            isp_at < ir_at,
+            "lamp off only after the ISP switches to day, or a frame is \
+             captured dark"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_apply_night_leaves_white_led_alone_by_default() {
+        use crate::hal::common::imaging::MockImagingHalTrait;
+
+        // The node exists, so caps.white_led is true and only the config term
+        // holds the gate shut. A stock ring board lands here: WHITE_LED is a
+        // visible floodlight and must stay dark through a night transition.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let paths = NodePaths::rooted(dir.path(), dir.path());
+        seed_gpio_nodes(&paths);
+        // Seeded "0", not the helper's "9" sentinel, and deliberately not
+        // folded into seed_gpio_nodes. "9" means "never written", so asserting
+        // against it would only claim the fixture is untouched; "0" means "lamp
+        // off", which is the claim this test exists to make. Widening the
+        // shared helper would force the weaker assertion on every caller.
+        std::fs::write(paths.node(Node::WhiteLed), "0").unwrap();
+
+        let mut ffi = MockImagingHalTrait::new();
+        ffi.expect_set_ir_filter().returning(|_| 0);
+
+        let cfg = test_config();
+        assert!(!cfg.white_led_is_ir, "the default must be off");
+        let ctl = NightModeController::new(
+            paths.clone(),
+            cfg,
+            std::sync::Arc::new(ffi),
+            crate::onvif::types::common::IrCutFilterMode::AUTO,
+            None,
+        );
+        ctl.apply(DayNight::Night).await.unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(paths.node(Node::IrLed)).unwrap(),
+            "1",
+            "the IR lamp still turns on"
+        );
+        assert_eq!(
+            std::fs::read_to_string(paths.node(Node::WhiteLed)).unwrap(),
+            "0",
+            "a stock board's visible floodlight must not be driven by a \
+             night transition"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_apply_night_drives_white_led_when_configured_as_ir() {
+        use crate::hal::common::imaging::MockImagingHalTrait;
+
+        // The replacement all-IR ring: HB drives the half/full-power bypass,
+        // so the mirrored write must reach the GPIO node, not just the plan.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let paths = NodePaths::rooted(dir.path(), dir.path());
+        seed_gpio_nodes(&paths);
+        std::fs::write(paths.node(Node::WhiteLed), "0").unwrap();
+
+        let mut ffi = MockImagingHalTrait::new();
+        ffi.expect_set_ir_filter().returning(|_| 0);
+
+        let ctl = NightModeController::new(
+            paths.clone(),
+            crate::config::types::NightConfig {
+                white_led_is_ir: true,
+                ..Default::default()
+            },
+            std::sync::Arc::new(ffi),
+            crate::onvif::types::common::IrCutFilterMode::AUTO,
+            None,
+        );
+        ctl.apply(DayNight::Night).await.unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(paths.node(Node::IrLed)).unwrap(),
+            "1"
+        );
+        assert_eq!(
+            std::fs::read_to_string(paths.node(Node::WhiteLed)).unwrap(),
+            "1",
+            "both emitters are infrared on this board"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_apply_day_turns_the_mirrored_white_led_back_off() {
+        use crate::hal::common::imaging::MockImagingHalTrait;
+
+        // The day write lands in the post-ISP batch, a different
+        // `spawn_blocking` call than the night write, so passing the night
+        // direction proves nothing about this one. A ring that never turns off
+        // is a worse failure than one that never turns on.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let paths = NodePaths::rooted(dir.path(), dir.path());
+        seed_gpio_nodes(&paths);
+        std::fs::write(paths.node(Node::WhiteLed), "0").unwrap();
+
+        let mut ffi = MockImagingHalTrait::new();
+        ffi.expect_set_ir_filter().returning(|_| 0);
+
+        let ctl = NightModeController::new(
+            paths.clone(),
+            crate::config::types::NightConfig {
+                white_led_is_ir: true,
+                ..Default::default()
+            },
+            std::sync::Arc::new(ffi),
+            crate::onvif::types::common::IrCutFilterMode::AUTO,
+            None,
+        );
+
+        ctl.apply(DayNight::Night).await.unwrap();
+        assert_eq!(
+            std::fs::read_to_string(paths.node(Node::WhiteLed)).unwrap(),
+            "1"
+        );
+
+        ctl.apply(DayNight::Day).await.unwrap();
+        assert_eq!(
+            std::fs::read_to_string(paths.node(Node::IrLed)).unwrap(),
+            "0"
+        );
+        assert_eq!(
+            std::fs::read_to_string(paths.node(Node::WhiteLed)).unwrap(),
+            "0",
+            "the mirrored lamp must come back off at dawn"
+        );
+    }
+
+    #[test]
+    fn test_mirror_lamp_leaves_a_plan_without_lamp_writes_alone() {
+        // The `!caps.ir_led` case: by the time `apply()` mirrors, the retain
+        // has already stripped the lamp writes, so there is nothing to mirror
+        // and the helper must not invent a WhiteLed write with no IR source.
+        let mut steps = vec![Step::IspMode, Step::Sleep(SETTLE)];
+        let before = steps.clone();
+        mirror_lamp_to_white(&mut steps);
+        assert_eq!(steps, before);
     }
 }

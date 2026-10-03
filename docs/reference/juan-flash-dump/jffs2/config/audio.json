@@ -1,0 +1,37 @@
+{
+	"stAudioAilist":	[{
+			"bEnable":	true,
+			"bAmic":	2,
+			"enEncodeType":	1,
+			"enSampleSize":	16,
+			"enSampleSpeed":	8000,
+			"enStereo":	0,
+			"nVolume":	68,
+			"nGain":	40,
+			"bNoiseReduction":	false
+		}, {
+			"bEnable":	false,
+			"bAmic":	2,
+			"enEncodeType":	1,
+			"enSampleSize":	16,
+			"enSampleSpeed":	8000,
+			"enStereo":	0,
+			"nVolume":	68,
+			"nGain":	40,
+			"bNoiseReduction":	false
+		}],
+	"stAudioAo":	{
+		"bEnable":	false,
+		"bAmic":	1,
+		"enEncodeType":	0,
+		"enSampleSize":	16,
+		"enSampleSpeed":	8000,
+		"enStereo":	0,
+		"nVolume":	60,
+		"nGain":	100,
+		"nAlarmVolume":	60,
+		"nAlarmGain":	100
+	},
+	"bVoiceAlarmEnable":	false,
+	"nVoiceAlarmLevel":	90
+}
