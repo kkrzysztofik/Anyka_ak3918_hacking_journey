@@ -11,18 +11,12 @@ use std::time::{Duration, Instant};
 
 /// Exponential backoff: `min << (attempt - 1)`, clamped to `max`.
 pub fn backoff_delay(attempt: u32, min: Duration, max: Duration) -> Duration {
-    if attempt == 0 {
-        return min;
-    }
-    // Shifts past 63 would overflow; anything that large is already >= max.
-    let shift = attempt - 1;
-    if shift >= 63 {
-        return max;
-    }
-    match min.checked_mul(1u32 << shift.min(31)) {
-        Some(d) if d < max => d,
-        _ => max,
-    }
+    // checked_shl fails past 31 and checked_mul on overflow: both mean the
+    // delay is already past any sane max.
+    1u32.checked_shl(attempt.saturating_sub(1))
+        .and_then(|m| min.checked_mul(m))
+        .filter(|d| *d < max)
+        .unwrap_or(max)
 }
 
 /// Sliding window of restart timestamps, used for the crash-loop cap.
@@ -39,12 +33,12 @@ impl RestartHistory {
     /// Drops entries strictly older than `window`. An entry exactly `window`
     /// old is still inside the window.
     pub fn prune(&mut self, now: Instant, window: Duration) {
-        while let Some(&front) = self.stamps.front() {
-            if now.duration_since(front) > window {
-                self.stamps.pop_front();
-            } else {
-                break;
-            }
+        while self
+            .stamps
+            .front()
+            .is_some_and(|&f| now.duration_since(f) > window)
+        {
+            self.stamps.pop_front();
         }
     }
 
@@ -81,8 +75,7 @@ impl SvcState {
     pub fn pid(&self) -> Option<Pid> {
         match self {
             Self::Running { pid, .. } => Some(*pid),
-            Self::Backoff { .. } => None,
-            Self::Disabled => None,
+            Self::Backoff { .. } | Self::Disabled => None,
         }
     }
 }
@@ -167,20 +160,15 @@ pub fn decide(
             }
         }
 
-        (SvcState::Backoff { until, attempt }, _) => {
-            if now >= *until {
-                Decision {
-                    action: Action::Start,
-                    next: SvcState::Backoff {
-                        until: *until,
-                        attempt: *attempt,
-                    },
-                }
+        (SvcState::Backoff { until, .. }, _) => {
+            let action = if now >= *until {
+                Action::Start
             } else {
-                Decision {
-                    action: Action::Sleep(until.duration_since(now)),
-                    next: *state,
-                }
+                Action::Sleep(until.duration_since(now))
+            };
+            Decision {
+                action,
+                next: *state,
             }
         }
 

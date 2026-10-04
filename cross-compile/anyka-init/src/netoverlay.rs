@@ -71,17 +71,6 @@ impl NetworkOverlay {
         }
     }
 
-    /// True when any overlay key is present (file exists and parsed non-empty).
-    pub fn has_content(&self) -> bool {
-        self.ssid.is_some()
-            || self.password.is_some()
-            || self.security.is_some()
-            || self.dhcp.is_some()
-            || self.address.is_some()
-            || self.gateway.is_some()
-            || self.dns.is_some()
-    }
-
     /// Whether this overlay overrides Wi-Fi association inputs.
     pub fn overrides_association(&self) -> bool {
         self.ssid.is_some() || self.password.is_some() || self.security.is_some()

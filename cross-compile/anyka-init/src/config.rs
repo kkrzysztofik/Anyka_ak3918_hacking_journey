@@ -570,10 +570,6 @@ impl Config {
             }
             Err(err) => return Err(err),
         };
-        if !overlay.has_content() {
-            return Ok(());
-        }
-
         let baseline_wifi = cfg.wifi.clone();
         if let Err(err) = overlay.validate() {
             tracing::warn!(error = %err, "invalid network overlay; quarantining");

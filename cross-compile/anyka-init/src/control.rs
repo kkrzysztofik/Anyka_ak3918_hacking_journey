@@ -26,32 +26,29 @@ impl ServiceStatus {
         hist: &RestartHistory,
         now: Instant,
     ) -> Self {
+        let mut s = Self {
+            name: name.to_owned(),
+            state: "disabled",
+            pid: None,
+            uptime_s: 0,
+            restarts: 0,
+            retry_in_s: 0,
+        };
         match state {
-            SvcState::Running { pid, since } => Self {
-                name: name.to_owned(),
-                state: "running",
-                pid: Some(*pid),
-                uptime_s: now.duration_since(*since).as_secs(),
-                restarts: hist.len() as u64,
-                retry_in_s: 0,
-            },
-            SvcState::Backoff { until, attempt } => Self {
-                name: name.to_owned(),
-                state: "backoff",
-                pid: None,
-                uptime_s: 0,
-                restarts: *attempt as u64,
-                retry_in_s: until.saturating_duration_since(now).as_secs(),
-            },
-            SvcState::Disabled => Self {
-                name: name.to_owned(),
-                state: "disabled",
-                pid: None,
-                uptime_s: 0,
-                restarts: 0,
-                retry_in_s: 0,
-            },
+            SvcState::Running { pid, since } => {
+                s.state = "running";
+                s.pid = Some(*pid);
+                s.uptime_s = now.duration_since(*since).as_secs();
+                s.restarts = hist.len() as u64;
+            }
+            SvcState::Backoff { until, attempt } => {
+                s.state = "backoff";
+                s.restarts = u64::from(*attempt);
+                s.retry_in_s = until.saturating_duration_since(now).as_secs();
+            }
+            SvcState::Disabled => {}
         }
+        s
     }
 
     /// One TSV row: `name\tstate\tpid\tuptime_s\trestarts\tretry_in_s`.
@@ -66,12 +63,10 @@ impl ServiceStatus {
 }
 
 pub fn encode_status(rows: &[ServiceStatus]) -> String {
-    let mut out = String::new();
-    for r in rows {
-        out.push_str(&r.encode_tsv());
-    }
-    out.push('\n');
-    out
+    rows.iter()
+        .map(ServiceStatus::encode_tsv)
+        .collect::<String>()
+        + "\n"
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

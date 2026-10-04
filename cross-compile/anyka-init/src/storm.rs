@@ -70,10 +70,6 @@ impl StormState {
     }
 }
 
-pub fn should_enter_safe_mode(fast_reboots: u8, max_reboots: u8) -> bool {
-    fast_reboots >= max_reboots
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -139,14 +135,6 @@ mod tests {
         ] {
             assert_eq!(StormState::parse(bad), StormState::default());
         }
-    }
-
-    #[test]
-    fn test_should_enter_safe_mode_at_threshold() {
-        assert!(!should_enter_safe_mode(0, 3));
-        assert!(!should_enter_safe_mode(2, 3));
-        assert!(should_enter_safe_mode(3, 3));
-        assert!(should_enter_safe_mode(4, 3));
     }
 
     #[test]

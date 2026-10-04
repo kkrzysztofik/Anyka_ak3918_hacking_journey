@@ -48,10 +48,7 @@ fn main() {
     let sysimpl: Arc<dyn sys::Sys> = Arc::new(sys::RealSys::new());
 
     let storm_state = storm::StormState::load(&cfg.supervisor.storm_guard_state);
-    let safe_mode = storm::should_enter_safe_mode(
-        storm_state.fast_reboots,
-        cfg.supervisor.storm_guard_max_reboots,
-    );
+    let safe_mode = storm_state.fast_reboots >= cfg.supervisor.storm_guard_max_reboots;
     if safe_mode {
         tracing::error!(
             fast_reboots = storm_state.fast_reboots,
