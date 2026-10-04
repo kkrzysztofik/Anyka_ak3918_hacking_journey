@@ -693,7 +693,7 @@ rtk git commit -m "refactor(snmp-agent)!: drop snmp.toml enabled; anyka-init own
 
 ### Task 13: onvif-rust parses `snmp.toml` with the agent's own struct
 
-Removes `SnmpSettings` (a field-for-field copy plus the drift test that guarded it), `SnmpView` (another copy), `validate_patch` (the shared `validate()` covers it), and `config_path()`/`set_config_path_for_test`, which only their own test used. Every snmp-agent dependency is already an onvif-rust dependency.
+Removes `SnmpSettings` (a field-for-field copy plus the drift test that guarded it), `SnmpView` (another copy), `validate_patch` (the shared `validate()` covers it), and `config_path()`/`set_config_path_for_test`, which only their own test used. onvif-rust already depends on every snmp-agent dependency except `anyka-init`, which Task 11 added (bin-only); that crate is now compiled transitively for onvif-rust too — harmless, no cycle, but not free.
 
 **Files:**
 - Modify: `cross-compile/onvif-rust/Cargo.toml` (add `snmp-agent = { path = "../snmp-agent" }` to `[dependencies]`)
