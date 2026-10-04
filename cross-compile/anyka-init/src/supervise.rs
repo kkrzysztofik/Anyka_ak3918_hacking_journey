@@ -228,6 +228,17 @@ mod backoff_tests {
     fn test_backoff_attempt_zero_returns_min() {
         assert_eq!(backoff_delay(0, MIN, MAX), MIN);
     }
+
+    #[test]
+    fn test_backoff_pins_the_shift_width_boundaries() {
+        // Task 5 rewrites backoff_delay around checked_shl; these are the
+        // values on both sides of every guard the old code had.
+        for attempt in [31, 32, 33, 62, 63, 64] {
+            assert_eq!(backoff_delay(attempt, MIN, MAX), MAX, "attempt {attempt}");
+        }
+        assert_eq!(backoff_delay(0, MAX, MAX), MAX, "min == max at attempt 0");
+        assert_eq!(backoff_delay(9, Duration::ZERO, MAX), Duration::ZERO);
+    }
 }
 
 #[cfg(test)]

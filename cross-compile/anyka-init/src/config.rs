@@ -1581,4 +1581,25 @@ timezone = \"UTC0\"
         // Still parses.
         Config::load_without_overlay(path.to_str().expect("utf8")).ok();
     }
+
+    /// Every default, frozen. Task 2 moves these values from `d_*` fns into
+    /// `Default` impls; a typo there must fail here, not on a camera.
+    const DEFAULTS_GOLDEN: &str = r#"Config { schema: 0, log: LogCfg { dir: "/mnt/logs", level: "info", max_bytes: 2000000, keep: 2 }, system: SystemCfg { sensor_module: None, telnet: false, ftp: true }, wifi: WifiCfg { ssid: "testnet", password: "secret", config_file: "/etc/jffs2/anyka_cfg.ini", chip: "auto", gpio_polarity: "low_high", interface: "wlan0", security: "wpa", dhcp: true, address: None, gateway: None, dns: [], connect_timeout_sec: 45, fallback_to_vendor: true }, time: TimeCfg { enabled: true, servers: ["0.ubuntu.pool.ntp.org", "1.ubuntu.pool.ntp.org"], timezone: "GMT+00:00", first_sync_timeout_sec: 15, retry_interval_sec: 30, resync_interval_sec: 21600, step_threshold_sec: 2, min_plausible_unix: 1767225600, max_plausible_unix: 2147483647 }, supervisor: SupervisorCfg { backoff_min_sec: 1, backoff_max_sec: 60, crashloop_count: 10, crashloop_window_sec: 600, storm_guard_max_reboots: 3, storm_guard_state: "/mnt/anyka_hack/state/boot.json", storm_guard_reset_uptime_sec: 600 }, monitor: MonitorCfg { enabled: true, interval_sec: 60, wifi: true, wifi_probe: true, wifi_dhcp_after_ticks: 3, wifi_supplicant_after_ticks: 5, wifi_reboot_after_ticks: 10, wifi_reboot_cap: 3, video: true, video_restart_after_ticks: 2, video_kill_after_ticks: 3, video_reboot_after_ticks: 5, video_heartbeat_path: "/tmp/vd_heartbeat" }, reboot: RebootCfg { enabled: false, interval_min: 720, jitter_max_sec: 0 }, update: Update { root: "/mnt/anyka_hack", trial_hold_sec: 30, trial_deadline_sec: 120, trial_ports: [80, 554, 8080] }, services: {} }"#;
+
+    #[test]
+    fn test_defaults_match_the_golden_when_sections_are_absent() {
+        let cfg = Config::from_str(MINIMAL).expect("parses");
+        assert_eq!(format!("{cfg:?}"), DEFAULTS_GOLDEN);
+    }
+
+    #[test]
+    fn test_defaults_match_the_golden_when_sections_are_present_but_empty() {
+        // The other serde path: a present `[log]` header with no keys fills
+        // fields one by one, not via the section-level default.
+        let src = format!(
+            "{MINIMAL}\n[log]\n[system]\n[time]\n[supervisor]\n[monitor]\n[reboot]\n[update]\n"
+        );
+        let cfg = Config::from_str(&src).expect("parses");
+        assert_eq!(format!("{cfg:?}"), DEFAULTS_GOLDEN);
+    }
 }
