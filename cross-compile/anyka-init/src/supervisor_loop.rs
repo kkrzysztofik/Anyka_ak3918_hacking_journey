@@ -44,10 +44,6 @@ where
 /// by sending the process SIGCHLD.
 const REAP_POLL_INTERVAL: Duration = Duration::from_secs(1);
 
-pub enum ControlMsg {
-    Status(Vec<control::ServiceStatus>),
-}
-
 pub enum Msg {
     Exited(Pid, ExitStatus),
     Shutdown,
@@ -58,7 +54,7 @@ pub enum Msg {
     /// SIGKILL. A task wedged in D state will not die even from this — the
     /// monitor's next rung is a reboot, which does not need the process to die.
     KillService(String),
-    QueryStatus(Sender<ControlMsg>),
+    QueryStatus(Sender<Vec<control::ServiceStatus>>),
     /// Runtime enable/disable of a configured service. The handler persists to
     /// `anyka.toml` first, then transitions in-memory state.
     ToggleService {
@@ -79,6 +75,22 @@ struct Service {
     spec: SpawnSpec,
     state: SvcState,
     hist: RestartHistory,
+}
+
+impl Service {
+    /// The state a boot start gets: the next tick starts it under the normal
+    /// backoff/crash-loop policy.
+    fn pending(name: String, spec: SpawnSpec, now: Instant) -> Self {
+        Self {
+            name,
+            spec,
+            state: SvcState::Backoff {
+                until: now,
+                attempt: 0,
+            },
+            hist: RestartHistory::default(),
+        }
+    }
 }
 
 /// Rewrite a `SpawnSpec` so exec and slot-owned env paths resolve inside the
@@ -120,10 +132,6 @@ fn rewrite_env(key: &str, value: &str, rewrite: &impl Fn(&str) -> String) -> Str
     } else {
         rewrite(value)
     }
-}
-
-pub fn make_channel() -> (Sender<Msg>, Receiver<Msg>) {
-    channel()
 }
 
 pub fn spawn_reaper(
@@ -190,14 +198,8 @@ fn build_enabled_services(
     cfg.services
         .iter()
         .filter(|(_, s)| s.enabled)
-        .map(|(name, s)| Service {
-            name: name.clone(),
-            spec: spec_of_slot(s, update_root, slots),
-            state: SvcState::Backoff {
-                until: sys.now(),
-                attempt: 0,
-            },
-            hist: RestartHistory::default(),
+        .map(|(name, s)| {
+            Service::pending(name.clone(), spec_of_slot(s, update_root, slots), sys.now())
         })
         .collect()
 }
@@ -322,10 +324,7 @@ fn tick_services(
         }
 
         if let SvcState::Backoff { until, .. } = services[i].state {
-            next_deadline = Some(match next_deadline {
-                Some(d) if d < until => d,
-                _ => until,
-            });
+            next_deadline = Some(next_deadline.map_or(until, |d| d.min(until)));
         }
     }
 
@@ -374,21 +373,22 @@ fn handle_service_exited(
     }
 }
 
-fn handle_restart_service(sys: &dyn Sys, services: &[Service], name: String) {
+/// Signal a supervised service at the monitor's request: SIGTERM to restart
+/// it (the exit path respawns it under backoff), SIGKILL when SIGTERM did not
+/// take. A task wedged in D state survives even SIGKILL; the monitor's next
+/// rung is a reboot.
+fn signal_service(sys: &dyn Sys, services: &[Service], name: &str, sig: i32) {
     match services.iter().find(|s| s.name == name) {
         Some(svc) => match svc.state.pid() {
             Some(pid) => {
-                tracing::warn!(service = %name, pid, "restart requested by monitor");
-                let _ = sys.kill(pid, libc::SIGTERM);
+                tracing::warn!(service = %name, pid, sig, "signalling service at the monitor's request");
+                let _ = sys.kill(pid, sig);
             }
-            None => tracing::info!(
-                service = %name,
-                "restart requested but the service is not running"
-            ),
+            None => {
+                tracing::info!(service = %name, sig, "signal requested but the service is not running")
+            }
         },
-        None => {
-            tracing::warn!(service = %name, "restart requested for unknown service")
-        }
+        None => tracing::warn!(service = %name, sig, "signal requested for unknown service"),
     }
 }
 
@@ -396,7 +396,11 @@ fn handle_restart_service(sys: &dyn Sys, services: &[Service], name: String) {
 /// service has to be listable or the UI has no way to offer re-enabling it.
 /// `cfg` is the single source of truth — both the boot path and the toggle
 /// handler write it before anything else.
-fn handle_query_status(cfg: &Config, services: &[Service], reply_tx: &Sender<ControlMsg>) {
+fn handle_query_status(
+    cfg: &Config,
+    services: &[Service],
+    reply_tx: &Sender<Vec<control::ServiceStatus>>,
+) {
     let now = Instant::now();
     let rows: Vec<control::ServiceStatus> = cfg
         .services
@@ -413,18 +417,19 @@ fn handle_query_status(cfg: &Config, services: &[Service], reply_tx: &Sender<Con
                     control::ServiceStatus::from_svc_state(&svc.name, &svc.state, &svc.hist, now)
                 }
                 // Enabled but not yet in the vec: render as pending, never drop.
-                None => control::ServiceStatus {
-                    name: name.clone(),
-                    state: "backoff",
-                    pid: None,
-                    uptime_s: 0,
-                    restarts: 0,
-                    retry_in_s: 0,
-                },
+                None => control::ServiceStatus::from_svc_state(
+                    name,
+                    &SvcState::Backoff {
+                        until: now,
+                        attempt: 0,
+                    },
+                    &RestartHistory::default(),
+                    now,
+                ),
             }
         })
         .collect();
-    let _ = reply_tx.send(ControlMsg::Status(rows));
+    let _ = reply_tx.send(rows);
 }
 
 /// Services that may not be toggled at runtime.
@@ -435,14 +440,6 @@ fn handle_query_status(cfg: &Config, services: &[Service], reply_tx: &Sender<Con
 /// the device outright.
 const NON_TOGGLEABLE: [&str; 1] = ["wpa_supplicant"];
 
-/// Runtime enable/disable. Order is deliberate: **file first**, then
-/// in-memory cfg, then state/kill. A failed write means nothing changes — a
-/// "disabled" service that silently re-enabled itself on reboot would defeat
-/// the crash-loop escape hatch this exists for.
-///
-/// `telnetd` is special-cased before any service lookup: it is not a
-/// supervised service, it is the `[system].telnet` switch (see
-/// `handle_toggle_telnet`).
 /// Replace `[time].servers`: persist to `anyka.toml` first, then update the
 /// in-memory config, the same visible order as `handle_toggle_service` — a
 /// failed write leaves memory untouched so the two can never disagree.
@@ -462,6 +459,14 @@ fn handle_set_ntp(
     let _ = reply.send(control::ToggleOutcome::Ok);
 }
 
+/// Runtime enable/disable. Order is deliberate: **file first**, then
+/// in-memory cfg, then state/kill. A failed write means nothing changes — a
+/// "disabled" service that silently re-enabled itself on reboot would defeat
+/// the crash-loop escape hatch this exists for.
+///
+/// `telnetd` is special-cased before any service lookup: it is not a
+/// supervised service, it is the `[system].telnet` switch (see
+/// `handle_toggle_telnet`).
 fn handle_toggle_service(
     ctx: &mut LoopCtx<'_>,
     services: &mut Vec<Service>,
@@ -520,15 +525,11 @@ fn handle_toggle_service(
             // Not in the vec: disabled at boot, never started (the shipped
             // dropbear case). Insert exactly as build_enabled_services would.
             if let Some(s) = ctx.cfg.services.get(&name) {
-                services.push(Service {
-                    name: name.clone(),
-                    spec: spec_of_slot(s, ctx.update_root, ctx.slots),
-                    state: SvcState::Backoff {
-                        until: ctx.sys.now(),
-                        attempt: 0,
-                    },
-                    hist: RestartHistory::default(),
-                });
+                services.push(Service::pending(
+                    name.clone(),
+                    spec_of_slot(s, ctx.update_root, ctx.slots),
+                    ctx.sys.now(),
+                ));
                 tracing::info!(service = %name, "enabled (inserted)");
             }
         }
@@ -552,22 +553,6 @@ fn handle_toggle_service(
     let _ = reply.send(control::ToggleOutcome::Ok);
 }
 
-fn handle_kill_service(sys: &dyn Sys, services: &[Service], name: String) {
-    match services.iter().find(|s| s.name == name) {
-        Some(svc) => match svc.state.pid() {
-            Some(pid) => {
-                tracing::warn!(service = %name, pid, "SIGTERM did not take; sending SIGKILL");
-                let _ = sys.kill(pid, libc::SIGKILL);
-            }
-            None => tracing::info!(
-                service = %name,
-                "kill requested but the service is not running"
-            ),
-        },
-        None => tracing::warn!(service = %name, "kill requested for unknown service"),
-    }
-}
-
 fn handle_control_conn(mut stream: UnixStream, tx: &Sender<Msg>) -> std::io::Result<()> {
     use std::io::{BufRead, Write};
     let mut reader = std::io::BufReader::new(&stream);
@@ -579,12 +564,12 @@ fn handle_control_conn(mut stream: UnixStream, tx: &Sender<Msg>) -> std::io::Res
         Some(control::Request::Status) => {
             let (reply_tx, reply_rx) = channel();
             if tx.send(Msg::QueryStatus(reply_tx)).is_ok() {
-                // Bounded like `send_toggle`. This thread serves connections
+                // Bounded like `send_and_reply`. This thread serves connections
                 // one at a time, so an unbounded wait on a wedged loop would
                 // not just hang this status call — every later status,
                 // restart, enable and disable would queue behind it forever.
                 let reply = reply_rx.recv_timeout(CONTROL_REPLY_TIMEOUT);
-                if let Ok(ControlMsg::Status(rows)) = reply {
+                if let Ok(rows) = reply {
                     let _ = stream.write_all(control::encode_status(&rows).as_bytes());
                 }
             }
@@ -595,33 +580,35 @@ fn handle_control_conn(mut stream: UnixStream, tx: &Sender<Msg>) -> std::io::Res
             // else as a failure — keep the reply minimal, not chatty.
             let _ = stream.write_all(b"ok\n");
         }
-        Some(control::Request::Enable(name)) => send_toggle(&mut stream, tx, name, true),
-        Some(control::Request::Disable(name)) => send_toggle(&mut stream, tx, name, false),
+        Some(control::Request::Enable(name)) => {
+            let (reply, rx) = channel();
+            send_and_reply(
+                &mut stream,
+                tx,
+                Msg::ToggleService {
+                    name,
+                    enabled: true,
+                    reply,
+                },
+                rx,
+            );
+        }
+        Some(control::Request::Disable(name)) => {
+            let (reply, rx) = channel();
+            send_and_reply(
+                &mut stream,
+                tx,
+                Msg::ToggleService {
+                    name,
+                    enabled: false,
+                    reply,
+                },
+                rx,
+            );
+        }
         Some(control::Request::SetNtp(servers)) => {
-            let (reply_tx, reply_rx) = channel();
-            if tx
-                .send(Msg::SetNtpServers {
-                    servers,
-                    reply: reply_tx,
-                })
-                .is_err()
-            {
-                let _ = stream.write_all(b"error\n");
-                return Ok(());
-            }
-            // Same reply semantics as `send_toggle`: a timeout is `pending`,
-            // not `error` — the message is still queued and may still apply.
-            let reply = match reply_rx.recv_timeout(CONTROL_REPLY_TIMEOUT) {
-                Ok(control::ToggleOutcome::Ok) => "ok\n",
-                Ok(control::ToggleOutcome::Unknown) => "unknown\n",
-                Ok(control::ToggleOutcome::Error) => "error\n",
-                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-                    tracing::warn!("set-ntp reply timed out; the change may still apply");
-                    "pending\n"
-                }
-                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => "error\n",
-            };
-            let _ = stream.write_all(reply.as_bytes());
+            let (reply, rx) = channel();
+            send_and_reply(&mut stream, tx, Msg::SetNtpServers { servers, reply }, rx);
         }
         None => {
             let _ = stream.write_all(b"unknown\n");
@@ -637,28 +624,26 @@ fn handle_control_conn(mut stream: UnixStream, tx: &Sender<Msg>) -> std::io::Res
 /// waits turns every slow reply into a connection error.
 const CONTROL_REPLY_TIMEOUT: Duration = Duration::from_secs(1);
 
-/// Ask the loop to toggle a service and write its verdict back to the
-/// connection.
-fn send_toggle<W: std::io::Write>(writer: &mut W, tx: &Sender<Msg>, name: String, enabled: bool) {
-    let (reply_tx, reply_rx) = channel();
-    let sent = tx.send(Msg::ToggleService {
-        name,
-        enabled,
-        reply: reply_tx,
-    });
-    let reply = match sent {
-        // A timeout is NOT a failure. The message is still queued, and
-        // `handle_toggle_service` writes `anyka.toml` and updates state
-        // *before* it replies — dropping the receiver cancels nothing. Saying
-        // "error" here would tell an admin nothing changed while the toggle
-        // lands a moment later. `pending` says what is actually true: it was
-        // accepted, the outcome is unconfirmed, go look at the service list.
+/// Queue `msg` for the loop and write its verdict back to the connection.
+fn send_and_reply<W: std::io::Write>(
+    writer: &mut W,
+    tx: &Sender<Msg>,
+    msg: Msg,
+    reply_rx: Receiver<control::ToggleOutcome>,
+) {
+    let reply = match tx.send(msg) {
+        // A timeout is NOT a failure. The message is still queued, and the
+        // handler writes `anyka.toml` and updates state *before* it replies —
+        // dropping the receiver cancels nothing. Saying "error" here would
+        // tell an admin nothing changed while the change lands a moment
+        // later. `pending` says what is actually true: it was accepted, the
+        // outcome is unconfirmed, go look at the service list.
         Ok(()) => match reply_rx.recv_timeout(CONTROL_REPLY_TIMEOUT) {
             Ok(control::ToggleOutcome::Ok) => "ok\n",
             Ok(control::ToggleOutcome::Unknown) => "unknown\n",
             Ok(control::ToggleOutcome::Error) => "error\n",
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-                tracing::warn!("toggle reply timed out; the change may still apply");
+                tracing::warn!("control reply timed out; the change may still apply");
                 "pending\n"
             }
             Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => "error\n",
@@ -724,11 +709,11 @@ fn dispatch_msg(
             false
         }
         Ok(Msg::RestartService(name)) => {
-            handle_restart_service(ctx.sys, services, name);
+            signal_service(ctx.sys, services, &name, libc::SIGTERM);
             false
         }
         Ok(Msg::KillService(name)) => {
-            handle_kill_service(ctx.sys, services, name);
+            signal_service(ctx.sys, services, &name, libc::SIGKILL);
             false
         }
         Ok(Msg::QueryStatus(reply_tx)) => {
@@ -810,15 +795,10 @@ pub fn run(sys: Arc<dyn Sys>, cfg: &mut Config, config_path: &Path, rx: Receiver
 /// not reboot in lockstep and brown out the recorder they all stream to. Pure
 /// so the clamp is testable without waiting hours.
 pub fn periodic_reboot_delay(interval_min: u64, jitter_max_sec: u64, entropy: u64) -> Duration {
-    let base = interval_min.saturating_mul(60);
-    let jitter = if jitter_max_sec == 0 {
-        0
-    } else {
-        // saturating: `jitter_max_sec + 1` overflows at u64::MAX, and the
-        // modulus must never be zero.
-        entropy % jitter_max_sec.saturating_add(1)
-    };
-    Duration::from_secs(base.saturating_add(jitter))
+    // saturating: `jitter_max_sec + 1` overflows at u64::MAX. At 0 the
+    // modulus is 1, so the jitter is 0 without a special case.
+    let jitter = entropy % jitter_max_sec.saturating_add(1);
+    Duration::from_secs(interval_min.saturating_mul(60).saturating_add(jitter))
 }
 
 /// Replaces `periodic_reboot.sh`. Only started when `[reboot].enabled` is true.
@@ -1151,31 +1131,13 @@ mod run_tests {
 
     /// A `LoopCtx` over test-owned parts. Returned by value so each test can
     /// keep its tempdir alive.
-    fn ctx<'a>(
-        sys: &'a dyn Sys,
-        cfg: &'a mut Config,
-        config_path: &'a Path,
-        update_root: &'a Path,
-        slots: &'a crate::update::Slots,
-        policy: &'a Policy,
-    ) -> LoopCtx<'a> {
-        LoopCtx {
-            sys,
-            cfg,
-            config_path,
-            update_root,
-            slots,
-            policy,
-        }
-    }
-
     #[test]
     fn test_run_restart_message_for_unknown_service_is_ignored() {
         let mut sys = MockSys::new();
         sys.expect_now().returning(Instant::now);
 
         let mut cfg = test_config(BTreeMap::new());
-        let (tx, rx) = make_channel();
+        let (tx, rx) = channel();
         let sys: Arc<dyn Sys> = Arc::new(sys);
         let handle = std::thread::spawn(move || {
             run(sys, &mut cfg, Path::new("/nonexistent/anyka.toml"), rx)
@@ -1208,7 +1170,7 @@ mod run_tests {
             },
         );
         let mut cfg = test_config(services);
-        let (tx, rx) = make_channel();
+        let (tx, rx) = channel();
         let sys: Arc<dyn Sys> = Arc::new(sys);
         let handle = std::thread::spawn(move || {
             run(sys, &mut cfg, Path::new("/nonexistent/anyka.toml"), rx)
@@ -1229,7 +1191,7 @@ mod run_tests {
         sys.expect_now().returning(Instant::now);
 
         let mut cfg = test_config(BTreeMap::new());
-        let (tx, rx) = make_channel();
+        let (tx, rx) = channel();
         let sys: Arc<dyn Sys> = Arc::new(sys);
         let handle = std::thread::spawn(move || {
             run(sys, &mut cfg, Path::new("/nonexistent/anyka.toml"), rx)
@@ -1302,14 +1264,14 @@ mod run_tests {
 
         fn toggle(&mut self, sys: &dyn Sys, name: &str, enabled: bool) -> control::ToggleOutcome {
             let (rtx, rrx) = channel();
-            let mut c = ctx(
+            let mut c = LoopCtx {
                 sys,
-                &mut self.cfg,
-                &self.cfg_path,
-                self.dir.path(),
-                &self.slots,
-                &self.policy,
-            );
+                cfg: &mut self.cfg,
+                config_path: &self.cfg_path,
+                update_root: self.dir.path(),
+                slots: &self.slots,
+                policy: &self.policy,
+            };
             handle_toggle_service(&mut c, &mut self.svcs, name.into(), enabled, &rtx);
             rrx.recv().expect("reply")
         }
@@ -1474,7 +1436,7 @@ mod run_tests {
 
         let (tx, rx) = channel();
         handle_query_status(&cfg, &svcs, &tx);
-        let ControlMsg::Status(rows) = rx.recv().expect("status");
+        let rows = rx.recv().expect("status");
 
         // BTreeMap order; disabled rows synthesized from cfg.
         let names: Vec<&str> = rows.iter().map(|r| r.name.as_str()).collect();
@@ -1498,7 +1460,7 @@ mod run_tests {
 
         let (tx, rx) = channel();
         handle_query_status(&cfg, &[], &tx);
-        let ControlMsg::Status(rows) = rx.recv().expect("status");
+        let rows = rx.recv().expect("status");
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].state, "backoff");
     }
