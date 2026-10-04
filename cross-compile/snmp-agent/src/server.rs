@@ -2,7 +2,7 @@
 
 use crate::config::{DEFAULT_CONFIG_PATH, SnmpConfig};
 use crate::mib::{self, Snapshot, interfaces};
-use crate::pdu::{Pdu, PduType, SNMP_V2C_VERSION, SnmpMessage};
+use crate::pdu::{Pdu, PduType, SnmpMessage};
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -128,7 +128,6 @@ pub fn handle_datagram(bytes: &[u8], agent: &Agent) -> Option<Vec<u8>> {
         };
 
     SnmpMessage {
-        version: SNMP_V2C_VERSION,
         community: msg.community,
         pdu: Pdu {
             pdu_type: PduType::GetResponse,
@@ -318,7 +317,6 @@ mod tests {
 
     fn get_sysname_bytes(community: &str) -> Vec<u8> {
         let msg = SnmpMessage {
-            version: SNMP_V2C_VERSION,
             community: community.to_string(),
             pdu: Pdu {
                 pdu_type: PduType::GetRequest,

@@ -6,7 +6,7 @@ use crate::ber::{
 use thiserror::Error;
 
 /// SNMPv2c wire version (INTEGER 1).
-pub const SNMP_V2C_VERSION: i32 = 1;
+const SNMP_V2C_VERSION: i32 = 1;
 
 /// SNMP PDU type; the discriminant is the context-specific BER tag.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -71,7 +71,6 @@ pub struct Pdu {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SnmpMessage {
-    pub version: i32,
     pub community: String,
     pub pdu: Pdu,
 }
@@ -111,17 +110,17 @@ impl SnmpMessage {
         let pdu_type = PduType::from_tag(pdu_tag).ok_or(PduError::Malformed)?;
         let pdu = parse_pdu_body(pdu_type, pdu_content)?;
 
-        Ok(Self {
-            version,
-            community,
-            pdu,
-        })
+        Ok(Self { community, pdu })
     }
 
     /// Encode a response (or any PDU) as an SNMPv2c message.
     pub fn encode(&self) -> Result<Vec<u8>, PduError> {
         let mut inner = Vec::new();
-        ber::write_tlv(TAG_INTEGER, &ber::encode_integer(self.version), &mut inner);
+        ber::write_tlv(
+            TAG_INTEGER,
+            &ber::encode_integer(SNMP_V2C_VERSION),
+            &mut inner,
+        );
         ber::write_tlv(TAG_OCTET_STRING, self.community.as_bytes(), &mut inner);
         let pdu_bytes = encode_pdu(&self.pdu)?;
         inner.extend_from_slice(&pdu_bytes);
@@ -276,7 +275,6 @@ mod tests {
     #[test]
     fn test_parse_get_sysdescr_public() {
         let msg = SnmpMessage::parse(&hand_built_get_sysdescr()).expect("parse");
-        assert_eq!(msg.version, SNMP_V2C_VERSION);
         assert_eq!(msg.community, "public");
         assert_eq!(msg.pdu.pdu_type, PduType::GetRequest);
         assert_eq!(msg.pdu.request_id, 1);
@@ -309,7 +307,6 @@ mod tests {
     fn test_encode_round_trips_all_value_types() {
         let oid = Oid::from_slice(&[1, 3, 6, 1, 2, 1, 1, 2, 0]).unwrap();
         let msg = SnmpMessage {
-            version: SNMP_V2C_VERSION,
             community: "public".into(),
             pdu: Pdu {
                 pdu_type: PduType::GetResponse,
@@ -393,7 +390,6 @@ mod tests {
     fn test_counter32_max_round_trips() {
         let oid = Oid::from_slice(&[1, 3, 6, 1, 2, 1, 2, 2, 1, 10, 1]).unwrap();
         let msg = SnmpMessage {
-            version: SNMP_V2C_VERSION,
             community: "public".into(),
             pdu: Pdu {
                 pdu_type: PduType::GetResponse,

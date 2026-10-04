@@ -1,7 +1,7 @@
 //! End-to-end walk against a running agent. No net-snmp dependency, so it gates CI.
 
 use snmp_agent::ber::Oid;
-use snmp_agent::pdu::{Pdu, PduType, SNMP_V2C_VERSION, SnmpMessage, SnmpValue, VarBind};
+use snmp_agent::pdu::{Pdu, PduType, SnmpMessage, SnmpValue, VarBind};
 use std::time::Duration;
 use tokio::net::UdpSocket;
 
@@ -29,7 +29,6 @@ async fn spawn_agent() -> (u16, tokio::task::JoinHandle<()>, tempfile::TempDir) 
 
 fn request(pdu_type: PduType, oid: Oid) -> Vec<u8> {
     SnmpMessage {
-        version: SNMP_V2C_VERSION,
         community: "public".into(),
         pdu: Pdu {
             pdu_type,
@@ -188,7 +187,6 @@ async fn test_getbulk_walks_iftable() {
     let client = UdpSocket::bind("127.0.0.1:0").await.unwrap();
 
     let req = SnmpMessage {
-        version: SNMP_V2C_VERSION,
         community: "public".into(),
         pdu: Pdu {
             pdu_type: PduType::GetBulkRequest,
