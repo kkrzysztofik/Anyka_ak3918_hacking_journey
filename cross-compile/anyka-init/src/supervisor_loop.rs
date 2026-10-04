@@ -17,12 +17,23 @@ use std::time::{Duration, Instant};
 
 /// Background thread stack. 64 KiB on the camera (four threads on a 36 MB
 /// device); full default on host so integration tests can actually run.
-pub fn thread_stack() -> usize {
+fn thread_stack() -> usize {
     if cfg!(target_arch = "arm") {
         64 * 1024
     } else {
         2 * 1024 * 1024
     }
+}
+
+/// Spawn a named background thread with the camera-sized stack.
+pub fn spawn_named<F>(name: &str, f: F) -> std::io::Result<std::thread::JoinHandle<()>>
+where
+    F: FnOnce() + Send + 'static,
+{
+    std::thread::Builder::new()
+        .name(name.into())
+        .stack_size(thread_stack())
+        .spawn(f)
 }
 
 /// How long the reaper sleeps when no child has exited.
@@ -120,58 +131,49 @@ pub fn spawn_reaper(
     tx: Sender<Msg>,
     stop: Arc<AtomicBool>,
 ) -> Option<std::thread::JoinHandle<()>> {
-    match std::thread::Builder::new()
-        .name("reaper".into())
-        .stack_size(thread_stack())
-        .spawn(move || {
-            while !stop.load(Ordering::Relaxed) {
-                match sys.wait_any() {
-                    Ok(Some((pid, st))) => {
-                        if tx.send(Msg::Exited(pid, st)).is_err() {
-                            return;
-                        }
-                    }
-                    Ok(None) => {
-                        // 1s, not 50ms. This poll exists only so the reaper can
-                        // observe `stop`; nothing needs sub-second exit latency
-                        // because backoff_min is 1s anyway. At 50ms this thread
-                        // woke 20x/sec forever on a single core that also
-                        // encodes and streams video.
-                        std::thread::sleep(REAP_POLL_INTERVAL);
-                    }
-                    Err(e) => {
-                        tracing::debug!(error = %e, "wait_any");
-                        std::thread::sleep(Duration::from_millis(200));
+    spawn_named("reaper", move || {
+        while !stop.load(Ordering::Relaxed) {
+            match sys.wait_any() {
+                Ok(Some((pid, st))) => {
+                    if tx.send(Msg::Exited(pid, st)).is_err() {
+                        return;
                     }
                 }
+                Ok(None) => {
+                    // 1s, not 50ms. This poll exists only so the reaper can
+                    // observe `stop`; nothing needs sub-second exit latency
+                    // because backoff_min is 1s anyway. At 50ms this thread
+                    // woke 20x/sec forever on a single core that also
+                    // encodes and streams video.
+                    std::thread::sleep(REAP_POLL_INTERVAL);
+                }
+                Err(e) => {
+                    tracing::debug!(error = %e, "wait_any");
+                    std::thread::sleep(Duration::from_millis(200));
+                }
             }
-        }) {
-        Ok(handle) => Some(handle),
-        Err(e) => {
-            tracing::error!(
-                error = %e,
-                "failed to start the reaper thread; service exits will not be observed"
-            );
-            None
         }
-    }
+    })
+    .inspect_err(|e| {
+        tracing::error!(
+            error = %e,
+            "failed to start the reaper thread; service exits will not be observed"
+        )
+    })
+    .ok()
 }
 
 pub fn spawn_signal_thread(tx: Sender<Msg>) {
-    let spawned = std::thread::Builder::new()
-        .name("signals".into())
-        .stack_size(thread_stack())
-        .spawn(move || {
-            use signal_hook::consts::{SIGINT, SIGTERM};
-            let Ok(mut signals) = signal_hook::iterator::Signals::new([SIGTERM, SIGINT]) else {
-                tracing::error!("failed to install signal handler");
-                return;
-            };
-            for _ in signals.forever() {
-                let _ = tx.send(Msg::Shutdown);
-            }
-        });
-    if let Err(e) = spawned {
+    if let Err(e) = spawn_named("signals", move || {
+        use signal_hook::consts::{SIGINT, SIGTERM};
+        let Ok(mut signals) = signal_hook::iterator::Signals::new([SIGTERM, SIGINT]) else {
+            tracing::error!("failed to install signal handler");
+            return;
+        };
+        for _ in signals.forever() {
+            let _ = tx.send(Msg::Shutdown);
+        }
+    }) {
         tracing::error!(
             error = %e,
             "failed to start the signal thread; SIGTERM/SIGINT will not shut down cleanly"
@@ -682,18 +684,14 @@ pub fn spawn_control_thread(tx: Sender<Msg>) -> std::io::Result<()> {
         );
     }
 
-    std::thread::Builder::new()
-        .name("supervisor-ctl".into())
-        .stack_size(thread_stack())
-        .spawn(move || {
-            for stream in listener.incoming() {
-                let Ok(stream) = stream else { break };
-                if let Err(e) = handle_control_conn(stream, &tx) {
-                    tracing::warn!(error = %e, "control connection failed");
-                }
+    spawn_named("supervisor-ctl", move || {
+        for stream in listener.incoming() {
+            let Ok(stream) = stream else { break };
+            if let Err(e) = handle_control_conn(stream, &tx) {
+                tracing::warn!(error = %e, "control connection failed");
             }
-        })
-        .map_err(std::io::Error::other)?;
+        }
+    })?;
     Ok(())
 }
 

@@ -149,20 +149,17 @@ fn main() {
             ),
         };
         let lock = Arc::clone(&slot_lock);
-        let _ = std::thread::Builder::new()
-            .name("update-trial".into())
-            .stack_size(supervisor_loop::thread_stack())
-            .spawn(move || {
-                anyka_init::update::reconcile(
-                    s.as_ref(),
-                    std::path::Path::new(&root),
-                    running,
-                    policy,
-                    anyka_init::netstat::listening,
-                    std::thread::sleep,
-                    &lock,
-                );
-            });
+        let _ = supervisor_loop::spawn_named("update-trial", move || {
+            anyka_init::update::reconcile(
+                s.as_ref(),
+                std::path::Path::new(&root),
+                running,
+                policy,
+                anyka_init::netstat::listening,
+                std::thread::sleep,
+                &lock,
+            );
+        });
     }
 
     // Poll `spool/` for a dropped bundle. Reuses the monitor cadence — a
@@ -177,18 +174,15 @@ fn main() {
         let schema = cfg.schema;
         let interval = Duration::from_secs(cfg.monitor.interval_sec.max(60));
         let lock = Arc::clone(&slot_lock);
-        let _ = std::thread::Builder::new()
-            .name("update-poll".into())
-            .stack_size(supervisor_loop::thread_stack())
-            .spawn(move || {
-                let root = std::path::Path::new(&root);
-                loop {
-                    std::thread::sleep(interval);
-                    if anyka_init::update::pending(root) {
-                        anyka_init::update::apply(s.as_ref(), root, schema, &lock);
-                    }
+        let _ = supervisor_loop::spawn_named("update-poll", move || {
+            let root = std::path::Path::new(&root);
+            loop {
+                std::thread::sleep(interval);
+                if anyka_init::update::pending(root) {
+                    anyka_init::update::apply(s.as_ref(), root, schema, &lock);
                 }
-            });
+            }
+        });
     }
 
     supervisor_loop::run(sysimpl, &mut cfg, std::path::Path::new(CONFIG_PATH), rx);
@@ -209,12 +203,9 @@ fn spawn_optional_threads(
         let mon = cfg.monitor.clone();
         let iface = cfg.wifi.interface.clone();
         let tx_mon = tx.clone();
-        let _ = std::thread::Builder::new()
-            .name("monitor".into())
-            .stack_size(supervisor_loop::thread_stack())
-            .spawn(move || {
-                monitor::run(s.as_ref(), &mon, &iface, &state_path, reset_after, tx_mon);
-            });
+        let _ = supervisor_loop::spawn_named("monitor", move || {
+            monitor::run(s.as_ref(), &mon, &iface, &state_path, reset_after, tx_mon);
+        });
     }
 
     if cfg.time.enabled {
@@ -223,24 +214,18 @@ fn spawn_optional_threads(
         let update_root = std::path::PathBuf::from(&cfg.update.root);
         let ntp_marker = timesync::ntp_disabled_marker_path(&update_root);
         let config_path = std::path::PathBuf::from(CONFIG_PATH);
-        let _ = std::thread::Builder::new()
-            .name("timesync".into())
-            .stack_size(supervisor_loop::thread_stack())
-            .spawn(move || {
-                timesync::resync_loop(s.as_ref(), &tcfg, &ntp_marker, &config_path, &update_root);
-            });
+        let _ = supervisor_loop::spawn_named("timesync", move || {
+            timesync::resync_loop(s.as_ref(), &tcfg, &ntp_marker, &config_path, &update_root);
+        });
     }
 
     if cfg.reboot.enabled && !safe_mode {
         let s = Arc::clone(sysimpl);
         let interval_min = cfg.reboot.interval_min;
         let jitter = cfg.reboot.jitter_max_sec;
-        let _ = std::thread::Builder::new()
-            .name("periodic-reboot".into())
-            .stack_size(supervisor_loop::thread_stack())
-            .spawn(move || {
-                supervisor_loop::periodic_reboot_loop(s.as_ref(), interval_min, jitter);
-            });
+        let _ = supervisor_loop::spawn_named("periodic-reboot", move || {
+            supervisor_loop::periodic_reboot_loop(s.as_ref(), interval_min, jitter);
+        });
     }
 }
 

@@ -62,22 +62,12 @@ impl Slots {
         self.root.join("slots").join(slot.name())
     }
 
-    /// Write the pointer via temp + rename + sync, the same durability dance
-    /// `storm.rs:58-70` uses: a power cut leaves the old byte or the new one,
-    /// never an empty file that would read as slot A by accident.
+    /// Write the pointer via `sys::atomic_write`: a power cut leaves the old
+    /// byte or the new one, never an empty file that would read as slot A by
+    /// accident.
     pub fn set_active(&self, slot: Slot) -> std::io::Result<()> {
-        use std::io::Write;
         std::fs::create_dir_all(&self.root)?;
-        let tmp = self.root.join("active.tmp");
-        {
-            let mut f = std::fs::File::create(&tmp)?;
-            f.write_all(slot.name().as_bytes())?;
-            f.sync_all()?;
-        }
-        std::fs::rename(&tmp, self.pointer())?;
-        // SAFETY: sync(2) takes no arguments and cannot fail.
-        unsafe { libc::sync() };
-        Ok(())
+        crate::sys::atomic_write(&self.pointer(), slot.name().as_bytes())
     }
 
     /// Which slot an executable path sits in, if any.

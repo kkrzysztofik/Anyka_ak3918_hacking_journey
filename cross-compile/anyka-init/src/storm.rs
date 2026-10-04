@@ -53,23 +53,14 @@ impl StormState {
         )
     }
 
-    /// Write via temp file + rename so a power cut leaves either the old
-    /// contents or the new ones, never a half-written file.
+    /// Write via `sys::atomic_write` (temp + fsync + rename + sync): a power
+    /// cut leaves either the old contents or the new ones, never a
+    /// half-written file.
     pub fn save(&self, path: &str) -> std::io::Result<()> {
-        use std::io::Write;
         if let Some(dir) = std::path::Path::new(path).parent() {
             std::fs::create_dir_all(dir)?;
         }
-        let tmp = format!("{path}.tmp");
-        {
-            let mut f = std::fs::File::create(&tmp)?;
-            f.write_all(self.render().as_bytes())?;
-            f.sync_all()?;
-        }
-        std::fs::rename(&tmp, path)?;
-        // SAFETY: sync(2) takes no arguments and cannot fail.
-        unsafe { libc::sync() };
-        Ok(())
+        crate::sys::atomic_write(std::path::Path::new(path), self.render().as_bytes())
     }
 
     pub fn load(path: &str) -> Self {

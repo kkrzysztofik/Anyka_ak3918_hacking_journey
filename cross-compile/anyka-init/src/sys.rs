@@ -111,6 +111,25 @@ impl Default for RealSys {
     }
 }
 
+/// Write `bytes` to `path` via `<path>.tmp`, fsync, rename, then sync(2), so
+/// a power cut on the vfat/exFAT card leaves the old contents or the new,
+/// never a half-written file.
+pub fn atomic_write(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut tmp = path.as_os_str().to_owned();
+    tmp.push(".tmp");
+    let tmp = std::path::PathBuf::from(tmp);
+    {
+        let mut f = std::fs::File::create(&tmp)?;
+        f.write_all(bytes)?;
+        f.sync_all()?;
+    }
+    std::fs::rename(&tmp, path)?;
+    // SAFETY: sync(2) takes no arguments and cannot fail.
+    unsafe { libc::sync() };
+    Ok(())
+}
+
 impl Sys for RealSys {
     fn spawn(&self, spec: &SpawnSpec) -> Result<Pid, SysError> {
         let log = OpenOptions::new()

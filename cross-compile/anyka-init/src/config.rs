@@ -345,25 +345,12 @@ fn read_config_text(path: &std::path::Path) -> Result<String, ConfigError> {
     })
 }
 
-/// Write `new_text` to a temp file next to `path`, fsync it, then rename over
-/// the original, so an interrupted write never leaves a half-written operator
-/// config behind (the same pattern `update.rs` uses for the `active` pointer
-/// on this filesystem).
+/// Write `new_text` via `sys::atomic_write` (temp + fsync + rename + sync),
+/// so an interrupted write never leaves a half-written operator config
+/// behind (the same pattern `update.rs` uses for the `active` pointer on
+/// this filesystem).
 fn persist_text(path: &std::path::Path, new_text: &str) -> Result<(), ConfigError> {
-    let tmp = path.with_extension("toml.tmp");
-    let write = |f: &mut std::fs::File| -> Result<(), std::io::Error> {
-        std::io::Write::write_all(f, new_text.as_bytes())?;
-        f.sync_all()
-    };
-    let mut f = std::fs::File::create(&tmp).map_err(|source| ConfigError::Write {
-        path: tmp.display().to_string(),
-        source,
-    })?;
-    write(&mut f).map_err(|source| ConfigError::Write {
-        path: tmp.display().to_string(),
-        source,
-    })?;
-    std::fs::rename(&tmp, path).map_err(|source| ConfigError::Write {
+    crate::sys::atomic_write(path, new_text.as_bytes()).map_err(|source| ConfigError::Write {
         path: path.display().to_string(),
         source,
     })
