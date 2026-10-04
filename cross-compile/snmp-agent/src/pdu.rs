@@ -8,42 +8,29 @@ use thiserror::Error;
 /// SNMPv2c wire version (INTEGER 1).
 pub const SNMP_V2C_VERSION: i32 = 1;
 
-const PDU_GET_REQUEST: u8 = 0xa0;
-const PDU_GET_NEXT_REQUEST: u8 = 0xa1;
-const PDU_GET_RESPONSE: u8 = 0xa2;
-const PDU_SET_REQUEST: u8 = 0xa3;
-const PDU_GET_BULK_REQUEST: u8 = 0xa5;
-
+/// SNMP PDU type; the discriminant is the context-specific BER tag.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
 pub enum PduType {
-    GetRequest,
-    GetNextRequest,
-    GetResponse,
-    SetRequest,
+    GetRequest = 0xa0,
+    GetNextRequest = 0xa1,
+    GetResponse = 0xa2,
+    SetRequest = 0xa3,
     /// SNMPv2c GetBulkRequest — `error_status`/`error_index` hold non-repeaters / max-repetitions.
-    GetBulkRequest,
+    GetBulkRequest = 0xa5,
 }
 
 impl PduType {
-    fn tag(self) -> u8 {
-        match self {
-            Self::GetRequest => PDU_GET_REQUEST,
-            Self::GetNextRequest => PDU_GET_NEXT_REQUEST,
-            Self::GetResponse => PDU_GET_RESPONSE,
-            Self::SetRequest => PDU_SET_REQUEST,
-            Self::GetBulkRequest => PDU_GET_BULK_REQUEST,
-        }
-    }
-
     fn from_tag(tag: u8) -> Option<Self> {
-        match tag {
-            PDU_GET_REQUEST => Some(Self::GetRequest),
-            PDU_GET_NEXT_REQUEST => Some(Self::GetNextRequest),
-            PDU_GET_RESPONSE => Some(Self::GetResponse),
-            PDU_SET_REQUEST => Some(Self::SetRequest),
-            PDU_GET_BULK_REQUEST => Some(Self::GetBulkRequest),
-            _ => None,
-        }
+        [
+            Self::GetRequest,
+            Self::GetNextRequest,
+            Self::GetResponse,
+            Self::SetRequest,
+            Self::GetBulkRequest,
+        ]
+        .into_iter()
+        .find(|t| *t as u8 == tag)
     }
 }
 
@@ -262,7 +249,7 @@ fn encode_pdu(pdu: &Pdu) -> Result<Vec<u8>, PduError> {
     ber::write_tlv(TAG_SEQUENCE, &vbl, &mut body);
 
     let mut out = Vec::new();
-    ber::write_tlv(pdu.pdu_type.tag(), &body, &mut out);
+    ber::write_tlv(pdu.pdu_type as u8, &body, &mut out);
     Ok(out)
 }
 
@@ -364,9 +351,9 @@ mod tests {
 
     #[test]
     fn test_pdu_type_tags_cover_getnext_and_set() {
-        assert_eq!(PduType::GetNextRequest.tag(), 0xa1);
-        assert_eq!(PduType::SetRequest.tag(), 0xa3);
-        assert_eq!(PduType::GetBulkRequest.tag(), 0xa5);
+        assert_eq!(PduType::GetNextRequest as u8, 0xa1);
+        assert_eq!(PduType::SetRequest as u8, 0xa3);
+        assert_eq!(PduType::GetBulkRequest as u8, 0xa5);
         assert_eq!(PduType::from_tag(0xa1), Some(PduType::GetNextRequest));
         assert_eq!(PduType::from_tag(0xa3), Some(PduType::SetRequest));
         assert_eq!(PduType::from_tag(0xa5), Some(PduType::GetBulkRequest));
