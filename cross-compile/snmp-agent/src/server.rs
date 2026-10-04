@@ -66,16 +66,6 @@ impl Agent {
             ),
         }
     }
-
-    /// Config-only view, for requests that are answered without consulting the
-    /// device — today only SET, which is refused before any value is resolved.
-    fn bare_snapshot(&self) -> Snapshot {
-        Snapshot {
-            config: self.config.clone(),
-            uptime_ticks: 0,
-            ifaces: Vec::new(),
-        }
-    }
 }
 
 fn proc_uptime_ticks(path: &Path) -> Option<u32> {
@@ -108,24 +98,17 @@ pub fn handle_datagram(bytes: &[u8], agent: &Agent) -> Option<Vec<u8>> {
         return None;
     }
 
-    // A SET is refused before any varbind is resolved, so reading /proc and
-    // sweeping sysfs for it is pure waste on every such packet.
-    let snapshot = if msg.pdu.pdu_type == PduType::SetRequest {
-        agent.bare_snapshot()
-    } else {
-        agent.snapshot()
+    let (error_status, error_index, variable_bindings) = match msg.pdu.pdu_type {
+        // Refused before any varbind is resolved, so /proc and sysfs are never read for it.
+        PduType::SetRequest => (mib::ERR_NOT_WRITABLE, 1, msg.pdu.variable_bindings),
+        PduType::GetBulkRequest => mib::handle_getbulk(
+            msg.pdu.error_status,
+            msg.pdu.error_index,
+            &msg.pdu.variable_bindings,
+            &agent.snapshot(),
+        ),
+        t => mib::handle_varbinds(t, &msg.pdu.variable_bindings, &agent.snapshot()),
     };
-    let (error_status, error_index, variable_bindings) =
-        if msg.pdu.pdu_type == PduType::GetBulkRequest {
-            mib::handle_getbulk(
-                msg.pdu.error_status,
-                msg.pdu.error_index,
-                &msg.pdu.variable_bindings,
-                &snapshot,
-            )
-        } else {
-            mib::handle_varbinds(msg.pdu.pdu_type, &msg.pdu.variable_bindings, &snapshot)
-        };
 
     SnmpMessage {
         community: msg.community,

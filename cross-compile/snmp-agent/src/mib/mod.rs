@@ -37,10 +37,6 @@ pub fn handle_varbinds(
     binds: &[VarBind],
     sources: &Snapshot,
 ) -> (i32, i32, Vec<VarBind>) {
-    if pdu_type == PduType::SetRequest {
-        return (ERR_NOT_WRITABLE, 1, binds.to_vec());
-    }
-
     let mut out = Vec::with_capacity(binds.len());
     for vb in binds {
         // RFC 3416: a missing object is an exception *in the varbind*, so one
@@ -176,18 +172,6 @@ mod tests {
             cursor = next;
         }
         assert!(system::get_next(&cursor, &sources()).is_none());
-    }
-
-    #[test]
-    fn test_set_returns_not_writable() {
-        let oid = Oid::from_slice(&[1, 3, 6, 1, 2, 1, 1, 5, 0]).unwrap();
-        let binds = vec![VarBind {
-            name: oid,
-            value: SnmpValue::Null,
-        }];
-        let (status, index, _) = handle_varbinds(PduType::SetRequest, &binds, &sources());
-        assert_eq!(status, ERR_NOT_WRITABLE);
-        assert_eq!(index, 1);
     }
 
     #[test]
