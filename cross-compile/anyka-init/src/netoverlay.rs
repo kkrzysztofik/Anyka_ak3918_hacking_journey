@@ -76,30 +76,6 @@ impl NetworkOverlay {
         self.ssid.is_some() || self.password.is_some() || self.security.is_some()
     }
 
-    /// Validate overlay invariants before merge.
-    pub fn validate(&self) -> Result<(), crate::config::ConfigError> {
-        if let Some(sec) = &self.security
-            && !matches!(sec.as_str(), "wpa" | "wep" | "open")
-        {
-            return Err(crate::config::ConfigError::Invalid(format!(
-                "network overlay security = {sec:?} is not one of wpa, wep, open"
-            )));
-        }
-        if self.dhcp == Some(false) {
-            if self.address.is_none() {
-                return Err(crate::config::ConfigError::Invalid(
-                    "network overlay address is required when dhcp = false".into(),
-                ));
-            }
-            if self.gateway.is_none() {
-                return Err(crate::config::ConfigError::Invalid(
-                    "network overlay gateway is required when dhcp = false".into(),
-                ));
-            }
-        }
-        Ok(())
-    }
-
     /// Read the overlay from `path`.
     ///
     /// An absent file is the normal, unconfigured case and yields the default

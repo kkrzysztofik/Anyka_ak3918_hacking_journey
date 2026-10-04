@@ -555,8 +555,10 @@ impl Config {
         Ok(cfg)
     }
 
-    /// Merge `network.toml` onto `[wifi]`, quarantining a bad overlay instead of
-    /// parking the camera. Read errors other than TOML parse still fail loud.
+    /// Merge `network.toml` onto `[wifi]`. The *merged* result is validated;
+    /// a merge that fails quarantines the overlay and restores the baseline
+    /// instead of parking the camera. Read errors other than TOML parse still
+    /// fail loud.
     fn merge_network_overlay(
         cfg: &mut Self,
         overlay_path: &std::path::Path,
@@ -571,11 +573,6 @@ impl Config {
             Err(err) => return Err(err),
         };
         let baseline_wifi = cfg.wifi.clone();
-        if let Err(err) = overlay.validate() {
-            tracing::warn!(error = %err, "invalid network overlay; quarantining");
-            crate::netoverlay::NetworkOverlay::quarantine(overlay_path);
-            return Ok(());
-        }
 
         overlay.apply_to(&mut cfg.wifi);
         if cfg.validate().is_err() {
@@ -1444,5 +1441,51 @@ timezone = \"UTC0\"
         );
         let cfg = Config::from_str(&src).expect("parses");
         assert_eq!(format!("{cfg:?}"), DEFAULTS_GOLDEN);
+    }
+
+    #[test]
+    fn test_overlay_static_switch_may_borrow_the_baseline_address() {
+        // The overlay only flips dhcp; the address and gateway come from the
+        // operator's file. The merged config is valid, so the overlay stands.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let base = dir.path().join("anyka.toml");
+        let overlay = dir.path().join("network.toml");
+        std::fs::write(
+            &base,
+            "[wifi]\nssid = \"OperatorNet\"\npassword = \"operatorpass\"\n\
+             address = \"192.168.2.50/24\"\ngateway = \"192.168.2.1\"\n",
+        )
+        .expect("write base");
+        std::fs::write(&overlay, "dhcp = false\n").expect("write overlay");
+
+        let cfg = Config::load_with_overlay(base.to_str().expect("utf8"), &overlay)
+            .expect("merged config is valid");
+
+        assert!(!cfg.wifi.dhcp);
+        assert_eq!(cfg.wifi.address.as_deref(), Some("192.168.2.50/24"));
+        assert!(
+            overlay.exists(),
+            "a valid merge must not quarantine the overlay"
+        );
+    }
+
+    #[test]
+    fn test_overlay_with_an_unknown_security_value_is_still_quarantined() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let base = dir.path().join("anyka.toml");
+        let overlay = dir.path().join("network.toml");
+        std::fs::write(
+            &base,
+            "[wifi]\nssid = \"OperatorNet\"\npassword = \"operatorpass\"\n",
+        )
+        .expect("write base");
+        std::fs::write(&overlay, "security = \"wpa3\"\n").expect("write overlay");
+
+        let cfg = Config::load_with_overlay(base.to_str().expect("utf8"), &overlay)
+            .expect("a bad overlay must not park the baseline load");
+
+        assert_eq!(cfg.wifi.security, "wpa");
+        assert!(!overlay.exists());
+        assert!(dir.path().join("network.toml.bad").exists());
     }
 }
