@@ -299,7 +299,6 @@ pub fn parse_args(args: impl IntoIterator<Item = String>) -> PathBuf {
 mod tests {
     use super::*;
     use crate::ber::Oid;
-    use crate::mib::MibSources;
     use crate::pdu::{SnmpValue, VarBind};
     use std::time::Duration;
 
@@ -404,7 +403,7 @@ mod tests {
             dir.path().into(),
             dir.path().join("sys"),
         );
-        assert_eq!(agent.snapshot().uptime_ticks(), 1_234_567);
+        assert_eq!(agent.snapshot().uptime_ticks, 1_234_567);
     }
 
     #[test]

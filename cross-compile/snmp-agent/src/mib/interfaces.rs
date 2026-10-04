@@ -1,7 +1,6 @@
 //! MIB-II interfaces group from `/proc/net/dev` + `/sys/class/net`.
 
 use crate::ber::Oid;
-use crate::mib::MibSources;
 use crate::pdu::SnmpValue;
 use std::path::Path;
 
@@ -195,13 +194,13 @@ fn value_for(oid: &Oid, rows: &[IfRow]) -> Option<SnmpValue> {
     None
 }
 
-/// Exact GET against interfaces MIB using injected rows.
-pub fn get_with_rows(oid: &Oid, rows: &[IfRow]) -> Option<(Oid, SnmpValue)> {
+/// Exact GET against ifTable rows.
+pub fn get(oid: &Oid, rows: &[IfRow]) -> Option<(Oid, SnmpValue)> {
     let value = value_for(oid, rows)?;
     Some((oid.clone(), value))
 }
 
-pub fn get_next_with_rows(oid: &Oid, rows: &[IfRow]) -> Option<(Oid, SnmpValue)> {
+pub fn get_next(oid: &Oid, rows: &[IfRow]) -> Option<(Oid, SnmpValue)> {
     for candidate in all_table_oids(rows) {
         if oid < &candidate {
             let value = value_for(&candidate, rows)?;
@@ -211,13 +210,6 @@ pub fn get_next_with_rows(oid: &Oid, rows: &[IfRow]) -> Option<(Oid, SnmpValue)>
     None
 }
 
-pub fn get(oid: &Oid, sources: &dyn MibSources) -> Option<(Oid, SnmpValue)> {
-    get_with_rows(oid, sources.interfaces())
-}
-
-pub fn get_next(oid: &Oid, sources: &dyn MibSources) -> Option<(Oid, SnmpValue)> {
-    get_next_with_rows(oid, sources.interfaces())
-}
 
 #[cfg(test)]
 mod tests {
@@ -300,7 +292,7 @@ mod tests {
     fn test_get_if_number() {
         let rows = fixture_rows();
         let oid = if_number_oid();
-        let (_, val) = get_with_rows(&oid, &rows).unwrap();
+        let (_, val) = get(&oid, &rows).unwrap();
         assert_eq!(val, SnmpValue::Integer(3));
     }
 
@@ -308,7 +300,7 @@ mod tests {
     fn test_get_if_descr_wlan0() {
         let rows = fixture_rows();
         let oid = table_oid(2, 3);
-        let (_, val) = get_with_rows(&oid, &rows).unwrap();
+        let (_, val) = get(&oid, &rows).unwrap();
         assert_eq!(val, SnmpValue::OctetString(b"wlan0".to_vec()));
     }
 
@@ -316,7 +308,7 @@ mod tests {
     fn test_get_if_in_octets_eth0() {
         let rows = fixture_rows();
         let oid = table_oid(10, 2);
-        let (_, val) = get_with_rows(&oid, &rows).unwrap();
+        let (_, val) = get(&oid, &rows).unwrap();
         assert_eq!(val, SnmpValue::Counter32(10000));
     }
 
@@ -324,7 +316,7 @@ mod tests {
     fn test_getnext_from_interfaces_prefix() {
         let rows = fixture_rows();
         let oid = Oid::from_slice(&[1, 3, 6, 1, 2, 1, 2]).unwrap();
-        let (next, _) = get_next_with_rows(&oid, &rows).unwrap();
+        let (next, _) = get_next(&oid, &rows).unwrap();
         assert_eq!(next, if_number_oid());
     }
 
@@ -354,7 +346,7 @@ mod tests {
         let rows = fixture_rows();
         // ifLastChange is column 9 — we do not serve it.
         let oid = table_oid(9, 1);
-        assert!(get_with_rows(&oid, &rows).is_none());
+        assert!(get(&oid, &rows).is_none());
     }
 
     #[test]
@@ -368,23 +360,23 @@ mod tests {
     #[test]
     fn test_get_table_columns_and_unknown_oid() {
         let rows = fixture_rows();
-        let (_, v) = get_with_rows(&table_oid(1, 1), &rows).unwrap();
+        let (_, v) = get(&table_oid(1, 1), &rows).unwrap();
         assert_eq!(v, SnmpValue::Integer(1));
-        let (_, v) = get_with_rows(&table_oid(3, 1), &rows).unwrap();
+        let (_, v) = get(&table_oid(3, 1), &rows).unwrap();
         assert_eq!(v, SnmpValue::Integer(1)); // other — no sysfs overlay
-        let (_, v) = get_with_rows(&table_oid(5, 1), &rows).unwrap();
+        let (_, v) = get(&table_oid(5, 1), &rows).unwrap();
         assert_eq!(v, SnmpValue::Gauge32(0));
-        let (_, v) = get_with_rows(&table_oid(6, 1), &rows).unwrap();
+        let (_, v) = get(&table_oid(6, 1), &rows).unwrap();
         assert_eq!(v, SnmpValue::OctetString(vec![]));
-        let (_, v) = get_with_rows(&table_oid(7, 1), &rows).unwrap();
+        let (_, v) = get(&table_oid(7, 1), &rows).unwrap();
         assert_eq!(v, SnmpValue::Integer(1));
-        let (_, v) = get_with_rows(&table_oid(8, 1), &rows).unwrap();
+        let (_, v) = get(&table_oid(8, 1), &rows).unwrap();
         assert_eq!(v, SnmpValue::Integer(4)); // unknown — never fabricated up
-        let (_, v) = get_with_rows(&table_oid(16, 2), &rows).unwrap();
+        let (_, v) = get(&table_oid(16, 2), &rows).unwrap();
         assert_eq!(v, SnmpValue::Counter32(20000));
-        assert!(get_with_rows(&Oid::from_slice(&[1, 2, 3]).unwrap(), &rows).is_none());
-        assert!(get_with_rows(&table_oid(2, 99), &rows).is_none());
-        assert!(get_next_with_rows(&table_oid(16, 3), &rows).is_none());
+        assert!(get(&Oid::from_slice(&[1, 2, 3]).unwrap(), &rows).is_none());
+        assert!(get(&table_oid(2, 99), &rows).is_none());
+        assert!(get_next(&table_oid(16, 3), &rows).is_none());
     }
 
     #[test]

@@ -1,7 +1,7 @@
 //! MIB-II system group (1.3.6.1.2.1.1).
 
 use crate::ber::Oid;
-use crate::mib::MibSources;
+use crate::mib::Snapshot;
 use crate::pdu::SnmpValue;
 
 /// sysServices: application layer (bit 6) typical for a camera/app agent.
@@ -26,16 +26,16 @@ fn system_scalars() -> [Oid; 7] {
     ]
 }
 
-fn value_for(oid: &Oid, sources: &dyn MibSources) -> Option<SnmpValue> {
+fn value_for(oid: &Oid, sources: &Snapshot) -> Option<SnmpValue> {
     let arcs = &oid.0;
     if arcs.len() != 9 || arcs[..7] != [1, 3, 6, 1, 2, 1, 1] || arcs[8] != 0 {
         return None;
     }
-    let cfg = sources.config();
+    let cfg = &sources.config;
     match arcs[7] {
         1 => Some(SnmpValue::OctetString(SYS_DESCR.as_bytes().to_vec())),
         2 => Some(SnmpValue::ObjectId(sys_object_id())),
-        3 => Some(SnmpValue::TimeTicks(sources.uptime_ticks())),
+        3 => Some(SnmpValue::TimeTicks(sources.uptime_ticks)),
         4 => Some(SnmpValue::OctetString(cfg.sys_contact.as_bytes().to_vec())),
         5 => {
             let name = if cfg.sys_name.is_empty() {
@@ -60,13 +60,13 @@ fn hostname_fallback() -> String {
 }
 
 /// Exact GET for a system scalar.
-pub fn get(oid: &Oid, sources: &dyn MibSources) -> Option<(Oid, SnmpValue)> {
+pub fn get(oid: &Oid, sources: &Snapshot) -> Option<(Oid, SnmpValue)> {
     let value = value_for(oid, sources)?;
     Some((oid.clone(), value))
 }
 
 /// Lexicographic next system scalar after `oid`.
-pub fn get_next(oid: &Oid, sources: &dyn MibSources) -> Option<(Oid, SnmpValue)> {
+pub fn get_next(oid: &Oid, sources: &Snapshot) -> Option<(Oid, SnmpValue)> {
     for candidate in system_scalars() {
         if oid < &candidate {
             let value = value_for(&candidate, sources)?;
