@@ -142,8 +142,6 @@ fn if_number_oid() -> Oid {
 
 /// Columnar OIDs: ifIndex(1), ifDescr(2), ifType(3), ifMtu(4), ifSpeed(5),
 /// ifPhysAddress(6), ifAdminStatus(7), ifOperStatus(8), ifInOctets(10), ifOutOctets(16).
-/// Columnar OIDs: ifIndex(1), ifDescr(2), ifType(3), ifMtu(4), ifSpeed(5),
-/// ifPhysAddress(6), ifAdminStatus(7), ifOperStatus(8), ifInOctets(10), ifOutOctets(16).
 const COLUMNS: [u32; 10] = [1, 2, 3, 4, 5, 6, 7, 8, 10, 16];
 
 fn table_oid(column: u32, index: u32) -> Oid {
