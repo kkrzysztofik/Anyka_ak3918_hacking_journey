@@ -88,7 +88,6 @@ describe('NetworkPage', () => {
     vi.mocked(getNetworkConfig).mockResolvedValue(MOCK_DATA.network);
     vi.mocked(getNetworkOverlay).mockResolvedValue(EMPTY_OVERLAY);
     vi.mocked(getSnmpConfig).mockResolvedValue({
-      enabled: true,
       port: 161,
       community: 'public',
       sys_contact: '',
@@ -404,7 +403,6 @@ describe('NetworkPage', () => {
 
   it('test_render_snmp_settings_fetched_config_displays_values', async () => {
     vi.mocked(getSnmpConfig).mockResolvedValue({
-      enabled: true,
       port: 1161,
       community: 'monitor',
       sys_contact: '',
@@ -418,6 +416,13 @@ describe('NetworkPage', () => {
     expect(screen.getByTestId('network-snmp-community-input')).toHaveValue('monitor');
   });
 
+  it('test_snmp_card_points_to_processes_instead_of_a_switch', async () => {
+    await renderNetworkPage();
+
+    expect(screen.queryByTestId('network-snmp-enabled-switch')).not.toBeInTheDocument();
+    expect(screen.getByText(/Diagnostics → Processes/)).toBeInTheDocument();
+  });
+
   it('test_save_snmp_settings_on_confirmation_calls_putSnmpConfig', async () => {
     const user = userEvent.setup();
     await renderNetworkPage();
@@ -428,7 +433,7 @@ describe('NetworkPage', () => {
 
     await waitFor(() => {
       expect(putSnmpConfig).toHaveBeenCalledWith(
-        expect.objectContaining({ enabled: true, port: 2161, community: 'public' }),
+        expect.objectContaining({ port: 2161, community: 'public' }),
       );
     });
   });
