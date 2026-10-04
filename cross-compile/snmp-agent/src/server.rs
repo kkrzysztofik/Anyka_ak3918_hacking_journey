@@ -1,6 +1,6 @@
 //! UDP SNMPv2c agent loop.
 
-use crate::config::{DEFAULT_CONFIG_PATH, SnmpConfig};
+use crate::config::SnmpConfig;
 use crate::mib::{self, Snapshot, interfaces};
 use crate::pdu::{Pdu, PduType, SnmpMessage};
 use std::net::SocketAddr;
@@ -118,17 +118,6 @@ pub fn handle_datagram(bytes: &[u8], agent: &Agent) -> Option<Vec<u8>> {
     .ok()
 }
 
-fn write_pidfile(path: &Path) -> std::io::Result<()> {
-    if let Some(parent) = path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    std::fs::write(path, format!("{}\n", std::process::id()))
-}
-
-fn remove_pidfile(path: &Path) {
-    let _ = std::fs::remove_file(path);
-}
-
 async fn bind_socket(port: u16) -> std::io::Result<UdpSocket> {
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
     UdpSocket::bind(addr).await
@@ -182,11 +171,11 @@ pub async fn run(
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut agent = Agent::new(SnmpConfig::load(&config_path)?);
 
-    write_pidfile(&pidfile)?;
+    std::fs::write(&pidfile, format!("{}\n", std::process::id()))?;
     struct PidGuard(PathBuf);
     impl Drop for PidGuard {
         fn drop(&mut self) {
-            remove_pidfile(&self.0);
+            let _ = std::fs::remove_file(&self.0);
         }
     }
     let _pid_guard = PidGuard(pidfile);
@@ -255,21 +244,6 @@ pub async fn run(
             }
         }
     }
-}
-
-/// Parse CLI args: optional `--config PATH`.
-pub fn parse_args(args: impl IntoIterator<Item = String>) -> PathBuf {
-    let mut config = PathBuf::from(DEFAULT_CONFIG_PATH);
-    let mut iter = args.into_iter();
-    let _exe = iter.next();
-    while let Some(arg) = iter.next() {
-        if arg == "--config"
-            && let Some(path) = iter.next()
-        {
-            config = PathBuf::from(path);
-        }
-    }
-    config
 }
 
 #[cfg(test)]
@@ -381,27 +355,6 @@ mod tests {
             dir.path().join("sys"),
         );
         assert_eq!(agent.snapshot().uptime_ticks, 1_234_567);
-    }
-
-    #[test]
-    fn test_parse_args_config_flag() {
-        let path = parse_args(vec![
-            "snmp-agent".into(),
-            "--config".into(),
-            "/tmp/x.toml".into(),
-        ]);
-        assert_eq!(path, PathBuf::from("/tmp/x.toml"));
-    }
-
-    #[test]
-    fn test_write_and_remove_pidfile() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("nested").join("agent.pid");
-        write_pidfile(&path).unwrap();
-        let text = std::fs::read_to_string(&path).unwrap();
-        assert_eq!(text.trim(), std::process::id().to_string());
-        remove_pidfile(&path);
-        assert!(!path.exists());
     }
 
     async fn wait_for_file(path: &Path, timeout: Duration) {

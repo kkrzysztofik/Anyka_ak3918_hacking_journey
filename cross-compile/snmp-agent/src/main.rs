@@ -1,3 +1,4 @@
+use snmp_agent::config::DEFAULT_CONFIG_PATH;
 use snmp_agent::server::{self, DEFAULT_PIDFILE};
 use std::path::PathBuf;
 use tokio::signal::unix::{SignalKind, signal};
@@ -17,7 +18,7 @@ async fn main() {
         .with_timer(LocalTimer)
         .with_ansi(false)
         .init();
-    let config_path = server::parse_args(std::env::args());
+    let config_path = PathBuf::from(DEFAULT_CONFIG_PATH);
     tracing::info!(?config_path, "snmp-agent starting");
 
     let (tx, rx) = tokio::sync::mpsc::channel(1);
