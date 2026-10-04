@@ -59,6 +59,7 @@ unicode-normalization = "0.1"
 # Grapheme cluster counting for ONVIF username validation (`onvif/device/user_types.rs`); required for spec-aligned length limits on embedded targets.
 unicode-segmentation = "1.13"
 streaming-lib = { path = "../streaming-lib" }
+snmp-agent = { path = "../snmp-agent" }
 
 [dev-dependencies]
 tokio-test = "0.4"
