@@ -14,18 +14,6 @@ pub fn sys_object_id() -> Oid {
     Oid(vec![1, 3, 6, 1, 4, 1, 0, 1])
 }
 
-fn system_scalars() -> [Oid; 7] {
-    [
-        Oid(vec![1, 3, 6, 1, 2, 1, 1, 1, 0]),
-        Oid(vec![1, 3, 6, 1, 2, 1, 1, 2, 0]),
-        Oid(vec![1, 3, 6, 1, 2, 1, 1, 3, 0]),
-        Oid(vec![1, 3, 6, 1, 2, 1, 1, 4, 0]),
-        Oid(vec![1, 3, 6, 1, 2, 1, 1, 5, 0]),
-        Oid(vec![1, 3, 6, 1, 2, 1, 1, 6, 0]),
-        Oid(vec![1, 3, 6, 1, 2, 1, 1, 7, 0]),
-    ]
-}
-
 fn value_for(oid: &Oid, sources: &Snapshot) -> Option<SnmpValue> {
     let arcs = &oid.0;
     if arcs.len() != 9 || arcs[..7] != [1, 3, 6, 1, 2, 1, 1] || arcs[8] != 0 {
@@ -65,13 +53,11 @@ pub fn get(oid: &Oid, sources: &Snapshot) -> Option<(Oid, SnmpValue)> {
     Some((oid.clone(), value))
 }
 
-/// Lexicographic next system scalar after `oid`.
+/// Lexicographic next system scalar after `oid` (sysDescr.0 … sysServices.0).
 pub fn get_next(oid: &Oid, sources: &Snapshot) -> Option<(Oid, SnmpValue)> {
-    for candidate in system_scalars() {
-        if oid < &candidate {
-            let value = value_for(&candidate, sources)?;
-            return Some((candidate, value));
-        }
-    }
-    None
+    let next = (1..=7)
+        .map(|arc| Oid(vec![1, 3, 6, 1, 2, 1, 1, arc, 0]))
+        .find(|candidate| oid < candidate)?;
+    let value = value_for(&next, sources)?;
+    Some((next, value))
 }

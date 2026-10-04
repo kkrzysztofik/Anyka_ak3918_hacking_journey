@@ -142,9 +142,9 @@ fn if_number_oid() -> Oid {
 
 /// Columnar OIDs: ifIndex(1), ifDescr(2), ifType(3), ifMtu(4), ifSpeed(5),
 /// ifPhysAddress(6), ifAdminStatus(7), ifOperStatus(8), ifInOctets(10), ifOutOctets(16).
-fn column_ids() -> [u32; 10] {
-    [1, 2, 3, 4, 5, 6, 7, 8, 10, 16]
-}
+/// Columnar OIDs: ifIndex(1), ifDescr(2), ifType(3), ifMtu(4), ifSpeed(5),
+/// ifPhysAddress(6), ifAdminStatus(7), ifOperStatus(8), ifInOctets(10), ifOutOctets(16).
+const COLUMNS: [u32; 10] = [1, 2, 3, 4, 5, 6, 7, 8, 10, 16];
 
 fn table_oid(column: u32, index: u32) -> Oid {
     Oid(vec![1, 3, 6, 1, 2, 1, 2, 2, 1, column, index])
@@ -153,7 +153,7 @@ fn table_oid(column: u32, index: u32) -> Oid {
 fn all_table_oids(rows: &[IfRow]) -> Vec<Oid> {
     let mut out = Vec::new();
     out.push(if_number_oid());
-    for col in column_ids() {
+    for col in COLUMNS {
         for row in rows {
             out.push(table_oid(col, row.index));
         }
@@ -184,7 +184,7 @@ fn value_for(oid: &Oid, rows: &[IfRow]) -> Option<SnmpValue> {
     // 1.3.6.1.2.1.2.2.1.<col>.<idx>
     if oid.0.len() == 11 && oid.0[..9] == [1, 3, 6, 1, 2, 1, 2, 2, 1] {
         let col = oid.0[9];
-        if !column_ids().contains(&col) {
+        if !COLUMNS.contains(&col) {
             return None;
         }
         let idx = oid.0[10];
