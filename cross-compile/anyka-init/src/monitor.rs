@@ -23,6 +23,8 @@ pub fn parse_mem_kb(meminfo: &str) -> Option<u64> {
 }
 
 fn sample() {
+    // No loadavg: on this SoC it counts D-state wifi threads and reads 3–15
+    // at 40 % idle CPU, so it misled every investigation that used it.
     let mem = std::fs::read_to_string("/proc/meminfo")
         .ok()
         .and_then(|s| parse_mem_kb(&s));
