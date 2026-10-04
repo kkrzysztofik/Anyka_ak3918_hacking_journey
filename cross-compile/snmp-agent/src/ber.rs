@@ -1,7 +1,5 @@
 //! Minimal BER helpers for SNMPv2c (not a full ASN.1 stack).
 
-use thiserror::Error;
-
 pub const TAG_INTEGER: u8 = 0x02;
 pub const TAG_OCTET_STRING: u8 = 0x04;
 pub const TAG_NULL: u8 = 0x05;
@@ -14,27 +12,27 @@ pub struct Oid(pub Vec<u32>);
 
 impl Oid {
     /// Build an OID from arcs. Requires at least two arcs with first in 0..=2.
-    pub fn from_slice(arcs: &[u32]) -> Result<Self, BerError> {
+    pub fn from_slice(arcs: &[u32]) -> Result<Self, Malformed> {
         if arcs.len() < 2 || arcs[0] > 2 {
-            return Err(BerError::InvalidOid);
+            return Err(Malformed);
         }
         if arcs[0] < 2 && arcs[1] >= 40 {
-            return Err(BerError::InvalidOid);
+            return Err(Malformed);
         }
         Ok(Self(arcs.to_vec()))
     }
 
     /// Encode OID content bytes (no tag/length).
-    pub fn encode(&self) -> Result<Vec<u8>, BerError> {
+    pub fn encode(&self) -> Result<Vec<u8>, Malformed> {
         if self.0.len() < 2 {
-            return Err(BerError::InvalidOid);
+            return Err(Malformed);
         }
         let mut out = Vec::new();
         // First two arcs share one base-128 subidentifier: 40*X+Y.
         let first = self.0[0]
             .checked_mul(40)
             .and_then(|v| v.checked_add(self.0[1]))
-            .ok_or(BerError::InvalidOid)?;
+            .ok_or(Malformed)?;
         encode_base128(first, &mut out);
         for &arc in &self.0[2..] {
             encode_base128(arc, &mut out);
@@ -43,9 +41,9 @@ impl Oid {
     }
 
     /// Decode OID content bytes (no tag/length).
-    pub fn decode(bytes: &[u8]) -> Result<Self, BerError> {
+    pub fn decode(bytes: &[u8]) -> Result<Self, Malformed> {
         if bytes.is_empty() {
-            return Err(BerError::InvalidOid);
+            return Err(Malformed);
         }
         let (first, mut i) = decode_base128(bytes, 0)?;
         // X.Y pack: <40 → 0.Y, <80 → 1.(Y-40), else → 2.(Y-80).
@@ -84,53 +82,46 @@ fn encode_base128(mut value: u32, out: &mut Vec<u8>) {
     out.push(stack[0]);
 }
 
-fn decode_base128(bytes: &[u8], mut i: usize) -> Result<(u32, usize), BerError> {
+fn decode_base128(bytes: &[u8], mut i: usize) -> Result<(u32, usize), Malformed> {
     let mut value: u32 = 0;
     loop {
         if i >= bytes.len() {
-            return Err(BerError::Truncated);
+            return Err(Malformed);
         }
         let b = bytes[i];
         i += 1;
         value = value
             .checked_mul(128)
             .and_then(|v| v.checked_add(u32::from(b & 0x7f)))
-            .ok_or(BerError::InvalidOid)?;
+            .ok_or(Malformed)?;
         if b & 0x80 == 0 {
             return Ok((value, i));
         }
     }
 }
 
-#[derive(Debug, Error, PartialEq, Eq)]
-pub enum BerError {
-    #[error("invalid OID")]
-    InvalidOid,
-    #[error("truncated BER")]
-    Truncated,
-    #[error("unexpected tag")]
-    UnexpectedTag,
-    #[error("unsupported BER")]
-    Unsupported,
-}
+/// Any BER the agent cannot decode or encode. The datagram is silently
+/// dropped, so nothing ever branches on *why*.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Malformed;
 
 /// Read tag, length, and content slice; returns (tag, content, rest).
-pub fn read_tlv(input: &[u8]) -> Result<(u8, &[u8], &[u8]), BerError> {
+pub fn read_tlv(input: &[u8]) -> Result<(u8, &[u8], &[u8]), Malformed> {
     if input.len() < 2 {
-        return Err(BerError::Truncated);
+        return Err(Malformed);
     }
     let tag = input[0];
     let (len, after_len) = read_length(&input[1..])?;
     if after_len.len() < len {
-        return Err(BerError::Truncated);
+        return Err(Malformed);
     }
     let (content, rest) = after_len.split_at(len);
     Ok((tag, content, rest))
 }
 
-fn read_length(input: &[u8]) -> Result<(usize, &[u8]), BerError> {
+fn read_length(input: &[u8]) -> Result<(usize, &[u8]), Malformed> {
     if input.is_empty() {
-        return Err(BerError::Truncated);
+        return Err(Malformed);
     }
     let first = input[0];
     if first & 0x80 == 0 {
@@ -138,7 +129,7 @@ fn read_length(input: &[u8]) -> Result<(usize, &[u8]), BerError> {
     }
     let nbytes = (first & 0x7f) as usize;
     if nbytes == 0 || nbytes > 4 || input.len() < 1 + nbytes {
-        return Err(BerError::Unsupported);
+        return Err(Malformed);
     }
     let mut len = 0usize;
     for &b in &input[1..1 + nbytes] {
@@ -169,9 +160,9 @@ fn write_length(len: usize, out: &mut Vec<u8>) {
     out.extend_from_slice(significant);
 }
 
-pub fn decode_integer(content: &[u8]) -> Result<i32, BerError> {
+pub fn decode_integer(content: &[u8]) -> Result<i32, Malformed> {
     if content.is_empty() || content.len() > 4 {
-        return Err(BerError::Unsupported);
+        return Err(Malformed);
     }
     let mut value: i32 = if content[0] & 0x80 != 0 { -1 } else { 0 };
     for &b in content {
@@ -209,10 +200,10 @@ pub fn encode_unsigned(value: u32) -> Vec<u8> {
     bytes
 }
 
-pub fn expect_tag(input: &[u8], tag: u8) -> Result<(&[u8], &[u8]), BerError> {
+pub fn expect_tag(input: &[u8], tag: u8) -> Result<(&[u8], &[u8]), Malformed> {
     let (got, content, rest) = read_tlv(input)?;
     if got != tag {
-        return Err(BerError::UnexpectedTag);
+        return Err(Malformed);
     }
     Ok((content, rest))
 }
@@ -235,15 +226,15 @@ mod tests {
 
     #[test]
     fn test_oid_from_slice_rejects_short_and_invalid_first_arc() {
-        assert_eq!(Oid::from_slice(&[1]), Err(BerError::InvalidOid));
-        assert_eq!(Oid::from_slice(&[3, 1]), Err(BerError::InvalidOid));
-        assert_eq!(Oid::from_slice(&[1, 40]), Err(BerError::InvalidOid));
+        assert_eq!(Oid::from_slice(&[1]), Err(Malformed));
+        assert_eq!(Oid::from_slice(&[3, 1]), Err(Malformed));
+        assert_eq!(Oid::from_slice(&[1, 40]), Err(Malformed));
     }
 
     #[test]
     fn test_oid_encode_rejects_empty_and_allows_large_first_subid() {
-        assert_eq!(Oid(vec![]).encode(), Err(BerError::InvalidOid));
-        assert_eq!(Oid(vec![1]).encode(), Err(BerError::InvalidOid));
+        assert_eq!(Oid(vec![]).encode(), Err(Malformed));
+        assert_eq!(Oid(vec![1]).encode(), Err(Malformed));
         // 2.176 → first subid 256, now encoded as multi-byte base-128 (was a hard reject).
         let oid = Oid::from_slice(&[2, 176]).unwrap();
         assert_eq!(oid.encode().unwrap(), vec![0x82, 0x00]);
@@ -251,8 +242,8 @@ mod tests {
 
     #[test]
     fn test_oid_decode_empty_and_truncated_base128() {
-        assert_eq!(Oid::decode(&[]), Err(BerError::InvalidOid));
-        assert_eq!(Oid::decode(&[0x2b, 0x81]), Err(BerError::Truncated));
+        assert_eq!(Oid::decode(&[]), Err(Malformed));
+        assert_eq!(Oid::decode(&[0x2b, 0x81]), Err(Malformed));
     }
 
     #[test]
@@ -265,16 +256,16 @@ mod tests {
 
     #[test]
     fn test_read_tlv_truncated_and_long_length() {
-        assert_eq!(read_tlv(&[0x04]), Err(BerError::Truncated));
-        assert_eq!(read_tlv(&[0x04, 0x02, 0x00]), Err(BerError::Truncated));
+        assert_eq!(read_tlv(&[0x04]), Err(Malformed));
+        assert_eq!(read_tlv(&[0x04, 0x02, 0x00]), Err(Malformed));
         // Long-form length: 0x81 0x01 means length=1
         let (tag, content, rest) = read_tlv(&[0x04, 0x81, 0x01, b'x', 0xff]).unwrap();
         assert_eq!(tag, TAG_OCTET_STRING);
         assert_eq!(content, b"x");
         assert_eq!(rest, &[0xff]);
-        assert_eq!(read_length(&[]), Err(BerError::Truncated));
-        assert_eq!(read_length(&[0x80]), Err(BerError::Unsupported));
-        assert_eq!(read_length(&[0x85, 0, 0, 0, 0]), Err(BerError::Unsupported));
+        assert_eq!(read_length(&[]), Err(Malformed));
+        assert_eq!(read_length(&[0x80]), Err(Malformed));
+        assert_eq!(read_length(&[0x85, 0, 0, 0, 0]), Err(Malformed));
     }
 
     #[test]
@@ -290,8 +281,8 @@ mod tests {
 
     #[test]
     fn test_decode_encode_integer_edge_cases() {
-        assert_eq!(decode_integer(&[]), Err(BerError::Unsupported));
-        assert_eq!(decode_integer(&[0, 0, 0, 0, 1]), Err(BerError::Unsupported));
+        assert_eq!(decode_integer(&[]), Err(Malformed));
+        assert_eq!(decode_integer(&[0, 0, 0, 0, 1]), Err(Malformed));
         assert_eq!(decode_integer(&[0xff]).unwrap(), -1);
         assert_eq!(encode_integer(-1), vec![0xff]);
         assert_eq!(encode_integer(128), vec![0x00, 0x80]);
@@ -300,7 +291,7 @@ mod tests {
         assert_eq!(rest, &[0xaa]);
         assert_eq!(
             expect_tag(&[0x04, 0x00], TAG_INTEGER),
-            Err(BerError::UnexpectedTag)
+            Err(Malformed)
         );
     }
 
@@ -324,7 +315,7 @@ mod tests {
     fn test_decode_rejects_oversized_base128_arc() {
         // Six continuation bytes: more than 32 bits of payload.
         let bytes = [0x2b, 0x8f, 0xff, 0xff, 0xff, 0xff, 0x7f];
-        assert_eq!(Oid::decode(&bytes), Err(BerError::InvalidOid));
+        assert_eq!(Oid::decode(&bytes), Err(Malformed));
     }
 
     #[test]
