@@ -289,10 +289,7 @@ mod tests {
         let (content, rest) = expect_tag(&[0x02, 0x01, 0x07, 0xaa], TAG_INTEGER).unwrap();
         assert_eq!(decode_integer(content).unwrap(), 7);
         assert_eq!(rest, &[0xaa]);
-        assert_eq!(
-            expect_tag(&[0x04, 0x00], TAG_INTEGER),
-            Err(Malformed)
-        );
+        assert_eq!(expect_tag(&[0x04, 0x00], TAG_INTEGER), Err(Malformed));
     }
 
     #[test]

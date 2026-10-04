@@ -210,7 +210,6 @@ pub fn get_next(oid: &Oid, rows: &[IfRow]) -> Option<(Oid, SnmpValue)> {
     None
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;

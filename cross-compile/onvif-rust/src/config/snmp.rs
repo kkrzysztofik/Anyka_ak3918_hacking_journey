@@ -83,7 +83,10 @@ mod tests {
         let path = dir.path().join("snmp.toml");
         update_at(&path, |_| {}).unwrap();
         let before = std::fs::read_to_string(&path).unwrap();
-        assert!(matches!(update_at(&path, |s| s.port = 0), Err(ConfigError::InvalidPort)));
+        assert!(matches!(
+            update_at(&path, |s| s.port = 0),
+            Err(ConfigError::InvalidPort)
+        ));
         assert!(matches!(
             update_at(&path, |s| s.community.clear()),
             Err(ConfigError::EmptyCommunity)

@@ -363,9 +363,7 @@ mod tests {
 
         std::fs::write(
             &cfg_path,
-            format!(
-                "port = {port}\ncommunity = \"public\"\nsys_name = \"run-cam\"\n"
-            ),
+            format!("port = {port}\ncommunity = \"public\"\nsys_name = \"run-cam\"\n"),
         )
         .unwrap();
 
@@ -396,9 +394,7 @@ mod tests {
         // Same-bind reload (port unchanged).
         std::fs::write(
             &cfg_path,
-            format!(
-                "port = {port}\ncommunity = \"public\"\nsys_name = \"run-cam2\"\n"
-            ),
+            format!("port = {port}\ncommunity = \"public\"\nsys_name = \"run-cam2\"\n"),
         )
         .unwrap();
         tx.send(()).await.unwrap();
@@ -461,9 +457,7 @@ mod tests {
         let port = holder.local_addr().unwrap().port();
         std::fs::write(
             &cfg_path,
-            format!(
-                "port = {port}\ncommunity = \"public\"\nsys_name = \"retry\"\n"
-            ),
+            format!("port = {port}\ncommunity = \"public\"\nsys_name = \"retry\"\n"),
         )
         .unwrap();
 
@@ -504,9 +498,7 @@ mod tests {
 
         std::fs::write(
             &cfg_path,
-            format!(
-                "port = {old_port}\ncommunity = \"public\"\nsys_name = \"old\"\n"
-            ),
+            format!("port = {old_port}\ncommunity = \"public\"\nsys_name = \"old\"\n"),
         )
         .unwrap();
 
@@ -525,9 +517,7 @@ mod tests {
         let new_port = holder.local_addr().unwrap().port();
         std::fs::write(
             &cfg_path,
-            format!(
-                "port = {new_port}\ncommunity = \"public\"\nsys_name = \"new\"\n"
-            ),
+            format!("port = {new_port}\ncommunity = \"public\"\nsys_name = \"new\"\n"),
         )
         .unwrap();
         tx.send(()).await.unwrap();

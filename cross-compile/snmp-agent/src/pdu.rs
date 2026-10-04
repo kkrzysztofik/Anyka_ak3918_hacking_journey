@@ -350,10 +350,7 @@ mod tests {
     fn test_parse_rejects_trailing_bytes_and_bad_community_utf8() {
         let mut bytes = hand_built_get_sysdescr();
         bytes.push(0x00);
-        assert!(matches!(
-            SnmpMessage::parse(&bytes),
-            Err(Malformed)
-        ));
+        assert!(matches!(SnmpMessage::parse(&bytes), Err(Malformed)));
 
         let mut bad = hand_built_get_sysdescr();
         // community bytes start at index 7 for "public"
