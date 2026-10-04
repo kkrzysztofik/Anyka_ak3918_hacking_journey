@@ -9,7 +9,7 @@ pub const TAG_OID: u8 = 0x06;
 pub const TAG_SEQUENCE: u8 = 0x30;
 
 /// Object identifier.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Oid(pub Vec<u32>);
 
 impl Oid {
@@ -340,5 +340,15 @@ mod tests {
         let enc = oid.encode().unwrap();
         assert!(enc.len() >= 2);
         assert_eq!(Oid::decode(&enc).unwrap(), oid);
+    }
+
+    #[test]
+    fn test_oid_orders_like_snmp() {
+        let o = |a: &[u32]| Oid(a.to_vec());
+        // A prefix sorts before its extensions (GETNEXT on a group yields its first leaf).
+        assert!(o(&[1, 3, 6, 1, 2, 1, 1]) < o(&[1, 3, 6, 1, 2, 1, 1, 1, 0]));
+        assert!(o(&[1, 3, 6, 1, 2, 1, 1, 7, 0]) < o(&[1, 3, 6, 1, 2, 1, 2]));
+        // Arcs compare numerically, not bytewise: column 2 before column 10.
+        assert!(o(&[1, 3, 6, 1, 2, 1, 2, 2, 1, 2, 1]) < o(&[1, 3, 6, 1, 2, 1, 2, 2, 1, 10, 1]));
     }
 }

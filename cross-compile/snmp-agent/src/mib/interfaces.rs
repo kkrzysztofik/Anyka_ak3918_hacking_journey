@@ -195,10 +195,6 @@ fn value_for(oid: &Oid, rows: &[IfRow]) -> Option<SnmpValue> {
     None
 }
 
-fn oid_less(a: &Oid, b: &Oid) -> bool {
-    a.0.iter().cmp(b.0.iter()).is_lt()
-}
-
 /// Exact GET against interfaces MIB using injected rows.
 pub fn get_with_rows(oid: &Oid, rows: &[IfRow]) -> Option<(Oid, SnmpValue)> {
     let value = value_for(oid, rows)?;
@@ -207,7 +203,7 @@ pub fn get_with_rows(oid: &Oid, rows: &[IfRow]) -> Option<(Oid, SnmpValue)> {
 
 pub fn get_next_with_rows(oid: &Oid, rows: &[IfRow]) -> Option<(Oid, SnmpValue)> {
     for candidate in all_table_oids(rows) {
-        if oid_less(oid, &candidate) {
+        if oid < &candidate {
             let value = value_for(&candidate, rows)?;
             return Some((candidate, value));
         }

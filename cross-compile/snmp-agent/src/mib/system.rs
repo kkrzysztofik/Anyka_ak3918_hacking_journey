@@ -68,14 +68,10 @@ pub fn get(oid: &Oid, sources: &dyn MibSources) -> Option<(Oid, SnmpValue)> {
 /// Lexicographic next system scalar after `oid`.
 pub fn get_next(oid: &Oid, sources: &dyn MibSources) -> Option<(Oid, SnmpValue)> {
     for candidate in system_scalars() {
-        if oid_less(oid, &candidate) {
+        if oid < &candidate {
             let value = value_for(&candidate, sources)?;
             return Some((candidate, value));
         }
     }
     None
-}
-
-fn oid_less(a: &Oid, b: &Oid) -> bool {
-    a.0.iter().cmp(b.0.iter()).is_lt()
 }
