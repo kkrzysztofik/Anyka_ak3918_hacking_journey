@@ -15,7 +15,7 @@ async fn spawn_agent() -> (u16, tokio::task::JoinHandle<()>, tempfile::TempDir) 
     drop(probe);
     std::fs::write(
         &cfg,
-        format!("enabled = true\nport = {port}\ncommunity = \"public\"\nsys_name = \"walk-cam\"\n"),
+        format!("port = {port}\ncommunity = \"public\"\nsys_name = \"walk-cam\"\n"),
     )
     .unwrap();
 

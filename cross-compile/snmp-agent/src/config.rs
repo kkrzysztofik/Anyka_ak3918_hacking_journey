@@ -7,10 +7,6 @@ use thiserror::Error;
 /// Default path on the camera SD payload.
 pub const DEFAULT_CONFIG_PATH: &str = "/mnt/anyka_hack/snmp.toml";
 
-fn default_enabled() -> bool {
-    true
-}
-
 fn default_port() -> u16 {
     161
 }
@@ -19,11 +15,9 @@ fn default_community() -> String {
     "public".to_string()
 }
 
-/// SNMPv2c agent settings.
+/// SNMPv2c agent settings. Whether the agent runs at all is [services.snmp] enabled in anyka.toml, owned by anyka-init.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SnmpConfig {
-    #[serde(default = "default_enabled")]
-    pub enabled: bool,
     #[serde(default = "default_port")]
     pub port: u16,
     #[serde(default = "default_community")]
@@ -39,7 +33,6 @@ pub struct SnmpConfig {
 impl Default for SnmpConfig {
     fn default() -> Self {
         Self {
-            enabled: default_enabled(),
             port: default_port(),
             community: default_community(),
             sys_contact: String::new(),
@@ -58,8 +51,8 @@ pub enum ConfigError {
     Parse(#[from] toml::de::Error),
     #[error("invalid port: must be non-zero")]
     InvalidPort,
-    #[error("community must not be empty when SNMP is enabled")]
-    EmptyCommunityWhenEnabled,
+    #[error("community must not be empty")]
+    EmptyCommunity,
 }
 
 impl SnmpConfig {
@@ -74,13 +67,19 @@ impl SnmpConfig {
             Err(e) => return Err(ConfigError::Io(e)),
         };
         let config: Self = toml::from_str(&raw)?;
-        if config.port == 0 {
+        config.validate()?;
+        Ok(config)
+    }
+
+    /// The rules [`SnmpConfig::load`] enforces; onvif-rust runs them before writing.
+    pub fn validate(&self) -> Result<(), ConfigError> {
+        if self.port == 0 {
             return Err(ConfigError::InvalidPort);
         }
-        if config.enabled && config.community.is_empty() {
-            return Err(ConfigError::EmptyCommunityWhenEnabled);
+        if self.community.is_empty() {
+            return Err(ConfigError::EmptyCommunity);
         }
-        Ok(config)
+        Ok(())
     }
 }
 
@@ -91,7 +90,6 @@ mod tests {
     #[test]
     fn test_default_config_values() {
         let c = SnmpConfig::default();
-        assert!(c.enabled);
         assert_eq!(c.port, 161);
         assert_eq!(c.community, "public");
         assert_eq!(c.sys_contact, "");
@@ -122,7 +120,6 @@ sys_location = "lab"
         )
         .unwrap();
         let c = SnmpConfig::load(&path).unwrap();
-        assert!(!c.enabled);
         assert_eq!(c.port, 1161);
         assert_eq!(c.community, "monitor");
         assert_eq!(c.sys_name, "cam-1");
@@ -137,13 +134,14 @@ sys_location = "lab"
     }
 
     #[test]
-    fn test_load_rejects_enabled_without_community() {
+    fn test_legacy_enabled_false_no_longer_excuses_empty_community() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("snmp.toml");
-        std::fs::write(&path, "enabled = true\nport = 161\ncommunity = \"\"\n").unwrap();
+        // Pre-cleanup files still carry `enabled`; it is ignored, not a parse error.
+        std::fs::write(&path, "enabled = false\ncommunity = \"\"\n").unwrap();
         assert!(matches!(
             SnmpConfig::load(&path),
-            Err(ConfigError::EmptyCommunityWhenEnabled)
+            Err(ConfigError::EmptyCommunity)
         ));
     }
 }

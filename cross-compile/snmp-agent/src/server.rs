@@ -123,43 +123,32 @@ async fn bind_socket(port: u16) -> std::io::Result<UdpSocket> {
     UdpSocket::bind(addr).await
 }
 
-/// Apply a freshly loaded config. Bind succeeds before `agent.config` is
-/// replaced so a failed rebind cannot leave APIs advertising a dead port.
+/// Apply a freshly loaded config. A new port is bound before `agent.config` is
+/// replaced, so a failed rebind keeps serving on the old one.
 async fn apply_reload(agent: &mut Agent, socket: &mut Option<UdpSocket>, new_cfg: SnmpConfig) {
-    let old_port = agent.config.port;
-    let old_enabled = agent.config.enabled;
-
-    if !new_cfg.enabled {
-        *socket = None;
-        agent.config = new_cfg;
-        tracing::info!("snmp-agent disabled after reload");
-        return;
-    }
-
-    let need_rebind = socket.is_none() || !old_enabled || old_port != new_cfg.port;
-    if need_rebind {
-        match bind_socket(new_cfg.port).await {
-            Ok(s) => {
-                tracing::info!(port = new_cfg.port, "snmp-agent rebound");
-                *socket = Some(s);
-                agent.config = new_cfg;
-            }
-            Err(e) => {
-                tracing::error!(
-                    error = %e,
-                    port = new_cfg.port,
-                    "rebind failed; keeping previous socket when bound"
-                );
-                // No live socket: commit the requested config so BIND_RETRY
-                // keeps trying the new port instead of stale last-good values.
-                if socket.is_none() {
-                    agent.config = new_cfg;
-                }
-            }
-        }
-    } else {
+    if socket.is_some() && agent.config.port == new_cfg.port {
         agent.config = new_cfg;
         tracing::info!("snmp-agent config reloaded (same bind)");
+        return;
+    }
+    match bind_socket(new_cfg.port).await {
+        Ok(s) => {
+            tracing::info!(port = new_cfg.port, "snmp-agent rebound");
+            *socket = Some(s);
+            agent.config = new_cfg;
+        }
+        Err(e) => {
+            tracing::error!(
+                error = %e,
+                port = new_cfg.port,
+                "rebind failed; keeping previous socket when bound"
+            );
+            // No live socket: commit the requested config so BIND_RETRY
+            // keeps trying the new port instead of stale last-good values.
+            if socket.is_none() {
+                agent.config = new_cfg;
+            }
+        }
     }
 }
 
@@ -180,25 +169,19 @@ pub async fn run(
     }
     let _pid_guard = PidGuard(pidfile);
 
-    let mut socket: Option<UdpSocket> = None;
-
-    if agent.config.enabled {
-        match bind_socket(agent.config.port).await {
-            Ok(s) => {
-                tracing::info!(port = agent.config.port, "snmp-agent listening");
-                socket = Some(s);
-            }
-            Err(e) => {
-                tracing::error!(error = %e, port = agent.config.port, "bind failed; will retry");
-            }
+    let mut socket = match bind_socket(agent.config.port).await {
+        Ok(s) => {
+            tracing::info!(port = agent.config.port, "snmp-agent listening");
+            Some(s)
         }
-    } else {
-        tracing::info!("snmp-agent disabled (unbound); waiting for reload");
-    }
+        Err(e) => {
+            tracing::error!(error = %e, port = agent.config.port, "bind failed; will retry");
+            None
+        }
+    };
 
     let mut buf = [0u8; 2048];
     loop {
-        let enabled = agent.config.enabled;
         let port = agent.config.port;
         tokio::select! {
             _ = reload.recv() => {
@@ -211,7 +194,7 @@ pub async fn run(
                     }
                 }
             }
-            _ = tokio::time::sleep(BIND_RETRY), if socket.is_none() && enabled => {
+            _ = tokio::time::sleep(BIND_RETRY), if socket.is_none() => {
                 match bind_socket(port).await {
                     Ok(s) => {
                         tracing::info!(port, "snmp-agent bound on retry");
@@ -369,7 +352,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_run_serves_udp_get_reload_and_disable() {
+    async fn test_run_serves_udp_get_and_reload() {
         let dir = tempfile::tempdir().unwrap();
         let cfg_path = dir.path().join("snmp.toml");
         let pidfile = dir.path().join("snmp-agent.pid");
@@ -381,7 +364,7 @@ mod tests {
         std::fs::write(
             &cfg_path,
             format!(
-                "enabled = true\nport = {port}\ncommunity = \"public\"\nsys_name = \"run-cam\"\n"
+                "port = {port}\ncommunity = \"public\"\nsys_name = \"run-cam\"\n"
             ),
         )
         .unwrap();
@@ -410,11 +393,11 @@ mod tests {
             SnmpValue::OctetString(b"run-cam".to_vec())
         );
 
-        // Same-bind reload (enabled + port unchanged).
+        // Same-bind reload (port unchanged).
         std::fs::write(
             &cfg_path,
             format!(
-                "enabled = true\nport = {port}\ncommunity = \"public\"\nsys_name = \"run-cam2\"\n"
+                "port = {port}\ncommunity = \"public\"\nsys_name = \"run-cam2\"\n"
             ),
         )
         .unwrap();
@@ -435,61 +418,13 @@ mod tests {
         tx.send(()).await.unwrap();
         tokio::time::sleep(Duration::from_millis(50)).await;
 
-        // Disable on reload.
-        std::fs::write(
-            &cfg_path,
-            format!(
-                "enabled = false\nport = {port}\ncommunity = \"public\"\nsys_name = \"run-cam2\"\n"
-            ),
-        )
-        .unwrap();
-        tx.send(()).await.unwrap();
-        tokio::time::sleep(Duration::from_millis(80)).await;
-
-        // Re-enable (rebind after socket cleared).
-        std::fs::write(
-            &cfg_path,
-            format!(
-                "enabled = true\nport = {port}\ncommunity = \"public\"\nsys_name = \"run-cam3\"\n"
-            ),
-        )
-        .unwrap();
-        tx.send(()).await.unwrap();
-        tokio::time::sleep(Duration::from_millis(80)).await;
-        client.send_to(&req, ("127.0.0.1", port)).await.unwrap();
-        let (n, _) = tokio::time::timeout(Duration::from_secs(2), client.recv_from(&mut buf))
-            .await
-            .expect("rebind response timeout")
-            .unwrap();
-        assert_eq!(
-            SnmpMessage::parse(&buf[..n]).unwrap().pdu.variable_bindings[0].value,
-            SnmpValue::OctetString(b"run-cam3".to_vec())
-        );
-
         handle.abort();
         let _ = handle.await;
     }
 
     #[tokio::test]
-    async fn test_run_starts_disabled_and_bind_failure_is_non_fatal() {
+    async fn test_bind_failure_is_non_fatal() {
         let dir = tempfile::tempdir().unwrap();
-        let cfg_path = dir.path().join("snmp.toml");
-        let pidfile = dir.path().join("disabled.pid");
-
-        std::fs::write(
-            &cfg_path,
-            "enabled = false\nport = 161\ncommunity = \"public\"\n",
-        )
-        .unwrap();
-        let run_cfg = cfg_path.clone();
-        let run_pid = pidfile.clone();
-        let (_tx, rx) = tokio::sync::mpsc::channel(1);
-        let handle = tokio::spawn(async move {
-            let _ = run(run_cfg, run_pid, rx).await;
-        });
-        wait_for_file(&pidfile, Duration::from_secs(2)).await;
-        handle.abort();
-        let _ = handle.await;
 
         // Bind failure: hold the port, then start agent on it.
         let holder = UdpSocket::bind("0.0.0.0:0").await.unwrap();
@@ -498,7 +433,7 @@ mod tests {
         let pidfile = dir.path().join("bindfail.pid");
         std::fs::write(
             &cfg_path,
-            format!("enabled = true\nport = {port}\ncommunity = \"public\"\n"),
+            format!("port = {port}\ncommunity = \"public\"\n"),
         )
         .unwrap();
         let run_cfg = cfg_path.clone();
@@ -527,7 +462,7 @@ mod tests {
         std::fs::write(
             &cfg_path,
             format!(
-                "enabled = true\nport = {port}\ncommunity = \"public\"\nsys_name = \"retry\"\n"
+                "port = {port}\ncommunity = \"public\"\nsys_name = \"retry\"\n"
             ),
         )
         .unwrap();
@@ -570,7 +505,7 @@ mod tests {
         std::fs::write(
             &cfg_path,
             format!(
-                "enabled = true\nport = {old_port}\ncommunity = \"public\"\nsys_name = \"old\"\n"
+                "port = {old_port}\ncommunity = \"public\"\nsys_name = \"old\"\n"
             ),
         )
         .unwrap();
@@ -591,7 +526,7 @@ mod tests {
         std::fs::write(
             &cfg_path,
             format!(
-                "enabled = true\nport = {new_port}\ncommunity = \"public\"\nsys_name = \"new\"\n"
+                "port = {new_port}\ncommunity = \"public\"\nsys_name = \"new\"\n"
             ),
         )
         .unwrap();
