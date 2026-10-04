@@ -610,14 +610,14 @@ fn stage_and_flip(
     remove_tree(sys, &staging)?;
     std::fs::create_dir_all(&staging)?;
 
+    // No `sh -c`: busybox dispatches on its first argument, so neither path
+    // passes through a shell (same as `remove_tree`).
     let untar = [
-        "sh".to_string(),
-        "-c".to_string(),
-        format!(
-            "busybox tar -xf {} -C {}",
-            shell_quote(&root.join("spool/bundle.tar")),
-            shell_quote(&staging)
-        ),
+        "tar".to_string(),
+        "-xf".to_string(),
+        root.join("spool/bundle.tar").to_string_lossy().into_owned(),
+        "-C".to_string(),
+        staging.to_string_lossy().into_owned(),
     ];
     match sys.run_to_completion("busybox", &untar) {
         Ok(st) if st.success() => {}
@@ -809,6 +809,11 @@ mod tests {
         }
         let _ = std::fs::remove_dir_all(&args[2]);
         true
+    }
+
+    /// The `-C` target of a mocked `busybox tar -xf <tar> -C <dir>` call.
+    fn fake_untar_dir(args: &[String]) -> Option<String> {
+        (args.first().map(String::as_str) == Some("tar")).then(|| args[4].clone())
     }
 
     #[test]
@@ -1199,12 +1204,7 @@ mod tests {
                 if fake_rm(args) {
                     return Ok(exit_ok());
                 }
-                if let Some(cmd) = args.iter().find(|a| a.contains("tar -xf")) {
-                    let dir = cmd
-                        .split("-C ")
-                        .nth(1)
-                        .map(|s| s.trim().trim_matches('\'').to_string())
-                        .expect("untar -C dir");
+                if let Some(dir) = fake_untar_dir(args) {
                     std::fs::create_dir_all(&dir).unwrap();
                     std::fs::write(
                         std::path::Path::new(&dir).join("manifest.sha256"),
@@ -1257,12 +1257,7 @@ mod tests {
                 return Ok(exit_fail());
             }
             // Materialize the staged slot the sha256sum step will reject.
-            let cmd = args.iter().find(|a| a.contains("tar -xf")).unwrap();
-            let dir = cmd
-                .split("-C ")
-                .nth(1)
-                .map(|s| s.trim().trim_matches('\'').to_string())
-                .expect("untar -C dir");
+            let dir = fake_untar_dir(args).expect("untar -C dir");
             std::fs::create_dir_all(&dir).unwrap();
             std::fs::write(
                 std::path::Path::new(&dir).join("manifest.sha256"),
@@ -1311,12 +1306,7 @@ mod tests {
             if fake_rm(args) {
                 return Ok(exit_ok());
             }
-            if let Some(cmd) = args.iter().find(|a| a.contains("tar -xf")) {
-                let dir = cmd
-                    .split("-C ")
-                    .nth(1)
-                    .map(|s| s.trim().trim_matches('\'').to_string())
-                    .expect("untar -C dir");
+            if let Some(dir) = fake_untar_dir(args) {
                 std::fs::create_dir_all(&dir).unwrap();
                 std::fs::write(
                     std::path::Path::new(&dir).join("manifest.sha256"),
@@ -1401,12 +1391,7 @@ mod tests {
             if fake_rm(args) {
                 return Ok(exit_ok());
             }
-            if let Some(cmd) = args.iter().find(|a| a.contains("tar -xf")) {
-                let dir = cmd
-                    .split("-C ")
-                    .nth(1)
-                    .map(|s| s.trim().trim_matches('\'').to_string())
-                    .expect("untar -C dir");
+            if let Some(dir) = fake_untar_dir(args) {
                 std::fs::create_dir_all(&dir).unwrap();
                 std::fs::write(
                     std::path::Path::new(&dir).join("manifest.sha256"),
@@ -1463,12 +1448,7 @@ mod tests {
                 }
                 return Ok(exit_fail());
             }
-            if let Some(cmd) = args.iter().find(|a| a.contains("tar -xf")) {
-                let dir = cmd
-                    .split("-C ")
-                    .nth(1)
-                    .map(|s| s.trim().trim_matches('\'').to_string())
-                    .expect("untar -C dir");
+            if let Some(dir) = fake_untar_dir(args) {
                 std::fs::create_dir_all(&dir).unwrap();
                 std::fs::write(
                     std::path::Path::new(&dir).join("manifest.sha256"),
