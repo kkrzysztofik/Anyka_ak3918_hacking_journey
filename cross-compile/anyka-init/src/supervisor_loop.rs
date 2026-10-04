@@ -895,23 +895,30 @@ fn shutdown(sys: &dyn Sys, by_pid: &BTreeMap<Pid, usize>, rx: &Receiver<Msg>) {
 mod reboot_delay_tests {
     use super::*;
 
+    /// A tempdir update root whose `active` pointer says `a`, plus the root as
+    /// a string for building expected paths.
+    fn slot_a_root() -> (tempfile::TempDir, String) {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(d.path().join("slots")).unwrap();
+        std::fs::write(d.path().join("active"), "a").unwrap();
+        let s = d.path().display().to_string();
+        (d, s)
+    }
+
+    fn rewrite_into_a(root: &Path) -> impl Fn(&str) -> String + '_ {
+        move |p| {
+            crate::update::slot_path(root, crate::update::Slot::A, Path::new(p))
+                .to_string_lossy()
+                .into_owned()
+        }
+    }
+
     #[test]
     fn test_rewrite_env_rewrites_a_path_list_entry_by_entry() {
         // Two entries on the update root: rewriting the whole value as one
         // path would leave the second entry pointing at the old slot.
-        let d = tempfile::tempdir().unwrap();
-        let root = d.path();
-        let slots = crate::update::Slots::new(root);
-        // Force active=a so slot_path resolves into slots/a regardless of the
-        // host this test runs on.
-        std::fs::create_dir_all(root.join("slots")).unwrap();
-        std::fs::write(root.join("active"), "a").unwrap();
-        let rewrite = |p: &str| {
-            crate::update::slot_path(root, slots.active(), Path::new(p))
-                .to_string_lossy()
-                .into_owned()
-        };
-        let root_str = root.display().to_string();
+        let (d, root_str) = slot_a_root();
+        let rewrite = rewrite_into_a(d.path());
         assert_eq!(
             rewrite_env(
                 "LD_LIBRARY_PATH",
@@ -924,17 +931,8 @@ mod reboot_delay_tests {
 
     #[test]
     fn test_rewrite_env_leaves_unbundled_path_list_entries_alone() {
-        let d = tempfile::tempdir().unwrap();
-        let root = d.path();
-        let slots = crate::update::Slots::new(root);
-        std::fs::create_dir_all(root.join("slots")).unwrap();
-        std::fs::write(root.join("active"), "a").unwrap();
-        let rewrite = |p: &str| {
-            crate::update::slot_path(root, slots.active(), Path::new(p))
-                .to_string_lossy()
-                .into_owned()
-        };
-        let root_str = root.display().to_string();
+        let (d, root_str) = slot_a_root();
+        let rewrite = rewrite_into_a(d.path());
         // /lib is outside the slots and must pass through.
         assert_eq!(
             rewrite_env(
@@ -948,17 +946,8 @@ mod reboot_delay_tests {
 
     #[test]
     fn test_rewrite_env_rewrites_non_path_list_values_verbatim() {
-        let d = tempfile::tempdir().unwrap();
-        let root = d.path();
-        let slots = crate::update::Slots::new(root);
-        std::fs::create_dir_all(root.join("slots")).unwrap();
-        std::fs::write(root.join("active"), "a").unwrap();
-        let rewrite = |p: &str| {
-            crate::update::slot_path(root, slots.active(), Path::new(p))
-                .to_string_lossy()
-                .into_owned()
-        };
-        let root_str = root.display().to_string();
+        let (d, root_str) = slot_a_root();
+        let rewrite = rewrite_into_a(d.path());
         // A single bundled path is rewritten wholesale, not split on ':'.
         assert_eq!(
             rewrite_env(
@@ -1036,52 +1025,16 @@ mod periodic_reboot_loop_tests {
 #[cfg(test)]
 mod run_tests {
     use super::*;
-    use crate::config::{
-        Config, LogCfg, MonitorCfg, RebootCfg, ServiceCfg, SupervisorCfg, SystemCfg, TimeCfg,
-        WifiCfg,
-    };
+    use crate::config::{Config, ServiceCfg};
     use crate::sys::{MockSys, SysError};
-    use std::str::FromStr;
-
-    fn minimal_wifi_cfg() -> WifiCfg {
-        WifiCfg {
-            ssid: "test".into(),
-            password: "test".into(),
-            config_file: "/nonexistent/anyka_cfg.ini".into(),
-            chip: "auto".into(),
-            gpio_polarity: "low_high".into(),
-            interface: "wlan0".into(),
-            security: "wpa".into(),
-            dhcp: true,
-            address: None,
-            gateway: None,
-            dns: Vec::new(),
-            connect_timeout_sec: 45,
-            fallback_to_vendor: true,
-        }
-    }
 
     fn test_config(services: BTreeMap<String, ServiceCfg>) -> Config {
-        Config {
-            schema: 0,
-            log: LogCfg::default(),
-            system: SystemCfg::default(),
-            wifi: minimal_wifi_cfg(),
-            time: TimeCfg::default(),
-            supervisor: SupervisorCfg {
-                backoff_min_sec: 30,
-                backoff_max_sec: 60,
-                crashloop_count: 100,
-                crashloop_window_sec: 600,
-                storm_guard_max_reboots: 3,
-                storm_guard_state: "/nonexistent/storm.json".into(),
-                storm_guard_reset_uptime_sec: 600,
-            },
-            monitor: MonitorCfg::default(),
-            reboot: RebootCfg::default(),
-            update: crate::config::Update::default(),
-            services,
-        }
+        let mut cfg = crate::config::test_config();
+        cfg.services = services;
+        cfg.supervisor.backoff_min_sec = 30;
+        cfg.supervisor.crashloop_count = 100;
+        cfg.supervisor.storm_guard_state = "/nonexistent/storm.json".into();
+        cfg
     }
 
     fn svc_cfg(exec: &str, enabled: bool) -> ServiceCfg {
@@ -1552,18 +1505,13 @@ mod run_tests {
         assert_eq!(rows[0].state, "backoff");
     }
 
-    /// A minimal config that parses under `deny_unknown_fields`.
-    fn minimal_config() -> Config {
-        Config::from_str("[wifi]\nssid = \"t\"\npassword = \"p\"\n").expect("parses")
-    }
-
     #[test]
     fn test_handle_set_ntp_writes_the_file_then_memory() {
         let dir = tempfile::tempdir().unwrap();
         let cfg_path = dir.path().join("anyka.toml");
         std::fs::write(&cfg_path, "[time]\nservers = [\"old.example\"]\n").unwrap();
 
-        let mut cfg = minimal_config();
+        let mut cfg = crate::config::test_config();
         cfg.time.servers = vec!["old.example".into()];
         let (reply_tx, reply_rx) = channel();
 
@@ -1577,7 +1525,7 @@ mod run_tests {
 
     #[test]
     fn test_handle_set_ntp_leaves_memory_alone_when_the_write_fails() {
-        let mut cfg = minimal_config();
+        let mut cfg = crate::config::test_config();
         cfg.time.servers = vec!["old.example".into()];
         let (reply_tx, reply_rx) = channel();
 
@@ -1599,7 +1547,7 @@ mod run_tests {
         let original = "[time]\nservers = [\"old.example\"]\n";
         std::fs::write(&cfg_path, original).unwrap();
 
-        let mut cfg = minimal_config();
+        let mut cfg = crate::config::test_config();
         let (reply_tx, reply_rx) = channel();
         handle_set_ntp(&mut cfg, &cfg_path, vec!["bad host".into()], &reply_tx);
 

@@ -896,6 +896,15 @@ impl Config {
     }
 }
 
+/// A parsed, unvalidated config for unit tests elsewhere in the crate. Tests
+/// mutate the fields they care about instead of hand-building every section.
+#[cfg(test)]
+pub(crate) fn test_config() -> Config {
+    "[wifi]\nssid = \"test\"\npassword = \"testpass\"\nconfig_file = \"/nonexistent/anyka_cfg.ini\"\n"
+        .parse()
+        .expect("test config parses")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

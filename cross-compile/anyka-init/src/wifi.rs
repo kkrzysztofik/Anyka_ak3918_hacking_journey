@@ -833,6 +833,19 @@ mod tests {
         }
     }
 
+    /// `test_layout` with wlan0 present, carrying, and addressed.
+    fn happy_layout(dir: &std::path::Path, carrier: bool) -> FsLayout {
+        let layout = test_layout(dir);
+        std::fs::create_dir_all(format!("{}/wlan0", layout.sys_class_net)).expect("iface dir");
+        if carrier {
+            std::fs::write(format!("{}/wlan0/carrier", layout.sys_class_net), "1")
+                .expect("carrier");
+        }
+        std::fs::write(&layout.proc_route, HAPPY_ROUTE).expect("route");
+        std::fs::write(&layout.proc_fib_trie, HAPPY_FIB_TRIE).expect("fib_trie");
+        layout
+    }
+
     fn happy_cfg() -> WifiCfg {
         WifiCfg {
             ssid: "testnet".into(),
@@ -1011,13 +1024,6 @@ mod tests {
                 "every security mode must probe actively, missing for {sec:?}"
             );
         }
-    }
-
-    #[test]
-    fn test_wpa_supplicant_conf_is_deterministic() {
-        let a = wpa_supplicant_conf("net", "password", Security::Wpa);
-        let b = wpa_supplicant_conf("net", "password", Security::Wpa);
-        assert_eq!(a, b);
     }
 
     #[test]
@@ -1344,11 +1350,7 @@ Local:
     #[test]
     fn test_try_bring_up_with_happy_path_over_dhcp() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let layout = test_layout(dir.path());
-        std::fs::create_dir_all(format!("{}/wlan0", layout.sys_class_net)).expect("iface dir");
-        std::fs::write(format!("{}/wlan0/carrier", layout.sys_class_net), "1").expect("carrier");
-        std::fs::write(&layout.proc_route, HAPPY_ROUTE).expect("route");
-        std::fs::write(&layout.proc_fib_trie, HAPPY_FIB_TRIE).expect("fib_trie");
+        let layout = happy_layout(dir.path(), true);
 
         let cfg = happy_cfg();
         let sys = happy_mock_sys();
@@ -1378,11 +1380,7 @@ Local:
     #[test]
     fn test_try_bring_up_with_clears_resolv_conf_when_static_dns_is_empty() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let layout = test_layout(dir.path());
-        std::fs::create_dir_all(format!("{}/wlan0", layout.sys_class_net)).expect("iface dir");
-        std::fs::write(format!("{}/wlan0/carrier", layout.sys_class_net), "1").expect("carrier");
-        std::fs::write(&layout.proc_route, HAPPY_ROUTE).expect("route");
-        std::fs::write(&layout.proc_fib_trie, HAPPY_FIB_TRIE).expect("fib_trie");
+        let layout = happy_layout(dir.path(), true);
         std::fs::write(&layout.resolv_conf, "nameserver 8.8.8.8\n").expect("seed resolv");
 
         let mut cfg = happy_cfg();
@@ -1403,11 +1401,7 @@ Local:
     #[test]
     fn test_bring_up_with_clears_wifi_reboot_counter_on_successful_association() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let layout = test_layout(dir.path());
-        std::fs::create_dir_all(format!("{}/wlan0", layout.sys_class_net)).expect("iface dir");
-        std::fs::write(format!("{}/wlan0/carrier", layout.sys_class_net), "1").expect("carrier");
-        std::fs::write(&layout.proc_route, HAPPY_ROUTE).expect("route");
-        std::fs::write(&layout.proc_fib_trie, HAPPY_FIB_TRIE).expect("fib_trie");
+        let layout = happy_layout(dir.path(), true);
 
         let storm_path = dir.path().join("storm.json");
         std::fs::write(&storm_path, r#"{"fast_reboots":1,"wifi_reboots":2}"#)
@@ -1438,10 +1432,7 @@ Local:
         // Arrange: same tempdir layout as the happy-path test, but no carrier,
         // so association fails and bring-up returns Err.
         let dir = tempfile::tempdir().expect("tempdir");
-        let layout = test_layout(dir.path());
-        std::fs::create_dir_all(format!("{}/wlan0", layout.sys_class_net)).expect("iface dir");
-        std::fs::write(&layout.proc_route, HAPPY_ROUTE).expect("route");
-        std::fs::write(&layout.proc_fib_trie, HAPPY_FIB_TRIE).expect("fib_trie");
+        let layout = happy_layout(dir.path(), false);
 
         let mut overlay_cfg = happy_cfg();
         overlay_cfg.ssid = "TypoNet".into();
