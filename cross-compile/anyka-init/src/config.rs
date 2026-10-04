@@ -472,9 +472,9 @@ impl std::str::FromStr for Config {
 }
 
 impl Config {
-    /// Persist `enabled` for one service: line-level edit, then atomic
-    /// tmp+rename over the original (the same pattern `update.rs` uses for the
-    /// `active` pointer on this filesystem). On failure the original is
+    /// Persist `enabled` for one service: line-level edit, then written via
+    /// `sys::atomic_write` (the same pattern `update.rs` uses for the `active`
+    /// pointer on this filesystem). On failure the original is
     /// untouched.
     ///
     /// Associated, not a method: this writes the file, and the in-memory

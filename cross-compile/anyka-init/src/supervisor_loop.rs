@@ -1129,8 +1129,6 @@ mod run_tests {
         }
     }
 
-    /// A `LoopCtx` over test-owned parts. Returned by value so each test can
-    /// keep its tempdir alive.
     #[test]
     fn test_run_restart_message_for_unknown_service_is_ignored() {
         let mut sys = MockSys::new();

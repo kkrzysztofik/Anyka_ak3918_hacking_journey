@@ -386,14 +386,13 @@ pub fn effective_trial_ports(requested: &[u16], onvif_enabled: bool) -> Vec<u16>
 /// flow, so a broken vendor-daemon can pass. Add a frame-counter probe if a
 /// silent-no-video regression ever ships.
 pub fn evaluate_trial(
-    ports: &[u16],
     policy: &Policy,
     mut probe: impl FnMut(u16) -> bool,
     mut sleep: impl FnMut(std::time::Duration),
 ) -> Outcome {
     let mut held = 0u32;
     for _ in 0..policy.deadline_secs {
-        if ports.iter().all(|p| probe(*p)) {
+        if policy.ports.iter().all(|p| probe(*p)) {
             held += 1;
             if held >= policy.hold_secs {
                 return Outcome::Confirm;
@@ -404,6 +403,24 @@ pub fn evaluate_trial(
         sleep(std::time::Duration::from_secs(1));
     }
     Outcome::Revert
+}
+
+/// Point `active` back at `prev`, clear the marker, reboot.
+///
+/// Order matters: if power is lost between the first two steps the next boot
+/// repeats a revert that is already correct, whereas clearing the marker
+/// first would boot the broken slot with no marker and no way back. Returns
+/// false when the pointer could not be restored.
+fn revert(sys: &dyn crate::sys::Sys, root: &Path, slots: &Slots, prev: Slot) -> bool {
+    if let Err(e) = slots.set_active(prev) {
+        tracing::error!(error = %e, "could not restore the previous slot");
+        return false;
+    }
+    if let Err(e) = Trial::clear(root) {
+        tracing::error!(error = %e, "could not clear the trial marker");
+    }
+    let _ = sys.reboot();
+    true
 }
 
 /// Resolve an unconfirmed update, if there is one. Called once per boot, after
@@ -435,7 +452,7 @@ pub fn reconcile(
     // The trial evaluation sleeps through the whole window but touches no
     // shared state; only the confirm/revert tail below writes the pointer and
     // the marker, so the lock is taken there and held across the reboot.
-    match evaluate_trial(&policy.ports, &policy, probe, sleep) {
+    match evaluate_trial(&policy, probe, sleep) {
         Outcome::Confirm => {
             let _guard = lock
                 .lock()
@@ -464,21 +481,10 @@ pub fn reconcile(
                 "trial failed: reverting to slot {}",
                 prev.name()
             );
-            // Order matters. Restore the pointer, then clear the marker, then
-            // reboot: if power is lost between the first two the next boot
-            // repeats a revert that is already correct, whereas clearing first
-            // would boot the broken slot with no marker and no way back.
             let _guard = lock
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            if let Err(e) = slots.set_active(prev) {
-                tracing::error!(error = %e, "could not restore the previous slot");
-                return;
-            }
-            if let Err(e) = Trial::clear(root) {
-                tracing::error!(error = %e, "could not clear the trial marker");
-            }
-            let _ = sys.reboot();
+            revert(sys, root, &slots, prev);
         }
     }
 }
@@ -503,15 +509,7 @@ pub fn revert_now(sys: &dyn crate::sys::Sys, root: &Path) -> bool {
         prev = prev.name(),
         "safe mode with an unconfirmed update: reverting without a trial"
     );
-    if let Err(e) = slots.set_active(prev) {
-        tracing::error!(error = %e, "could not restore the previous slot");
-        return false;
-    }
-    if let Err(e) = Trial::clear(root) {
-        tracing::error!(error = %e, "could not clear the trial marker");
-    }
-    let _ = sys.reboot();
-    true
+    revert(sys, root, &slots, prev)
 }
 
 /// Is a complete bundle waiting?
@@ -884,7 +882,6 @@ mod tests {
     fn trial_passes_when_every_port_is_bound_for_the_hold() {
         let mut calls = 0;
         let outcome = evaluate_trial(
-            &[80, 554, 8080],
             &Policy {
                 hold_secs: 3,
                 deadline_secs: 10,
@@ -903,7 +900,6 @@ mod tests {
     #[test]
     fn trial_fails_when_one_port_never_binds() {
         let outcome = evaluate_trial(
-            &[80, 554, 8080],
             &Policy {
                 hold_secs: 3,
                 deadline_secs: 6,
@@ -919,11 +915,10 @@ mod tests {
     fn a_late_bind_still_confirms_inside_the_deadline() {
         let mut tick = 0;
         let outcome = evaluate_trial(
-            &[554],
             &Policy {
                 hold_secs: 2,
                 deadline_secs: 20,
-                ports: TRIAL_PORTS.to_vec(),
+                ports: vec![554],
             },
             |_| {
                 tick += 1;
@@ -938,11 +933,10 @@ mod tests {
     fn a_flapping_port_resets_the_hold_and_eventually_reverts() {
         let mut tick = 0;
         let outcome = evaluate_trial(
-            &[80],
             &Policy {
                 hold_secs: 3,
                 deadline_secs: 8,
-                ports: TRIAL_PORTS.to_vec(),
+                ports: vec![80],
             },
             |_| {
                 tick += 1;

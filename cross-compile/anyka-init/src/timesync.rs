@@ -95,9 +95,6 @@ pub fn parse_response(
     Ok(UNIX_EPOCH + Duration::new(unix, frac_nanos))
 }
 
-/// Read a 64-bit nonce from `/dev/urandom`. Falls back to a mixed
-/// wall-clock / pid / counter value if unavailable — weaker than urandom,
-/// but `Instant::now().elapsed()` is ~0 and must not be used alone.
 /// A 64-bit nonce from std's OS-seeded `RandomState` (getrandom, falling back
 /// to /dev/urandom). Panics only on a system with no randomness source at
 /// all, where the old hand-mixed fallback would have been guessable anyway.
@@ -252,11 +249,8 @@ pub fn sync_once(
             return None;
         }
         let timeout = remaining
-            .map(|left| left.min(Duration::from_secs(5)))
-            .unwrap_or(Duration::from_secs(5));
-        if timeout.is_zero() {
-            return None;
-        }
+            .unwrap_or(Duration::from_secs(5))
+            .min(Duration::from_secs(5));
         match query(server, timeout, &bounds) {
             Ok(t) => {
                 let before = sys.realtime();
@@ -306,17 +300,9 @@ pub fn first_sync(sys: &dyn Sys, cfg: &TimeCfg, ntp_disabled: &Path) -> bool {
         if sync_once(sys, cfg, Some(remaining), ntp_disabled).is_some() {
             return true;
         }
+        // Bounded by `deadline`; the check above ends the loop once it
+        // passes, so a retry_interval longer than the timeout means one attempt.
         let left = deadline.saturating_duration_since(sys.now());
-        if left.is_zero() {
-            tracing::warn!(
-                timeout_sec = cfg.first_sync_timeout_sec,
-                "no NTP sync before boot deadline; continuing with a wrong clock. \
-                 Authenticated ONVIF requests will fail until the resync thread succeeds."
-            );
-            return false;
-        }
-        // Bounded by `deadline` above, so a retry_interval longer than the
-        // timeout simply means one attempt.
         sys.sleep(Duration::from_secs(cfg.retry_interval_sec.min(2)).min(left));
     }
 }

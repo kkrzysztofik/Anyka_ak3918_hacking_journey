@@ -11,27 +11,20 @@
 //! Every field is `Option` so that "the user never touched this" is
 //! distinguishable from "the user set this to false / to an empty list".
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
 use crate::config::WifiCfg;
 
 /// Overlay applied over `[wifi]` from `anyka.toml`.
-#[derive(Debug, Default, Clone, Deserialize, Serialize, PartialEq)]
+#[derive(Debug, Default, Clone, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct NetworkOverlay {
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub ssid: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub password: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub security: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub dhcp: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub address: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub gateway: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub dns: Option<Vec<String>>,
 }
 

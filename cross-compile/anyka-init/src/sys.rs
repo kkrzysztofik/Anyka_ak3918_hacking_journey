@@ -6,7 +6,6 @@
 
 use std::collections::BTreeMap;
 use std::fs::OpenOptions;
-use std::mem::ManuallyDrop;
 use std::os::unix::process::{CommandExt, ExitStatusExt};
 use std::path::Path;
 use std::process::{Command, Stdio};
@@ -192,12 +191,9 @@ impl Sys for RealSys {
             exec: spec.exec.clone(),
             source,
         })?;
-        // The reaper thread owns reaping via waitpid(-1). Dropping Child would
-        // race that waitpid. Wrap in ManuallyDrop so Drop/wait never runs;
-        // do not into_inner — reaper owns waitpid(-1).
-        let child = ManuallyDrop::new(child);
-        let pid = child.id() as Pid;
-        Ok(pid)
+        // The reaper thread owns reaping via waitpid(-1). std's `Child` has no
+        // Drop that waits or kills, so letting the handle go cannot race it.
+        Ok(child.id() as Pid)
     }
 
     fn wait_any(&self) -> Result<Option<(Pid, ExitStatus)>, SysError> {
@@ -336,11 +332,9 @@ impl Sys for RealSys {
             exec: prog.to_string(),
             source,
         })?;
-        // Same ManuallyDrop pattern as spawn(): the reaper owns waitpid.
-        // Do not into_inner / drop — reaper owns waitpid(-1).
-        let child = ManuallyDrop::new(child);
-        let pid = child.id() as Pid;
-        Ok(pid)
+        // The reaper thread owns reaping via waitpid(-1). std's `Child` has no
+        // Drop that waits or kills, so letting the handle go cannot race it.
+        Ok(child.id() as Pid)
     }
 }
 

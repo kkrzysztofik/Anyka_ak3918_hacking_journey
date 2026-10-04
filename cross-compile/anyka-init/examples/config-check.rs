@@ -12,16 +12,11 @@
 //! Usage: cargo run --example config-check --target x86_64-unknown-linux-gnu -- <path>
 
 fn main() -> std::process::ExitCode {
-    let mut args = std::env::args();
-    let _ = args.next();
-    let Some(path) = args.next() else {
+    let mut args = std::env::args().skip(1);
+    let (Some(path), None) = (args.next(), args.next()) else {
         eprintln!("usage: config-check <anyka.toml>");
         return std::process::ExitCode::FAILURE;
     };
-    if args.next().is_some() {
-        eprintln!("usage: config-check <anyka.toml>");
-        return std::process::ExitCode::FAILURE;
-    }
     match anyka_init::config::Config::load(&path) {
         Ok(cfg) => {
             println!("OK   {path}  (schema={})", cfg.schema);
