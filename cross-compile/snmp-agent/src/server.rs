@@ -5,7 +5,6 @@ use crate::mib::{self, Snapshot, interfaces};
 use crate::pdu::{Pdu, PduType, SnmpMessage};
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
-use std::time::Instant;
 use tokio::net::UdpSocket;
 
 /// Default pidfile path for SIGHUP from onvif-rust.
@@ -24,7 +23,6 @@ pub struct Agent {
     pub config: SnmpConfig,
     proc_root: PathBuf,
     sys_class_net: PathBuf,
-    started: Instant,
 }
 
 impl Agent {
@@ -41,7 +39,6 @@ impl Agent {
             config,
             proc_root,
             sys_class_net,
-            started: Instant::now(),
         }
     }
 
@@ -50,10 +47,7 @@ impl Agent {
     /// `/proc/uptime`, not process uptime: anyka-init restarts this binary on
     /// crash, and an NMS reads a sysUpTime reset as a device reboot.
     fn uptime_ticks(&self) -> u32 {
-        proc_uptime_ticks(&self.proc_root.join("uptime")).unwrap_or_else(|| {
-            let e = self.started.elapsed();
-            (e.as_secs() * 100 + u64::from(e.subsec_millis()) / 10).min(u64::from(u32::MAX)) as u32
-        })
+        proc_uptime_ticks(&self.proc_root.join("uptime")).unwrap_or(0)
     }
 
     pub fn snapshot(&self) -> Snapshot {
