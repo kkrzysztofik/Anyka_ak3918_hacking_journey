@@ -63,39 +63,31 @@ pub struct Config {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, default)]
 pub struct Update {
     /// Root holding `active`, `slots/`, `state/` and `spool/`.
-    #[serde(default = "default_update_root")]
     pub root: String,
     /// Consecutive seconds all trial ports must stay bound.
-    #[serde(default = "default_trial_hold")]
     pub trial_hold_sec: u32,
     /// Give up and revert after this long.
-    #[serde(default = "default_trial_deadline")]
     pub trial_deadline_sec: u32,
     /// Ports an unconfirmed update must bind to be confirmed. The default
     /// mirrors the shipped ONVIF/RTSP/HTTP-FLV contract; if an operator
     /// changes those ports, the trial follows.
-    #[serde(default = "default_trial_ports")]
     pub trial_ports: Vec<u16>,
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, default)]
 pub struct LogCfg {
-    #[serde(default = "d_log_dir")]
     pub dir: String,
-    #[serde(default = "d_log_level")]
     pub level: String,
-    #[serde(default = "d_log_max_bytes")]
     pub max_bytes: u64,
-    #[serde(default = "d_log_keep")]
     pub keep: u8,
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, default)]
 pub struct SystemCfg {
     /// Sensor kernel module to load.
     ///
@@ -103,13 +95,10 @@ pub struct SystemCfg {
     /// the hack ships its module at `/data/sensor/`, which is on *none* of
     /// camera.sh's three search paths (`/etc/jffs2`, `/usr/modules`,
     /// `/data/sensor_ko_and_isp_conf`). Do not delete this as a duplicate.
-    #[serde(default)]
     pub sensor_module: Option<String>,
     /// Keep the P0 recovery telnetd running after boot.
-    #[serde(default)]
     pub telnet: bool,
     /// Keep the vendor's FTP server (`rc.local:14`) running.
-    #[serde(default = "d_true")]
     pub ftp: bool,
 }
 
@@ -158,86 +147,54 @@ pub struct WifiCfg {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, default)]
 pub struct TimeCfg {
-    #[serde(default = "d_true")]
     pub enabled: bool,
-    #[serde(default = "d_ntp_servers")]
     pub servers: Vec<String>,
-    #[serde(default = "d_timezone")]
     pub timezone: String,
-    #[serde(default = "d_first_sync_timeout")]
     pub first_sync_timeout_sec: u64,
-    #[serde(default = "d_retry_interval")]
     pub retry_interval_sec: u64,
-    #[serde(default = "d_resync_interval")]
     pub resync_interval_sec: u64,
-    #[serde(default = "d_step_threshold")]
     pub step_threshold_sec: u64,
-    #[serde(default = "d_min_plausible")]
     pub min_plausible_unix: u64,
-    #[serde(default = "d_max_plausible")]
     pub max_plausible_unix: u64,
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, default)]
 pub struct SupervisorCfg {
-    #[serde(default = "d_backoff_min")]
     pub backoff_min_sec: u64,
-    #[serde(default = "d_backoff_max")]
     pub backoff_max_sec: u64,
-    #[serde(default = "d_crashloop_count")]
     pub crashloop_count: u32,
-    #[serde(default = "d_crashloop_window")]
     pub crashloop_window_sec: u64,
-    #[serde(default = "d_storm_max")]
     pub storm_guard_max_reboots: u8,
-    #[serde(default = "d_storm_state")]
     pub storm_guard_state: String,
-    #[serde(default = "d_storm_reset_uptime")]
     pub storm_guard_reset_uptime_sec: u64,
 }
 
 #[derive(Debug, Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, default)]
 pub struct MonitorCfg {
-    #[serde(default = "d_true")]
     pub enabled: bool,
-    #[serde(default = "d_monitor_interval")]
     pub interval_sec: u64,
-    #[serde(default = "d_true")]
     pub wifi: bool,
-    #[serde(default = "d_true")]
     pub wifi_probe: bool,
-    #[serde(default = "d_wifi_dhcp_ticks")]
     pub wifi_dhcp_after_ticks: u32,
-    #[serde(default = "d_wifi_supplicant_ticks")]
     pub wifi_supplicant_after_ticks: u32,
-    #[serde(default = "d_wifi_reboot_ticks")]
     pub wifi_reboot_after_ticks: u32,
-    #[serde(default = "d_wifi_reboot_cap")]
     pub wifi_reboot_cap: u8,
-    #[serde(default = "d_true")]
     pub video: bool,
-    #[serde(default = "d_video_restart_ticks")]
     pub video_restart_after_ticks: u32,
-    #[serde(default = "d_video_kill_ticks")]
     pub video_kill_after_ticks: u32,
-    #[serde(default = "d_video_reboot_ticks")]
     pub video_reboot_after_ticks: u32,
-    #[serde(default = "d_video_heartbeat")]
     pub video_heartbeat_path: String,
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, default)]
 pub struct RebootCfg {
-    #[serde(default)]
     pub enabled: bool,
-    #[serde(default = "d_reboot_interval")]
     pub interval_min: u64,
-    #[serde(default)]
     pub jitter_max_sec: u64,
 }
 
@@ -265,18 +222,6 @@ pub struct ServiceCfg {
 fn d_true() -> bool {
     true
 }
-fn d_log_dir() -> String {
-    "/mnt/logs".into()
-}
-fn d_log_level() -> String {
-    "info".into()
-}
-fn d_log_max_bytes() -> u64 {
-    2_000_000
-}
-fn d_log_keep() -> u8 {
-    2
-}
 fn d_wifi_cfg_file() -> String {
     "/etc/jffs2/anyka_cfg.ini".into()
 }
@@ -295,98 +240,6 @@ fn d_wifi_security() -> String {
 }
 fn d_wifi_timeout() -> u64 {
     45
-}
-fn d_ntp_servers() -> Vec<String> {
-    vec![
-        "0.ubuntu.pool.ntp.org".into(),
-        "1.ubuntu.pool.ntp.org".into(),
-    ]
-}
-fn d_timezone() -> String {
-    "GMT+00:00".into()
-}
-fn d_first_sync_timeout() -> u64 {
-    15
-}
-fn d_retry_interval() -> u64 {
-    30
-}
-fn d_resync_interval() -> u64 {
-    21_600
-}
-fn d_step_threshold() -> u64 {
-    2
-}
-fn d_min_plausible() -> u64 {
-    1_767_225_600
-} // 2026-01-01
-fn d_max_plausible() -> u64 {
-    // ARMv5 uClibc uses 32-bit time_t; stay below the 2038 overflow.
-    i32::MAX as u64
-}
-fn d_backoff_min() -> u64 {
-    1
-}
-fn d_backoff_max() -> u64 {
-    60
-}
-fn d_crashloop_count() -> u32 {
-    10
-}
-fn d_crashloop_window() -> u64 {
-    600
-}
-fn d_storm_max() -> u8 {
-    3
-}
-fn d_storm_state() -> String {
-    "/mnt/anyka_hack/state/boot.json".into()
-}
-fn d_storm_reset_uptime() -> u64 {
-    600
-}
-fn d_monitor_interval() -> u64 {
-    60
-}
-
-fn d_wifi_dhcp_ticks() -> u32 {
-    3
-}
-fn d_wifi_supplicant_ticks() -> u32 {
-    5
-}
-fn d_wifi_reboot_ticks() -> u32 {
-    10
-}
-fn d_wifi_reboot_cap() -> u8 {
-    3
-}
-fn d_video_restart_ticks() -> u32 {
-    2
-}
-fn d_video_kill_ticks() -> u32 {
-    3
-}
-fn d_video_reboot_ticks() -> u32 {
-    5
-}
-fn d_video_heartbeat() -> String {
-    "/tmp/vd_heartbeat".into()
-}
-fn d_reboot_interval() -> u64 {
-    720
-}
-fn default_update_root() -> String {
-    "/mnt/anyka_hack".to_string()
-}
-fn default_trial_hold() -> u32 {
-    30
-}
-fn default_trial_deadline() -> u32 {
-    120
-}
-fn default_trial_ports() -> Vec<u16> {
-    crate::update::TRIAL_PORTS.to_vec()
 }
 
 /// Line-level edit of `key = <raw>` under `section`, where `raw` is already
@@ -428,16 +281,6 @@ pub fn set_value_in_text(
     let lead: String = out[i].chars().take_while(|c| c.is_whitespace()).collect();
     out[i] = format!("{lead}{key} = {raw}");
     verified(out.join(nl), section, key)
-}
-
-/// Line-level edit of a boolean, e.g. `enabled =` under `[services.<name>]`.
-pub fn set_bool_in_text(
-    text: &str,
-    section: &str,
-    key: &str,
-    enabled: bool,
-) -> Result<String, ConfigError> {
-    set_value_in_text(text, section, key, if enabled { "true" } else { "false" })
 }
 
 /// A line with any trailing `# comment` removed, trimmed. Lets
@@ -526,13 +369,24 @@ fn persist_text(path: &std::path::Path, new_text: &str) -> Result<(), ConfigErro
     })
 }
 
+/// Read, edit one `key = raw` line under `section`, write atomically.
+fn edit_file(
+    path: &std::path::Path,
+    section: &str,
+    key: &str,
+    raw: &str,
+) -> Result<(), ConfigError> {
+    let text = read_config_text(path)?;
+    persist_text(path, &set_value_in_text(&text, section, key, raw)?)
+}
+
 impl Default for Update {
     fn default() -> Self {
         Self {
-            root: default_update_root(),
-            trial_hold_sec: default_trial_hold(),
-            trial_deadline_sec: default_trial_deadline(),
-            trial_ports: default_trial_ports(),
+            root: "/mnt/anyka_hack".into(),
+            trial_hold_sec: 30,
+            trial_deadline_sec: 120,
+            trial_ports: crate::update::TRIAL_PORTS.to_vec(),
         }
     }
 }
@@ -540,13 +394,14 @@ impl Default for Update {
 impl Default for LogCfg {
     fn default() -> Self {
         Self {
-            dir: d_log_dir(),
-            level: d_log_level(),
-            max_bytes: d_log_max_bytes(),
-            keep: d_log_keep(),
+            dir: "/mnt/logs".into(),
+            level: "info".into(),
+            max_bytes: 2_000_000,
+            keep: 2,
         }
     }
 }
+
 impl Default for SystemCfg {
     fn default() -> Self {
         Self {
@@ -556,58 +411,66 @@ impl Default for SystemCfg {
         }
     }
 }
+
 impl Default for TimeCfg {
     fn default() -> Self {
         Self {
             enabled: true,
-            servers: d_ntp_servers(),
-            timezone: d_timezone(),
-            first_sync_timeout_sec: d_first_sync_timeout(),
-            retry_interval_sec: d_retry_interval(),
-            resync_interval_sec: d_resync_interval(),
-            step_threshold_sec: d_step_threshold(),
-            min_plausible_unix: d_min_plausible(),
-            max_plausible_unix: d_max_plausible(),
+            servers: vec![
+                "0.ubuntu.pool.ntp.org".into(),
+                "1.ubuntu.pool.ntp.org".into(),
+            ],
+            timezone: "GMT+00:00".into(),
+            first_sync_timeout_sec: 15,
+            retry_interval_sec: 30,
+            resync_interval_sec: 21_600,
+            step_threshold_sec: 2,
+            min_plausible_unix: 1_767_225_600, // 2026-01-01
+            // ARMv5 uClibc uses 32-bit time_t; stay below the 2038 overflow.
+            max_plausible_unix: i32::MAX as u64,
         }
     }
 }
+
 impl Default for SupervisorCfg {
     fn default() -> Self {
         Self {
-            backoff_min_sec: d_backoff_min(),
-            backoff_max_sec: d_backoff_max(),
-            crashloop_count: d_crashloop_count(),
-            crashloop_window_sec: d_crashloop_window(),
-            storm_guard_max_reboots: d_storm_max(),
-            storm_guard_state: d_storm_state(),
-            storm_guard_reset_uptime_sec: d_storm_reset_uptime(),
+            backoff_min_sec: 1,
+            backoff_max_sec: 60,
+            crashloop_count: 10,
+            crashloop_window_sec: 600,
+            storm_guard_max_reboots: 3,
+            storm_guard_state: "/mnt/anyka_hack/state/boot.json".into(),
+            storm_guard_reset_uptime_sec: 600,
         }
     }
 }
+
 impl Default for MonitorCfg {
     fn default() -> Self {
         Self {
             enabled: true,
-            interval_sec: d_monitor_interval(),
+            interval_sec: 60,
             wifi: true,
             wifi_probe: true,
-            wifi_dhcp_after_ticks: d_wifi_dhcp_ticks(),
-            wifi_supplicant_after_ticks: d_wifi_supplicant_ticks(),
-            wifi_reboot_after_ticks: d_wifi_reboot_ticks(),
-            wifi_reboot_cap: d_wifi_reboot_cap(),
+            wifi_dhcp_after_ticks: 3,
+            wifi_supplicant_after_ticks: 5,
+            wifi_reboot_after_ticks: 10,
+            wifi_reboot_cap: 3,
             video: true,
-            video_restart_after_ticks: d_video_restart_ticks(),
-            video_kill_after_ticks: d_video_kill_ticks(),
-            video_reboot_after_ticks: d_video_reboot_ticks(),
-            video_heartbeat_path: d_video_heartbeat(),
+            video_restart_after_ticks: 2,
+            video_kill_after_ticks: 3,
+            video_reboot_after_ticks: 5,
+            video_heartbeat_path: "/tmp/vd_heartbeat".into(),
         }
     }
 }
+
 impl Default for RebootCfg {
     fn default() -> Self {
         Self {
             enabled: false,
-            interval_min: d_reboot_interval(),
+            interval_min: 720,
             jitter_max_sec: 0,
         }
     }
@@ -635,9 +498,12 @@ impl Config {
         name: &str,
         enabled: bool,
     ) -> Result<(), ConfigError> {
-        let text = read_config_text(path)?;
-        let new_text = set_bool_in_text(&text, &format!("[services.{name}]"), "enabled", enabled)?;
-        persist_text(path, &new_text)
+        edit_file(
+            path,
+            &format!("[services.{name}]"),
+            "enabled",
+            &enabled.to_string(),
+        )
     }
 
     /// Persist `[time].servers`. Same file-first atomic-write discipline as
@@ -662,9 +528,7 @@ impl Config {
                 .collect::<Vec<_>>()
                 .join(", ")
         );
-        let text = read_config_text(path)?;
-        let new_text = set_value_in_text(&text, "[time]", "servers", &raw)?;
-        persist_text(path, &new_text)
+        edit_file(path, "[time]", "servers", &raw)
     }
 
     /// Persist `[system].telnet` — the recovery-telnet switch. Same file-first
@@ -672,9 +536,7 @@ impl Config {
     /// and the runtime side (spawn/killall) are the caller's, in the same
     /// visible order.
     pub fn set_system_telnet(path: &std::path::Path, enabled: bool) -> Result<(), ConfigError> {
-        let text = read_config_text(path)?;
-        let new_text = set_bool_in_text(&text, "[system]", "telnet", enabled)?;
-        persist_text(path, &new_text)
+        edit_file(path, "[system]", "telnet", &enabled.to_string())
     }
 
     pub fn load(path: &str) -> Result<Self, ConfigError> {
@@ -742,11 +604,7 @@ impl Config {
     }
 
     fn parse_file(path: &str) -> Result<Self, ConfigError> {
-        let src = std::fs::read_to_string(path).map_err(|source| ConfigError::Read {
-            path: path.to_string(),
-            source,
-        })?;
-        src.parse()
+        read_config_text(std::path::Path::new(path))?.parse()
     }
 
     pub fn validate(&self) -> Result<(), ConfigError> {
@@ -1356,7 +1214,7 @@ password = "overlaypass"
 
     #[test]
     fn test_set_bool_in_text_replaces_an_existing_line() {
-        let got = set_bool_in_text(SAMPLE, "[services.onvif]", "enabled", false).expect("edit");
+        let got = set_value_in_text(SAMPLE, "[services.onvif]", "enabled", "false").expect("edit");
         assert!(got.contains("[services.onvif]\nenabled = false\nexec ="));
     }
 
@@ -1365,7 +1223,7 @@ password = "overlaypass"
         // A prefix match would overwrite this line, silently losing a key from
         // the operator's file.
         let src = "[services.x]\nenabled_at_boot = \"yes\"\nexec = \"/bin/true\"\n";
-        let got = set_bool_in_text(src, "[services.x]", "enabled", false).expect("edit");
+        let got = set_value_in_text(src, "[services.x]", "enabled", "false").expect("edit");
         assert!(got.contains("enabled_at_boot = \"yes\""));
         assert!(got.contains("\nenabled = false\n"));
     }
@@ -1375,7 +1233,7 @@ password = "overlaypass"
         // `"enabled" = true` is legal TOML. Skipping it would insert a second
         // `enabled` key and produce a duplicate-key document.
         let src = "[services.x]\n\"enabled\" = true\nexec = \"/bin/true\"\n";
-        let got = set_bool_in_text(src, "[services.x]", "enabled", false).expect("edit");
+        let got = set_value_in_text(src, "[services.x]", "enabled", "false").expect("edit");
         assert!(got.contains("enabled = false"));
         toml::from_str::<toml::Value>(&got).expect("must stay valid TOML");
     }
@@ -1383,7 +1241,7 @@ password = "overlaypass"
     #[test]
     fn test_set_bool_in_text_matches_a_header_with_a_trailing_comment() {
         let src = "[services.x]  # the X service\nenabled = true\nexec = \"/bin/true\"\n";
-        let got = set_bool_in_text(src, "[services.x]", "enabled", false).expect("edit");
+        let got = set_value_in_text(src, "[services.x]", "enabled", "false").expect("edit");
         assert!(got.contains("# the X service"));
         assert!(got.contains("enabled = false"));
     }
@@ -1391,7 +1249,7 @@ password = "overlaypass"
     #[test]
     fn test_set_bool_in_text_ignores_a_commented_out_key() {
         let src = "[services.x]\n# enabled = true\nexec = \"/bin/true\"\n";
-        let got = set_bool_in_text(src, "[services.x]", "enabled", false).expect("edit");
+        let got = set_value_in_text(src, "[services.x]", "enabled", "false").expect("edit");
         assert!(got.contains("# enabled = true"));
         assert!(got.contains("\nenabled = false\n"));
     }
@@ -1399,7 +1257,7 @@ password = "overlaypass"
     #[test]
     fn test_set_bool_in_text_preserves_crlf_line_endings() {
         let src = "[services.x]\r\nenabled = true\r\nexec = \"/bin/true\"\r\n";
-        let got = set_bool_in_text(src, "[services.x]", "enabled", false).expect("edit");
+        let got = set_value_in_text(src, "[services.x]", "enabled", "false").expect("edit");
         assert!(!got.contains("\n\n"), "no bare LF may be introduced");
         assert_eq!(got, src.replace("enabled = true", "enabled = false"));
     }
@@ -1411,7 +1269,7 @@ password = "overlaypass"
         // check turns that into a refused edit instead of a config that fails
         // to parse on the next boot.
         let src = "[services.x]\nargs = [\n[\"a\"],\n]\nenabled = true\n";
-        match set_bool_in_text(src, "[services.x]", "enabled", false) {
+        match set_value_in_text(src, "[services.x]", "enabled", "false") {
             Err(ConfigError::Invalid(m)) => assert!(m.contains("invalid TOML"), "{m}"),
             other => panic!("expected refusal, got {other:?}"),
         }
@@ -1451,13 +1309,6 @@ timezone = \"UTC0\"
             err.is_err(),
             "a malformed raw value must be refused, not written"
         );
-    }
-
-    #[test]
-    fn test_set_bool_in_text_still_works_after_generalization() {
-        let src = "[services.snmp]\nenabled = false\n";
-        let out = set_bool_in_text(src, "[services.snmp]", "enabled", true).unwrap();
-        assert!(out.contains("enabled = true"));
     }
 
     #[test]
@@ -1507,7 +1358,7 @@ timezone = \"UTC0\"
 
     #[test]
     fn test_set_bool_in_text_preserves_everything_else() {
-        let got = set_bool_in_text(SAMPLE, "[services.snmp]", "enabled", true).expect("edit");
+        let got = set_value_in_text(SAMPLE, "[services.snmp]", "enabled", "true").expect("edit");
         // The only byte-level change: one inserted line.
         assert_eq!(
             got,
@@ -1523,20 +1374,20 @@ timezone = \"UTC0\"
     fn test_set_bool_in_text_inserts_under_the_header_when_absent() {
         // A hand-edited config may omit `enabled` entirely (it defaults true),
         // so "disable" has to be able to create the line.
-        let got = set_bool_in_text(SAMPLE, "[services.snmp]", "enabled", false).expect("edit");
+        let got = set_value_in_text(SAMPLE, "[services.snmp]", "enabled", "false").expect("edit");
         assert!(got.contains("[services.snmp]\nenabled = false\nexec ="));
     }
 
     #[test]
     fn test_set_bool_in_text_does_not_escape_the_stanza() {
         // dropbear's line must be untouched when onvif is edited.
-        let got = set_bool_in_text(SAMPLE, "[services.onvif]", "enabled", false).expect("edit");
+        let got = set_value_in_text(SAMPLE, "[services.onvif]", "enabled", "false").expect("edit");
         assert!(got.contains("[services.dropbear]\nenabled = false\n"));
     }
 
     #[test]
     fn test_set_bool_in_text_unknown_stanza_is_an_error() {
-        match set_bool_in_text(SAMPLE, "[services.nope]", "enabled", true) {
+        match set_value_in_text(SAMPLE, "[services.nope]", "enabled", "true") {
             Err(ConfigError::Invalid(_)) => {}
             other => panic!("expected Invalid, got {other:?}"),
         }
@@ -1546,7 +1397,7 @@ timezone = \"UTC0\"
 
     #[test]
     fn test_set_bool_in_text_system_telnet_replaces_the_line_only() {
-        let got = set_bool_in_text(SYSTEM_SAMPLE, "[system]", "telnet", true).expect("edit");
+        let got = set_value_in_text(SYSTEM_SAMPLE, "[system]", "telnet", "true").expect("edit");
         assert!(got.contains(
             "[system]\nsensor_module = \"/data/sensor/sensor_gc1084.ko\"\ntelnet = true\nftp = true"
         ));
@@ -1555,7 +1406,7 @@ timezone = \"UTC0\"
     #[test]
     fn test_set_bool_in_text_system_telnet_inserts_when_absent() {
         let sample = "[system]\nftp = true\n";
-        let got = set_bool_in_text(sample, "[system]", "telnet", false).expect("edit");
+        let got = set_value_in_text(sample, "[system]", "telnet", "false").expect("edit");
         assert!(got.contains("[system]\ntelnet = false\nftp = true"));
     }
 
