@@ -24,6 +24,7 @@ The PATH prefix is mandatory — without it clippy dies with E0514.
 **Gate `G`** — run at the end of every task; all three must pass:
 
 ```bash
+set -o pipefail
 cargo test --target x86_64-unknown-linux-gnu -p anyka-init 2>&1 | tail -5 \
  && cargo clippy --target x86_64-unknown-linux-gnu -p anyka-init --all-targets -- -D warnings 2>&1 | tail -3 \
  && cargo fmt -p anyka-init --check && echo GATE-OK
@@ -96,10 +97,12 @@ Append inside `mod backoff_tests` in `src/supervise.rs`:
 **Step 3: Run the new tests**
 
 ```bash
-cargo test --target x86_64-unknown-linux-gnu -p anyka-init defaults_match_the_golden backoff_pins 2>&1 | tail -5
+set -o pipefail
+cargo test --target x86_64-unknown-linux-gnu -p anyka-init defaults_match_the_golden 2>&1 | tail -5
+cargo test --target x86_64-unknown-linux-gnu -p anyka-init backoff_pins 2>&1 | tail -5
 ```
 
-Expected: 3 passed. If a golden test fails, the golden is wrong for *this* code — regenerate it by printing `format!("{:?}", Config::from_str(MINIMAL)?)`; never edit the code to match.
+Expected: 2 passed, then 1 passed. If a golden test fails, the golden is wrong for *this* code — regenerate it by printing `format!("{:?}", Config::from_str(MINIMAL)?)`; never edit the code to match.
 
 **Step 4: Gate `G`** — expect 355 tests.
 

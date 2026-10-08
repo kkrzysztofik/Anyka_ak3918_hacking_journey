@@ -193,6 +193,9 @@ mod tests {
             got,
             "onvif-rust\trunning\t42\t90\t3\t0\nvendor-daemon\tbackoff\t-1\t0\t7\t12\n\n"
         );
+        // The wire contract is byte-exact, including the blank line the
+        // legacy reply ends with when there are no services at all.
+        assert_eq!(encode_status(&[]), "\n");
     }
 
     #[test]

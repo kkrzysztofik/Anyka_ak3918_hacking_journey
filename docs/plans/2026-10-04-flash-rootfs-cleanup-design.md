@@ -105,6 +105,13 @@ path. The cleanup deletes that path, so `boot.sh` replaces stage 2:
 - stage 2: flip `active` to the other slot and reboot; a boot counter in
   `/mnt/anyka_hack` caps it at two flips, after that park with telnet 24
 
+Ordering is inherited from `config.sh` and is load-bearing: arm the deadman
+**before** the slot `-x` checks and before `exec`, exactly as `config.sh` does
+today. A slot binary that is missing or non-executable makes `boot.sh` exit
+before normal Wi-Fi startup, which is the stranding the deadman exists for; if
+the arm came after the checks that case would bypass the slot flip entirely.
+Cover it in the host test: no executable slot ⇒ deadman armed, exit non-zero.
+
 This is SD-side only and ships to every camera before any flash write.
 
 ## Recovery ladder
