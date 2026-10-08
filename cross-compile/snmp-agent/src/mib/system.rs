@@ -1,7 +1,7 @@
 //! MIB-II system group (1.3.6.1.2.1.1).
 
 use crate::ber::Oid;
-use crate::mib::MibSources;
+use crate::mib::Snapshot;
 use crate::pdu::SnmpValue;
 
 /// sysServices: application layer (bit 6) typical for a camera/app agent.
@@ -14,28 +14,16 @@ pub fn sys_object_id() -> Oid {
     Oid(vec![1, 3, 6, 1, 4, 1, 0, 1])
 }
 
-fn system_scalars() -> [Oid; 7] {
-    [
-        Oid(vec![1, 3, 6, 1, 2, 1, 1, 1, 0]),
-        Oid(vec![1, 3, 6, 1, 2, 1, 1, 2, 0]),
-        Oid(vec![1, 3, 6, 1, 2, 1, 1, 3, 0]),
-        Oid(vec![1, 3, 6, 1, 2, 1, 1, 4, 0]),
-        Oid(vec![1, 3, 6, 1, 2, 1, 1, 5, 0]),
-        Oid(vec![1, 3, 6, 1, 2, 1, 1, 6, 0]),
-        Oid(vec![1, 3, 6, 1, 2, 1, 1, 7, 0]),
-    ]
-}
-
-fn value_for(oid: &Oid, sources: &dyn MibSources) -> Option<SnmpValue> {
+fn value_for(oid: &Oid, sources: &Snapshot) -> Option<SnmpValue> {
     let arcs = &oid.0;
     if arcs.len() != 9 || arcs[..7] != [1, 3, 6, 1, 2, 1, 1] || arcs[8] != 0 {
         return None;
     }
-    let cfg = sources.config();
+    let cfg = &sources.config;
     match arcs[7] {
         1 => Some(SnmpValue::OctetString(SYS_DESCR.as_bytes().to_vec())),
         2 => Some(SnmpValue::ObjectId(sys_object_id())),
-        3 => Some(SnmpValue::TimeTicks(sources.uptime_ticks())),
+        3 => Some(SnmpValue::TimeTicks(sources.uptime_ticks)),
         4 => Some(SnmpValue::OctetString(cfg.sys_contact.as_bytes().to_vec())),
         5 => {
             let name = if cfg.sys_name.is_empty() {
@@ -60,22 +48,16 @@ fn hostname_fallback() -> String {
 }
 
 /// Exact GET for a system scalar.
-pub fn get(oid: &Oid, sources: &dyn MibSources) -> Option<(Oid, SnmpValue)> {
+pub fn get(oid: &Oid, sources: &Snapshot) -> Option<(Oid, SnmpValue)> {
     let value = value_for(oid, sources)?;
     Some((oid.clone(), value))
 }
 
-/// Lexicographic next system scalar after `oid`.
-pub fn get_next(oid: &Oid, sources: &dyn MibSources) -> Option<(Oid, SnmpValue)> {
-    for candidate in system_scalars() {
-        if oid_less(oid, &candidate) {
-            let value = value_for(&candidate, sources)?;
-            return Some((candidate, value));
-        }
-    }
-    None
-}
-
-fn oid_less(a: &Oid, b: &Oid) -> bool {
-    a.0.iter().cmp(b.0.iter()).is_lt()
+/// Lexicographic next system scalar after `oid` (sysDescr.0 … sysServices.0).
+pub fn get_next(oid: &Oid, sources: &Snapshot) -> Option<(Oid, SnmpValue)> {
+    let next = (1..=7)
+        .map(|arc| Oid(vec![1, 3, 6, 1, 2, 1, 1, arc, 0]))
+        .find(|candidate| oid < candidate)?;
+    let value = value_for(&next, sources)?;
+    Some((next, value))
 }

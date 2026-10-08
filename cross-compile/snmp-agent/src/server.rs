@@ -1,11 +1,10 @@
 //! UDP SNMPv2c agent loop.
 
-use crate::config::{DEFAULT_CONFIG_PATH, SnmpConfig};
+use crate::config::SnmpConfig;
 use crate::mib::{self, Snapshot, interfaces};
-use crate::pdu::{Pdu, PduType, SNMP_V2C_VERSION, SnmpMessage};
+use crate::pdu::{Pdu, PduType, SnmpMessage};
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
-use std::time::Instant;
 use tokio::net::UdpSocket;
 
 /// Default pidfile path for SIGHUP from onvif-rust.
@@ -24,7 +23,6 @@ pub struct Agent {
     pub config: SnmpConfig,
     proc_root: PathBuf,
     sys_class_net: PathBuf,
-    started: Instant,
 }
 
 impl Agent {
@@ -41,7 +39,6 @@ impl Agent {
             config,
             proc_root,
             sys_class_net,
-            started: Instant::now(),
         }
     }
 
@@ -50,10 +47,7 @@ impl Agent {
     /// `/proc/uptime`, not process uptime: anyka-init restarts this binary on
     /// crash, and an NMS reads a sysUpTime reset as a device reboot.
     fn uptime_ticks(&self) -> u32 {
-        proc_uptime_ticks(&self.proc_root.join("uptime")).unwrap_or_else(|| {
-            let e = self.started.elapsed();
-            (e.as_secs() * 100 + u64::from(e.subsec_millis()) / 10).min(u64::from(u32::MAX)) as u32
-        })
+        proc_uptime_ticks(&self.proc_root.join("uptime")).unwrap_or(0)
     }
 
     pub fn snapshot(&self) -> Snapshot {
@@ -64,16 +58,6 @@ impl Agent {
                 &self.proc_root.join("net/dev"),
                 &self.sys_class_net,
             ),
-        }
-    }
-
-    /// Config-only view, for requests that are answered without consulting the
-    /// device — today only SET, which is refused before any value is resolved.
-    fn bare_snapshot(&self) -> Snapshot {
-        Snapshot {
-            config: self.config.clone(),
-            uptime_ticks: 0,
-            ifaces: Vec::new(),
         }
     }
 }
@@ -108,27 +92,19 @@ pub fn handle_datagram(bytes: &[u8], agent: &Agent) -> Option<Vec<u8>> {
         return None;
     }
 
-    // A SET is refused before any varbind is resolved, so reading /proc and
-    // sweeping sysfs for it is pure waste on every such packet.
-    let snapshot = if msg.pdu.pdu_type == PduType::SetRequest {
-        agent.bare_snapshot()
-    } else {
-        agent.snapshot()
+    let (error_status, error_index, variable_bindings) = match msg.pdu.pdu_type {
+        // Refused before any varbind is resolved, so /proc and sysfs are never read for it.
+        PduType::SetRequest => (mib::ERR_NOT_WRITABLE, 1, msg.pdu.variable_bindings),
+        PduType::GetBulkRequest => mib::handle_getbulk(
+            msg.pdu.error_status,
+            msg.pdu.error_index,
+            &msg.pdu.variable_bindings,
+            &agent.snapshot(),
+        ),
+        t => mib::handle_varbinds(t, &msg.pdu.variable_bindings, &agent.snapshot()),
     };
-    let (error_status, error_index, variable_bindings) =
-        if msg.pdu.pdu_type == PduType::GetBulkRequest {
-            mib::handle_getbulk(
-                msg.pdu.error_status,
-                msg.pdu.error_index,
-                &msg.pdu.variable_bindings,
-                &snapshot,
-            )
-        } else {
-            mib::handle_varbinds(msg.pdu.pdu_type, &msg.pdu.variable_bindings, &snapshot)
-        };
 
     SnmpMessage {
-        version: SNMP_V2C_VERSION,
         community: msg.community,
         pdu: Pdu {
             pdu_type: PduType::GetResponse,
@@ -142,59 +118,37 @@ pub fn handle_datagram(bytes: &[u8], agent: &Agent) -> Option<Vec<u8>> {
     .ok()
 }
 
-fn write_pidfile(path: &Path) -> std::io::Result<()> {
-    if let Some(parent) = path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    std::fs::write(path, format!("{}\n", std::process::id()))
-}
-
-fn remove_pidfile(path: &Path) {
-    let _ = std::fs::remove_file(path);
-}
-
 async fn bind_socket(port: u16) -> std::io::Result<UdpSocket> {
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
     UdpSocket::bind(addr).await
 }
 
-/// Apply a freshly loaded config. Bind succeeds before `agent.config` is
-/// replaced so a failed rebind cannot leave APIs advertising a dead port.
+/// Apply a freshly loaded config. A new port is bound before `agent.config` is
+/// replaced, so a failed rebind keeps serving on the old one.
 async fn apply_reload(agent: &mut Agent, socket: &mut Option<UdpSocket>, new_cfg: SnmpConfig) {
-    let old_port = agent.config.port;
-    let old_enabled = agent.config.enabled;
-
-    if !new_cfg.enabled {
-        *socket = None;
-        agent.config = new_cfg;
-        tracing::info!("snmp-agent disabled after reload");
-        return;
-    }
-
-    let need_rebind = socket.is_none() || !old_enabled || old_port != new_cfg.port;
-    if need_rebind {
-        match bind_socket(new_cfg.port).await {
-            Ok(s) => {
-                tracing::info!(port = new_cfg.port, "snmp-agent rebound");
-                *socket = Some(s);
-                agent.config = new_cfg;
-            }
-            Err(e) => {
-                tracing::error!(
-                    error = %e,
-                    port = new_cfg.port,
-                    "rebind failed; keeping previous socket when bound"
-                );
-                // No live socket: commit the requested config so BIND_RETRY
-                // keeps trying the new port instead of stale last-good values.
-                if socket.is_none() {
-                    agent.config = new_cfg;
-                }
-            }
-        }
-    } else {
+    if socket.is_some() && agent.config.port == new_cfg.port {
         agent.config = new_cfg;
         tracing::info!("snmp-agent config reloaded (same bind)");
+        return;
+    }
+    match bind_socket(new_cfg.port).await {
+        Ok(s) => {
+            tracing::info!(port = new_cfg.port, "snmp-agent rebound");
+            *socket = Some(s);
+            agent.config = new_cfg;
+        }
+        Err(e) => {
+            tracing::error!(
+                error = %e,
+                port = new_cfg.port,
+                "rebind failed; keeping previous socket when bound"
+            );
+            // No live socket: commit the requested config so BIND_RETRY
+            // keeps trying the new port instead of stale last-good values.
+            if socket.is_none() {
+                agent.config = new_cfg;
+            }
+        }
     }
 }
 
@@ -206,34 +160,34 @@ pub async fn run(
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut agent = Agent::new(SnmpConfig::load(&config_path)?);
 
-    write_pidfile(&pidfile)?;
+    // tokio::fs::create_dir_all delegates to std, which returns Ok for an empty
+    // path (library/std/src/fs.rs), so a bare filename pidfile reaches here with
+    // Some("") and is a no-op.
+    if let Some(parent) = pidfile.parent() {
+        tokio::fs::create_dir_all(parent).await?;
+    }
+    tokio::fs::write(&pidfile, format!("{}\n", std::process::id())).await?;
     struct PidGuard(PathBuf);
     impl Drop for PidGuard {
         fn drop(&mut self) {
-            remove_pidfile(&self.0);
+            let _ = std::fs::remove_file(&self.0);
         }
     }
     let _pid_guard = PidGuard(pidfile);
 
-    let mut socket: Option<UdpSocket> = None;
-
-    if agent.config.enabled {
-        match bind_socket(agent.config.port).await {
-            Ok(s) => {
-                tracing::info!(port = agent.config.port, "snmp-agent listening");
-                socket = Some(s);
-            }
-            Err(e) => {
-                tracing::error!(error = %e, port = agent.config.port, "bind failed; will retry");
-            }
+    let mut socket = match bind_socket(agent.config.port).await {
+        Ok(s) => {
+            tracing::info!(port = agent.config.port, "snmp-agent listening");
+            Some(s)
         }
-    } else {
-        tracing::info!("snmp-agent disabled (unbound); waiting for reload");
-    }
+        Err(e) => {
+            tracing::error!(error = %e, port = agent.config.port, "bind failed; will retry");
+            None
+        }
+    };
 
     let mut buf = [0u8; 2048];
     loop {
-        let enabled = agent.config.enabled;
         let port = agent.config.port;
         tokio::select! {
             _ = reload.recv() => {
@@ -246,7 +200,7 @@ pub async fn run(
                     }
                 }
             }
-            _ = tokio::time::sleep(BIND_RETRY), if socket.is_none() && enabled => {
+            _ = tokio::time::sleep(BIND_RETRY), if socket.is_none() => {
                 match bind_socket(port).await {
                     Ok(s) => {
                         tracing::info!(port, "snmp-agent bound on retry");
@@ -281,26 +235,10 @@ pub async fn run(
     }
 }
 
-/// Parse CLI args: optional `--config PATH`.
-pub fn parse_args(args: impl IntoIterator<Item = String>) -> PathBuf {
-    let mut config = PathBuf::from(DEFAULT_CONFIG_PATH);
-    let mut iter = args.into_iter();
-    let _exe = iter.next();
-    while let Some(arg) = iter.next() {
-        if arg == "--config"
-            && let Some(path) = iter.next()
-        {
-            config = PathBuf::from(path);
-        }
-    }
-    config
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::ber::Oid;
-    use crate::mib::MibSources;
     use crate::pdu::{SnmpValue, VarBind};
     use std::time::Duration;
 
@@ -318,7 +256,6 @@ mod tests {
 
     fn get_sysname_bytes(community: &str) -> Vec<u8> {
         let msg = SnmpMessage {
-            version: SNMP_V2C_VERSION,
             community: community.to_string(),
             pdu: Pdu {
                 pdu_type: PduType::GetRequest,
@@ -406,28 +343,7 @@ mod tests {
             dir.path().into(),
             dir.path().join("sys"),
         );
-        assert_eq!(agent.snapshot().uptime_ticks(), 1_234_567);
-    }
-
-    #[test]
-    fn test_parse_args_config_flag() {
-        let path = parse_args(vec![
-            "snmp-agent".into(),
-            "--config".into(),
-            "/tmp/x.toml".into(),
-        ]);
-        assert_eq!(path, PathBuf::from("/tmp/x.toml"));
-    }
-
-    #[test]
-    fn test_write_and_remove_pidfile() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("nested").join("agent.pid");
-        write_pidfile(&path).unwrap();
-        let text = std::fs::read_to_string(&path).unwrap();
-        assert_eq!(text.trim(), std::process::id().to_string());
-        remove_pidfile(&path);
-        assert!(!path.exists());
+        assert_eq!(agent.snapshot().uptime_ticks, 1_234_567);
     }
 
     async fn wait_for_file(path: &Path, timeout: Duration) {
@@ -442,7 +358,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_run_serves_udp_get_reload_and_disable() {
+    async fn test_run_serves_udp_get_and_reload() {
         let dir = tempfile::tempdir().unwrap();
         let cfg_path = dir.path().join("snmp.toml");
         let pidfile = dir.path().join("snmp-agent.pid");
@@ -453,9 +369,7 @@ mod tests {
 
         std::fs::write(
             &cfg_path,
-            format!(
-                "enabled = true\nport = {port}\ncommunity = \"public\"\nsys_name = \"run-cam\"\n"
-            ),
+            format!("port = {port}\ncommunity = \"public\"\nsys_name = \"run-cam\"\n"),
         )
         .unwrap();
 
@@ -483,12 +397,10 @@ mod tests {
             SnmpValue::OctetString(b"run-cam".to_vec())
         );
 
-        // Same-bind reload (enabled + port unchanged).
+        // Same-bind reload (port unchanged).
         std::fs::write(
             &cfg_path,
-            format!(
-                "enabled = true\nport = {port}\ncommunity = \"public\"\nsys_name = \"run-cam2\"\n"
-            ),
+            format!("port = {port}\ncommunity = \"public\"\nsys_name = \"run-cam2\"\n"),
         )
         .unwrap();
         tx.send(()).await.unwrap();
@@ -508,61 +420,13 @@ mod tests {
         tx.send(()).await.unwrap();
         tokio::time::sleep(Duration::from_millis(50)).await;
 
-        // Disable on reload.
-        std::fs::write(
-            &cfg_path,
-            format!(
-                "enabled = false\nport = {port}\ncommunity = \"public\"\nsys_name = \"run-cam2\"\n"
-            ),
-        )
-        .unwrap();
-        tx.send(()).await.unwrap();
-        tokio::time::sleep(Duration::from_millis(80)).await;
-
-        // Re-enable (rebind after socket cleared).
-        std::fs::write(
-            &cfg_path,
-            format!(
-                "enabled = true\nport = {port}\ncommunity = \"public\"\nsys_name = \"run-cam3\"\n"
-            ),
-        )
-        .unwrap();
-        tx.send(()).await.unwrap();
-        tokio::time::sleep(Duration::from_millis(80)).await;
-        client.send_to(&req, ("127.0.0.1", port)).await.unwrap();
-        let (n, _) = tokio::time::timeout(Duration::from_secs(2), client.recv_from(&mut buf))
-            .await
-            .expect("rebind response timeout")
-            .unwrap();
-        assert_eq!(
-            SnmpMessage::parse(&buf[..n]).unwrap().pdu.variable_bindings[0].value,
-            SnmpValue::OctetString(b"run-cam3".to_vec())
-        );
-
         handle.abort();
         let _ = handle.await;
     }
 
     #[tokio::test]
-    async fn test_run_starts_disabled_and_bind_failure_is_non_fatal() {
+    async fn test_bind_failure_is_non_fatal() {
         let dir = tempfile::tempdir().unwrap();
-        let cfg_path = dir.path().join("snmp.toml");
-        let pidfile = dir.path().join("disabled.pid");
-
-        std::fs::write(
-            &cfg_path,
-            "enabled = false\nport = 161\ncommunity = \"public\"\n",
-        )
-        .unwrap();
-        let run_cfg = cfg_path.clone();
-        let run_pid = pidfile.clone();
-        let (_tx, rx) = tokio::sync::mpsc::channel(1);
-        let handle = tokio::spawn(async move {
-            let _ = run(run_cfg, run_pid, rx).await;
-        });
-        wait_for_file(&pidfile, Duration::from_secs(2)).await;
-        handle.abort();
-        let _ = handle.await;
 
         // Bind failure: hold the port, then start agent on it.
         let holder = UdpSocket::bind("0.0.0.0:0").await.unwrap();
@@ -571,7 +435,7 @@ mod tests {
         let pidfile = dir.path().join("bindfail.pid");
         std::fs::write(
             &cfg_path,
-            format!("enabled = true\nport = {port}\ncommunity = \"public\"\n"),
+            format!("port = {port}\ncommunity = \"public\"\n"),
         )
         .unwrap();
         let run_cfg = cfg_path.clone();
@@ -588,6 +452,32 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_run_creates_a_missing_pidfile_parent_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let cfg_path = dir.path().join("mkdir.toml");
+        let pidfile = dir.path().join("state/run/snmp-agent.pid");
+
+        let probe = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let port = probe.local_addr().unwrap().port();
+        drop(probe);
+        std::fs::write(
+            &cfg_path,
+            format!("port = {port}\ncommunity = \"public\"\n"),
+        )
+        .unwrap();
+
+        let run_pid = pidfile.clone();
+        let (_tx, rx) = tokio::sync::mpsc::channel(1);
+        let handle = tokio::spawn(async move {
+            let _ = run(cfg_path, run_pid, rx).await;
+        });
+
+        wait_for_file(&pidfile, Duration::from_secs(2)).await;
+        handle.abort();
+        let _ = handle.await;
+    }
+
+    #[tokio::test]
     async fn test_bind_retry_recovers_after_the_port_frees() {
         // Uses the #[cfg(test)] BIND_RETRY (50ms): start_paused does not mix
         // cleanly with real UDP sockets.
@@ -599,9 +489,7 @@ mod tests {
         let port = holder.local_addr().unwrap().port();
         std::fs::write(
             &cfg_path,
-            format!(
-                "enabled = true\nport = {port}\ncommunity = \"public\"\nsys_name = \"retry\"\n"
-            ),
+            format!("port = {port}\ncommunity = \"public\"\nsys_name = \"retry\"\n"),
         )
         .unwrap();
 
@@ -642,9 +530,7 @@ mod tests {
 
         std::fs::write(
             &cfg_path,
-            format!(
-                "enabled = true\nport = {old_port}\ncommunity = \"public\"\nsys_name = \"old\"\n"
-            ),
+            format!("port = {old_port}\ncommunity = \"public\"\nsys_name = \"old\"\n"),
         )
         .unwrap();
 
@@ -663,9 +549,7 @@ mod tests {
         let new_port = holder.local_addr().unwrap().port();
         std::fs::write(
             &cfg_path,
-            format!(
-                "enabled = true\nport = {new_port}\ncommunity = \"public\"\nsys_name = \"new\"\n"
-            ),
+            format!("port = {new_port}\ncommunity = \"public\"\nsys_name = \"new\"\n"),
         )
         .unwrap();
         tx.send(()).await.unwrap();

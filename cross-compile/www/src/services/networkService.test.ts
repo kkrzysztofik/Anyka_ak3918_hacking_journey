@@ -357,7 +357,6 @@ describe('networkService', () => {
       vi.mocked(authorizedFetch).mockResolvedValueOnce(
         new Response(
           JSON.stringify({
-            enabled: true,
             port: 161,
             community: 'public',
             sys_contact: '',

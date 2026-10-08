@@ -90,9 +90,11 @@ const networkSchema = z
     secondaryDNS: z.string().regex(ipRegex, 'Invalid IP address').optional().or(z.literal('')),
     httpPort: z.number().int().min(1, 'Port must be 1-65535').max(65535, 'Port must be 1-65535'),
     rtspPort: z.number().int().min(1, 'Port must be 1-65535').max(65535, 'Port must be 1-65535'),
-    snmpEnabled: z.boolean(),
     snmpPort: z.number().int().min(1, 'Port must be 1-65535').max(65535, 'Port must be 1-65535'),
-    snmpCommunity: z.string().max(64),
+    snmpCommunity: z
+      .string()
+      .max(64)
+      .refine((s) => s.trim() !== '', 'Community must not be empty'),
   })
   .superRefine((data, ctx) => {
     if (!data.dhcp) {
@@ -110,13 +112,6 @@ const networkSchema = z
           message: 'Gateway is required when DHCP is disabled',
         });
       }
-    }
-    if (data.snmpEnabled && !data.snmpCommunity.trim()) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['snmpCommunity'],
-        message: 'Community must not be empty',
-      });
     }
   });
 
@@ -161,7 +156,7 @@ function formValuesFrom(
   config: NetworkConfig,
   overlay: NetworkOverlayState | undefined,
   wifi: WifiDiagnostics | null | undefined,
-): Omit<NetworkFormData, 'snmpEnabled' | 'snmpPort' | 'snmpCommunity'> {
+): Omit<NetworkFormData, 'snmpPort' | 'snmpCommunity'> {
   const iface = pickPrimaryNetworkInterface(config.interfaces);
   const pending = overlay?.pending;
   const parsed = parseOverlayAddress(pending?.address);
@@ -253,7 +248,6 @@ export default function NetworkPage() {
       secondaryDNS: '',
       httpPort: 80,
       rtspPort: 554,
-      snmpEnabled: true,
       snmpPort: 161,
       snmpCommunity: 'public',
     },
@@ -282,7 +276,6 @@ export default function NetworkPage() {
     if (!config || form.formState.isDirty) return;
     form.reset({
       ...formValuesFrom(config, overlay, diagnostics?.wifi),
-      snmpEnabled: form.getValues('snmpEnabled'),
       snmpPort: form.getValues('snmpPort'),
       snmpCommunity: form.getValues('snmpCommunity'),
     });
@@ -290,7 +283,6 @@ export default function NetworkPage() {
 
   useEffect(() => {
     if (!snmpLoaded || !snmp || form.formState.isDirty) return;
-    form.setValue('snmpEnabled', snmp.enabled);
     form.setValue('snmpPort', snmp.port);
     form.setValue('snmpCommunity', snmp.community);
   }, [snmp, snmpLoaded, form, form.formState.isDirty]);
@@ -327,9 +319,7 @@ export default function NetworkPage() {
       );
       const snmpChanged =
         snmp !== undefined &&
-        (values.snmpEnabled !== snmp.enabled ||
-          values.snmpPort !== snmp.port ||
-          values.snmpCommunity !== snmp.community);
+        (values.snmpPort !== snmp.port || values.snmpCommunity !== snmp.community);
       if (snmpChanged) {
         if (!snmpLoaded) {
           throw new Error('SNMP configuration is still loading');
@@ -341,7 +331,6 @@ export default function NetworkPage() {
         }
         await runNetworkStep('SNMP configuration failed', () =>
           putSnmpConfig({
-            enabled: values.snmpEnabled,
             port: values.snmpPort,
             community: values.snmpCommunity,
           }),
@@ -383,9 +372,8 @@ export default function NetworkPage() {
     if (config) {
       form.reset({
         ...formValuesFrom(config, overlay, diagnostics?.wifi),
-        snmpEnabled: snmp?.enabled ?? false,
         snmpPort: snmp?.port ?? 161,
-        snmpCommunity: snmp?.community ?? '',
+        snmpCommunity: snmp?.community ?? form.getValues('snmpCommunity'),
       });
       toast.info('Form reset to current values');
     }
@@ -831,7 +819,8 @@ export default function NetworkPage() {
                   <div>
                     <SettingsCardTitle>SNMP</SettingsCardTitle>
                     <SettingsCardDescription>
-                      Read-only SNMPv2c agent (applies without reboot)
+                      Read-only SNMPv2c agent; changes apply without reboot. Turn it on or off under
+                      Diagnostics → Processes.
                     </SettingsCardDescription>
                   </div>
                 </div>
@@ -844,28 +833,6 @@ export default function NetworkPage() {
                       : 'Failed to load SNMP settings'}
                   </p>
                 )}
-                <FormField
-                  control={form.control}
-                  name="snmpEnabled"
-                  render={({ field }) => (
-                    <FormItem className="flex items-center justify-between gap-[16px]">
-                      <div>
-                        <FormLabel className="text-[#a1a1a6]">Enable SNMP</FormLabel>
-                        <FormDescription className="text-[#636366]">
-                          Default community &quot;public&quot; is insecure on untrusted networks
-                        </FormDescription>
-                      </div>
-                      <FormControl>
-                        <Switch
-                          checked={field.value}
-                          onCheckedChange={field.onChange}
-                          disabled={snmpUnavailable}
-                          data-testid="network-snmp-enabled-switch"
-                        />
-                      </FormControl>
-                    </FormItem>
-                  )}
-                />
                 <div className="grid grid-cols-1 gap-[24px] md:grid-cols-2">
                   <FormField
                     control={form.control}
@@ -901,6 +868,9 @@ export default function NetworkPage() {
                             data-testid="network-snmp-community-input"
                           />
                         </FormControl>
+                        <FormDescription className="text-[#636366]">
+                          Default community &quot;public&quot; is insecure on untrusted networks
+                        </FormDescription>
                         <FormMessage data-testid="network-snmp-community-error" />
                       </FormItem>
                     )}

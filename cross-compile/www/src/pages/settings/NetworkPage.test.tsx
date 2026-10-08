@@ -88,7 +88,6 @@ describe('NetworkPage', () => {
     vi.mocked(getNetworkConfig).mockResolvedValue(MOCK_DATA.network);
     vi.mocked(getNetworkOverlay).mockResolvedValue(EMPTY_OVERLAY);
     vi.mocked(getSnmpConfig).mockResolvedValue({
-      enabled: true,
       port: 161,
       community: 'public',
       sys_contact: '',
@@ -404,7 +403,6 @@ describe('NetworkPage', () => {
 
   it('test_render_snmp_settings_fetched_config_displays_values', async () => {
     vi.mocked(getSnmpConfig).mockResolvedValue({
-      enabled: true,
       port: 1161,
       community: 'monitor',
       sys_contact: '',
@@ -418,6 +416,13 @@ describe('NetworkPage', () => {
     expect(screen.getByTestId('network-snmp-community-input')).toHaveValue('monitor');
   });
 
+  it('should point SNMP on/off to Diagnostics → Processes instead of a switch', async () => {
+    await renderNetworkPage();
+
+    expect(screen.queryByTestId('network-snmp-enabled-switch')).not.toBeInTheDocument();
+    expect(screen.getByText(/Diagnostics → Processes/)).toBeInTheDocument();
+  });
+
   it('test_save_snmp_settings_on_confirmation_calls_putSnmpConfig', async () => {
     const user = userEvent.setup();
     await renderNetworkPage();
@@ -428,7 +433,7 @@ describe('NetworkPage', () => {
 
     await waitFor(() => {
       expect(putSnmpConfig).toHaveBeenCalledWith(
-        expect.objectContaining({ enabled: true, port: 2161, community: 'public' }),
+        expect.objectContaining({ port: 2161, community: 'public' }),
       );
     });
   });
@@ -483,5 +488,22 @@ describe('NetworkPage', () => {
       expect(setNetworkProtocols).toHaveBeenCalled();
     });
     expect(putSnmpConfig).not.toHaveBeenCalled();
+  });
+
+  it('should keep unrelated settings saveable after a reset when SNMP config is unavailable', async () => {
+    vi.mocked(getSnmpConfig).mockRejectedValue(new Error('SNMP unavailable'));
+    const user = userEvent.setup();
+    await renderNetworkPage();
+    await screen.findByTestId('network-snmp-load-error');
+
+    await user.click(screen.getByTestId('network-reset-button'));
+    await makeFormDirty(user, 'network-http-port-input', '8080');
+    await user.click(screen.getByTestId('network-save-button'));
+    await user.click(await screen.findByTestId('network-confirm-save-button'));
+
+    await waitFor(() => {
+      expect(setNetworkProtocols).toHaveBeenCalled();
+    });
+    expect(screen.queryByTestId('network-snmp-community-error')).not.toBeInTheDocument();
   });
 });

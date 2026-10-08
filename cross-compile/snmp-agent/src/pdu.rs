@@ -1,49 +1,35 @@
 //! SNMPv2c message and PDU encode/decode.
 
 use crate::ber::{
-    self, BerError, Oid, TAG_INTEGER, TAG_NULL, TAG_OCTET_STRING, TAG_OID, TAG_SEQUENCE,
+    self, Malformed, Oid, TAG_INTEGER, TAG_NULL, TAG_OCTET_STRING, TAG_OID, TAG_SEQUENCE,
 };
-use thiserror::Error;
 
 /// SNMPv2c wire version (INTEGER 1).
-pub const SNMP_V2C_VERSION: i32 = 1;
+const SNMP_V2C_VERSION: i32 = 1;
 
-const PDU_GET_REQUEST: u8 = 0xa0;
-const PDU_GET_NEXT_REQUEST: u8 = 0xa1;
-const PDU_GET_RESPONSE: u8 = 0xa2;
-const PDU_SET_REQUEST: u8 = 0xa3;
-const PDU_GET_BULK_REQUEST: u8 = 0xa5;
-
+/// SNMP PDU type; the discriminant is the context-specific BER tag.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
 pub enum PduType {
-    GetRequest,
-    GetNextRequest,
-    GetResponse,
-    SetRequest,
+    GetRequest = 0xa0,
+    GetNextRequest = 0xa1,
+    GetResponse = 0xa2,
+    SetRequest = 0xa3,
     /// SNMPv2c GetBulkRequest — `error_status`/`error_index` hold non-repeaters / max-repetitions.
-    GetBulkRequest,
+    GetBulkRequest = 0xa5,
 }
 
 impl PduType {
-    fn tag(self) -> u8 {
-        match self {
-            Self::GetRequest => PDU_GET_REQUEST,
-            Self::GetNextRequest => PDU_GET_NEXT_REQUEST,
-            Self::GetResponse => PDU_GET_RESPONSE,
-            Self::SetRequest => PDU_SET_REQUEST,
-            Self::GetBulkRequest => PDU_GET_BULK_REQUEST,
-        }
-    }
-
     fn from_tag(tag: u8) -> Option<Self> {
-        match tag {
-            PDU_GET_REQUEST => Some(Self::GetRequest),
-            PDU_GET_NEXT_REQUEST => Some(Self::GetNextRequest),
-            PDU_GET_RESPONSE => Some(Self::GetResponse),
-            PDU_SET_REQUEST => Some(Self::SetRequest),
-            PDU_GET_BULK_REQUEST => Some(Self::GetBulkRequest),
-            _ => None,
-        }
+        [
+            Self::GetRequest,
+            Self::GetNextRequest,
+            Self::GetResponse,
+            Self::SetRequest,
+            Self::GetBulkRequest,
+        ]
+        .into_iter()
+        .find(|t| *t as u8 == tag)
     }
 }
 
@@ -84,57 +70,46 @@ pub struct Pdu {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SnmpMessage {
-    pub version: i32,
     pub community: String,
     pub pdu: Pdu,
 }
 
-#[derive(Debug, Error, PartialEq, Eq)]
-pub enum PduError {
-    #[error(transparent)]
-    Ber(#[from] BerError),
-    #[error("unsupported SNMP version {0}")]
-    UnsupportedVersion(i32),
-    #[error("malformed SNMP message")]
-    Malformed,
-}
-
 impl SnmpMessage {
-    pub fn parse(bytes: &[u8]) -> Result<Self, PduError> {
+    pub fn parse(bytes: &[u8]) -> Result<Self, Malformed> {
         let (seq, rest) = ber::expect_tag(bytes, TAG_SEQUENCE)?;
         if !rest.is_empty() {
-            return Err(PduError::Malformed);
+            return Err(Malformed);
         }
 
         let (ver_content, rest) = ber::expect_tag(seq, TAG_INTEGER)?;
         let version = ber::decode_integer(ver_content)?;
         if version != SNMP_V2C_VERSION {
-            return Err(PduError::UnsupportedVersion(version));
+            return Err(Malformed);
         }
 
         let (community_bytes, rest) = ber::expect_tag(rest, TAG_OCTET_STRING)?;
         let community = std::str::from_utf8(community_bytes)
-            .map_err(|_| PduError::Malformed)?
+            .map_err(|_| Malformed)?
             .to_string();
 
         let (pdu_tag, pdu_content, rest) = ber::read_tlv(rest)?;
         if !rest.is_empty() {
-            return Err(PduError::Malformed);
+            return Err(Malformed);
         }
-        let pdu_type = PduType::from_tag(pdu_tag).ok_or(PduError::Malformed)?;
+        let pdu_type = PduType::from_tag(pdu_tag).ok_or(Malformed)?;
         let pdu = parse_pdu_body(pdu_type, pdu_content)?;
 
-        Ok(Self {
-            version,
-            community,
-            pdu,
-        })
+        Ok(Self { community, pdu })
     }
 
     /// Encode a response (or any PDU) as an SNMPv2c message.
-    pub fn encode(&self) -> Result<Vec<u8>, PduError> {
+    pub fn encode(&self) -> Result<Vec<u8>, Malformed> {
         let mut inner = Vec::new();
-        ber::write_tlv(TAG_INTEGER, &ber::encode_integer(self.version), &mut inner);
+        ber::write_tlv(
+            TAG_INTEGER,
+            &ber::encode_integer(SNMP_V2C_VERSION),
+            &mut inner,
+        );
         ber::write_tlv(TAG_OCTET_STRING, self.community.as_bytes(), &mut inner);
         let pdu_bytes = encode_pdu(&self.pdu)?;
         inner.extend_from_slice(&pdu_bytes);
@@ -145,7 +120,7 @@ impl SnmpMessage {
     }
 }
 
-fn parse_pdu_body(pdu_type: PduType, content: &[u8]) -> Result<Pdu, PduError> {
+fn parse_pdu_body(pdu_type: PduType, content: &[u8]) -> Result<Pdu, Malformed> {
     let (id_c, rest) = ber::expect_tag(content, TAG_INTEGER)?;
     let request_id = ber::decode_integer(id_c)?;
     let (es_c, rest) = ber::expect_tag(rest, TAG_INTEGER)?;
@@ -154,7 +129,7 @@ fn parse_pdu_body(pdu_type: PduType, content: &[u8]) -> Result<Pdu, PduError> {
     let error_index = ber::decode_integer(ei_c)?;
     let (vbl_c, rest) = ber::expect_tag(rest, TAG_SEQUENCE)?;
     if !rest.is_empty() {
-        return Err(PduError::Malformed);
+        return Err(Malformed);
     }
     let variable_bindings = parse_varbind_list(vbl_c)?;
     Ok(Pdu {
@@ -166,7 +141,7 @@ fn parse_pdu_body(pdu_type: PduType, content: &[u8]) -> Result<Pdu, PduError> {
     })
 }
 
-fn parse_varbind_list(mut input: &[u8]) -> Result<Vec<VarBind>, PduError> {
+fn parse_varbind_list(mut input: &[u8]) -> Result<Vec<VarBind>, Malformed> {
     let mut out = Vec::new();
     while !input.is_empty() {
         let (vb, rest) = ber::expect_tag(input, TAG_SEQUENCE)?;
@@ -175,7 +150,7 @@ fn parse_varbind_list(mut input: &[u8]) -> Result<Vec<VarBind>, PduError> {
         let name = Oid::decode(oid_c)?;
         let (val_tag, val_c, rest) = ber::read_tlv(rest)?;
         if !rest.is_empty() {
-            return Err(PduError::Malformed);
+            return Err(Malformed);
         }
         let value = decode_value(val_tag, val_c)?;
         out.push(VarBind { name, value });
@@ -190,22 +165,22 @@ const TAG_NO_SUCH_OBJECT: u8 = 0x80;
 const TAG_NO_SUCH_INSTANCE: u8 = 0x81;
 const TAG_END_OF_MIB_VIEW: u8 = 0x82;
 
-fn decode_u32_app(content: &[u8]) -> Result<u32, PduError> {
+fn decode_u32_app(content: &[u8]) -> Result<u32, Malformed> {
     // Up to 5 bytes: real agents pad values with the top bit set with a leading zero.
     if content.is_empty() || content.len() > 5 {
-        return Err(PduError::Malformed);
+        return Err(Malformed);
     }
     if content.len() == 5 && content[0] != 0 {
-        return Err(PduError::Malformed);
+        return Err(Malformed);
     }
     let mut value: u64 = 0;
     for &b in content {
         value = (value << 8) | u64::from(b);
     }
-    u32::try_from(value).map_err(|_| PduError::Malformed)
+    u32::try_from(value).map_err(|_| Malformed)
 }
 
-fn decode_value(tag: u8, content: &[u8]) -> Result<SnmpValue, PduError> {
+fn decode_value(tag: u8, content: &[u8]) -> Result<SnmpValue, Malformed> {
     match tag {
         TAG_NULL if content.is_empty() => Ok(SnmpValue::Null),
         TAG_INTEGER => Ok(SnmpValue::Integer(ber::decode_integer(content)?)),
@@ -217,11 +192,11 @@ fn decode_value(tag: u8, content: &[u8]) -> Result<SnmpValue, PduError> {
         TAG_NO_SUCH_OBJECT if content.is_empty() => Ok(SnmpValue::NoSuchObject),
         TAG_NO_SUCH_INSTANCE if content.is_empty() => Ok(SnmpValue::NoSuchInstance),
         TAG_END_OF_MIB_VIEW if content.is_empty() => Ok(SnmpValue::EndOfMibView),
-        _ => Err(PduError::Malformed),
+        _ => Err(Malformed),
     }
 }
 
-fn encode_value(value: &SnmpValue, out: &mut Vec<u8>) -> Result<(), PduError> {
+fn encode_value(value: &SnmpValue, out: &mut Vec<u8>) -> Result<(), Malformed> {
     match value {
         SnmpValue::Null => ber::write_tlv(TAG_NULL, &[], out),
         SnmpValue::Integer(v) => ber::write_tlv(TAG_INTEGER, &ber::encode_integer(*v), out),
@@ -237,7 +212,7 @@ fn encode_value(value: &SnmpValue, out: &mut Vec<u8>) -> Result<(), PduError> {
     Ok(())
 }
 
-fn encode_pdu(pdu: &Pdu) -> Result<Vec<u8>, PduError> {
+fn encode_pdu(pdu: &Pdu) -> Result<Vec<u8>, Malformed> {
     let mut body = Vec::new();
     ber::write_tlv(TAG_INTEGER, &ber::encode_integer(pdu.request_id), &mut body);
     ber::write_tlv(
@@ -262,7 +237,7 @@ fn encode_pdu(pdu: &Pdu) -> Result<Vec<u8>, PduError> {
     ber::write_tlv(TAG_SEQUENCE, &vbl, &mut body);
 
     let mut out = Vec::new();
-    ber::write_tlv(pdu.pdu_type.tag(), &body, &mut out);
+    ber::write_tlv(pdu.pdu_type as u8, &body, &mut out);
     Ok(out)
 }
 
@@ -289,7 +264,6 @@ mod tests {
     #[test]
     fn test_parse_get_sysdescr_public() {
         let msg = SnmpMessage::parse(&hand_built_get_sysdescr()).expect("parse");
-        assert_eq!(msg.version, SNMP_V2C_VERSION);
         assert_eq!(msg.community, "public");
         assert_eq!(msg.pdu.pdu_type, PduType::GetRequest);
         assert_eq!(msg.pdu.request_id, 1);
@@ -307,7 +281,7 @@ mod tests {
         let mut bytes = hand_built_get_sysdescr();
         bytes[4] = 0; // SNMPv1
         let err = SnmpMessage::parse(&bytes).expect_err("must reject v1");
-        assert!(matches!(err, PduError::UnsupportedVersion(0)));
+        assert!(matches!(err, Malformed));
     }
 
     #[test]
@@ -322,7 +296,6 @@ mod tests {
     fn test_encode_round_trips_all_value_types() {
         let oid = Oid::from_slice(&[1, 3, 6, 1, 2, 1, 1, 2, 0]).unwrap();
         let msg = SnmpMessage {
-            version: SNMP_V2C_VERSION,
             community: "public".into(),
             pdu: Pdu {
                 pdu_type: PduType::GetResponse,
@@ -364,9 +337,9 @@ mod tests {
 
     #[test]
     fn test_pdu_type_tags_cover_getnext_and_set() {
-        assert_eq!(PduType::GetNextRequest.tag(), 0xa1);
-        assert_eq!(PduType::SetRequest.tag(), 0xa3);
-        assert_eq!(PduType::GetBulkRequest.tag(), 0xa5);
+        assert_eq!(PduType::GetNextRequest as u8, 0xa1);
+        assert_eq!(PduType::SetRequest as u8, 0xa3);
+        assert_eq!(PduType::GetBulkRequest as u8, 0xa5);
         assert_eq!(PduType::from_tag(0xa1), Some(PduType::GetNextRequest));
         assert_eq!(PduType::from_tag(0xa3), Some(PduType::SetRequest));
         assert_eq!(PduType::from_tag(0xa5), Some(PduType::GetBulkRequest));
@@ -377,28 +350,25 @@ mod tests {
     fn test_parse_rejects_trailing_bytes_and_bad_community_utf8() {
         let mut bytes = hand_built_get_sysdescr();
         bytes.push(0x00);
-        assert!(matches!(
-            SnmpMessage::parse(&bytes),
-            Err(PduError::Malformed)
-        ));
+        assert!(matches!(SnmpMessage::parse(&bytes), Err(Malformed)));
 
         let mut bad = hand_built_get_sysdescr();
         // community bytes start at index 7 for "public"
         bad[7] = 0xff;
-        assert!(matches!(SnmpMessage::parse(&bad), Err(PduError::Malformed)));
+        assert!(matches!(SnmpMessage::parse(&bad), Err(Malformed)));
     }
 
     #[test]
     fn test_decode_value_rejects_unknown_tag_and_oversized_unsigned() {
-        assert!(matches!(decode_value(0x99, &[]), Err(PduError::Malformed)));
+        assert!(matches!(decode_value(0x99, &[]), Err(Malformed)));
         assert_eq!(decode_u32_app(&[0xff]).unwrap(), 255);
         assert!(matches!(
             decode_u32_app(&[0x01, 0, 0, 0, 0]),
-            Err(PduError::Malformed)
+            Err(Malformed)
         ));
         assert!(matches!(
             decode_u32_app(&[0, 0, 0, 0, 0, 0]),
-            Err(PduError::Malformed)
+            Err(Malformed)
         ));
     }
 
@@ -406,7 +376,6 @@ mod tests {
     fn test_counter32_max_round_trips() {
         let oid = Oid::from_slice(&[1, 3, 6, 1, 2, 1, 2, 2, 1, 10, 1]).unwrap();
         let msg = SnmpMessage {
-            version: SNMP_V2C_VERSION,
             community: "public".into(),
             pdu: Pdu {
                 pdu_type: PduType::GetResponse,

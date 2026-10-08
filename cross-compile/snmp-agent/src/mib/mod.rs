@@ -3,6 +3,7 @@
 pub mod interfaces;
 pub mod system;
 
+use crate::ber::Oid;
 use crate::config::SnmpConfig;
 use crate::mib::interfaces::IfRow;
 use crate::pdu::{PduType, SnmpValue, VarBind};
@@ -11,13 +12,6 @@ use crate::pdu::{PduType, SnmpValue, VarBind};
 pub const ERR_NO_ERROR: i32 = 0;
 /// SNMP error-status: notWritable for SETs.
 pub const ERR_NOT_WRITABLE: i32 = 17;
-
-/// Runtime sources for MIB values.
-pub trait MibSources {
-    fn config(&self) -> &SnmpConfig;
-    fn uptime_ticks(&self) -> u32;
-    fn interfaces(&self) -> &[IfRow];
-}
 
 /// One consistent view of the device, captured per datagram.
 ///
@@ -29,42 +23,20 @@ pub struct Snapshot {
     pub ifaces: Vec<IfRow>,
 }
 
-impl MibSources for Snapshot {
-    fn config(&self) -> &SnmpConfig {
-        &self.config
-    }
-    fn uptime_ticks(&self) -> u32 {
-        self.uptime_ticks
-    }
-    fn interfaces(&self) -> &[IfRow] {
-        &self.ifaces
-    }
+fn resolve_get(oid: &Oid, sources: &Snapshot) -> Option<(Oid, SnmpValue)> {
+    system::get(oid, sources).or_else(|| interfaces::get(oid, &sources.ifaces))
 }
 
-fn resolve_get(
-    oid: &crate::ber::Oid,
-    sources: &dyn MibSources,
-) -> Option<(crate::ber::Oid, crate::pdu::SnmpValue)> {
-    system::get(oid, sources).or_else(|| interfaces::get(oid, sources))
+fn resolve_get_next(oid: &Oid, sources: &Snapshot) -> Option<(Oid, SnmpValue)> {
+    system::get_next(oid, sources).or_else(|| interfaces::get_next(oid, &sources.ifaces))
 }
 
-fn resolve_get_next(
-    oid: &crate::ber::Oid,
-    sources: &dyn MibSources,
-) -> Option<(crate::ber::Oid, crate::pdu::SnmpValue)> {
-    system::get_next(oid, sources).or_else(|| interfaces::get_next(oid, sources))
-}
-
-/// Resolve GET / GETNEXT / reject SET for the fixed OID map.
+/// Resolve GET / GETNEXT for the fixed OID map.
 pub fn handle_varbinds(
     pdu_type: PduType,
     binds: &[VarBind],
-    sources: &dyn MibSources,
+    sources: &Snapshot,
 ) -> (i32, i32, Vec<VarBind>) {
-    if pdu_type == PduType::SetRequest {
-        return (ERR_NOT_WRITABLE, 1, binds.to_vec());
-    }
-
     let mut out = Vec::with_capacity(binds.len());
     for vb in binds {
         // RFC 3416: a missing object is an exception *in the varbind*, so one
@@ -91,7 +63,7 @@ pub fn handle_getbulk(
     non_repeaters: i32,
     max_repetitions: i32,
     binds: &[VarBind],
-    sources: &dyn MibSources,
+    sources: &Snapshot,
 ) -> (i32, i32, Vec<VarBind>) {
     let non_rep = (non_repeaters.max(0) as usize).min(binds.len());
     let max_rep = (max_repetitions.max(0) as usize).min(MAX_BULK_REPETITIONS);
@@ -150,39 +122,20 @@ mod tests {
     use super::*;
     use crate::ber::Oid;
     use crate::config::SnmpConfig;
-    use crate::mib::interfaces::IfRow;
     use crate::pdu::SnmpValue;
 
-    struct FixedSources {
-        cfg: SnmpConfig,
-        ticks: u32,
-        ifaces: Vec<IfRow>,
-    }
-
-    impl MibSources for FixedSources {
-        fn uptime_ticks(&self) -> u32 {
-            self.ticks
-        }
-        fn config(&self) -> &SnmpConfig {
-            &self.cfg
-        }
-        fn interfaces(&self) -> &[IfRow] {
-            &self.ifaces
-        }
-    }
-
-    fn sources() -> FixedSources {
-        let cfg = SnmpConfig {
-            sys_contact: "ops@example".into(),
-            sys_name: "cam-1".into(),
-            sys_location: "lab".into(),
-            ..Default::default()
-        };
-        let text = include_str!("../../tests/fixtures/proc_net_dev.txt");
-        FixedSources {
-            cfg,
-            ticks: 42,
-            ifaces: interfaces::parse_proc_net_dev(text),
+    fn sources() -> Snapshot {
+        Snapshot {
+            config: SnmpConfig {
+                sys_contact: "ops@example".into(),
+                sys_name: "cam-1".into(),
+                sys_location: "lab".into(),
+                ..Default::default()
+            },
+            uptime_ticks: 42,
+            ifaces: interfaces::parse_proc_net_dev(include_str!(
+                "../../tests/fixtures/proc_net_dev.txt"
+            )),
         }
     }
 
@@ -222,18 +175,6 @@ mod tests {
     }
 
     #[test]
-    fn test_set_returns_not_writable() {
-        let oid = Oid::from_slice(&[1, 3, 6, 1, 2, 1, 1, 5, 0]).unwrap();
-        let binds = vec![VarBind {
-            name: oid,
-            value: SnmpValue::Null,
-        }];
-        let (status, index, _) = handle_varbinds(PduType::SetRequest, &binds, &sources());
-        assert_eq!(status, ERR_NOT_WRITABLE);
-        assert_eq!(index, 1);
-    }
-
-    #[test]
     fn test_get_all_system_scalars_and_hostname_fallback() {
         let src = sources();
         for arc in 1..=7 {
@@ -248,12 +189,12 @@ mod tests {
             .is_none()
         );
 
-        let empty_name = FixedSources {
-            cfg: SnmpConfig {
+        let empty_name = Snapshot {
+            config: SnmpConfig {
                 sys_name: String::new(),
                 ..Default::default()
             },
-            ticks: 1,
+            uptime_ticks: 1,
             ifaces: Vec::new(),
         };
         let oid = Oid::from_slice(&[1, 3, 6, 1, 2, 1, 1, 5, 0]).unwrap();

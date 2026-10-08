@@ -42,7 +42,6 @@ export interface NetworkProtocols {
 }
 
 export interface SnmpConfig {
-  enabled: boolean;
   port: number;
   community: string;
   sys_contact: string;
