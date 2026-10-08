@@ -416,7 +416,7 @@ describe('NetworkPage', () => {
     expect(screen.getByTestId('network-snmp-community-input')).toHaveValue('monitor');
   });
 
-  it('test_snmp_card_points_to_processes_instead_of_a_switch', async () => {
+  it('should point SNMP on/off to Diagnostics → Processes instead of a switch', async () => {
     await renderNetworkPage();
 
     expect(screen.queryByTestId('network-snmp-enabled-switch')).not.toBeInTheDocument();
@@ -488,5 +488,22 @@ describe('NetworkPage', () => {
       expect(setNetworkProtocols).toHaveBeenCalled();
     });
     expect(putSnmpConfig).not.toHaveBeenCalled();
+  });
+
+  it('should keep unrelated settings saveable after a reset when SNMP config is unavailable', async () => {
+    vi.mocked(getSnmpConfig).mockRejectedValue(new Error('SNMP unavailable'));
+    const user = userEvent.setup();
+    await renderNetworkPage();
+    await screen.findByTestId('network-snmp-load-error');
+
+    await user.click(screen.getByTestId('network-reset-button'));
+    await makeFormDirty(user, 'network-http-port-input', '8080');
+    await user.click(screen.getByTestId('network-save-button'));
+    await user.click(await screen.findByTestId('network-confirm-save-button'));
+
+    await waitFor(() => {
+      expect(setNetworkProtocols).toHaveBeenCalled();
+    });
+    expect(screen.queryByTestId('network-snmp-community-error')).not.toBeInTheDocument();
   });
 });

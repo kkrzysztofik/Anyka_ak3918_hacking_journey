@@ -373,7 +373,7 @@ export default function NetworkPage() {
       form.reset({
         ...formValuesFrom(config, overlay, diagnostics?.wifi),
         snmpPort: snmp?.port ?? 161,
-        snmpCommunity: snmp?.community ?? '',
+        snmpCommunity: snmp?.community ?? form.getValues('snmpCommunity'),
       });
       toast.info('Form reset to current values');
     }

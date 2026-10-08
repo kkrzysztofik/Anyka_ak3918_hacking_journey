@@ -160,6 +160,9 @@ pub async fn run(
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut agent = Agent::new(SnmpConfig::load(&config_path)?);
 
+    if let Some(parent) = pidfile.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
     std::fs::write(&pidfile, format!("{}\n", std::process::id()))?;
     struct PidGuard(PathBuf);
     impl Drop for PidGuard {
@@ -443,6 +446,32 @@ mod tests {
         handle.abort();
         let _ = handle.await;
         drop(holder);
+    }
+
+    #[tokio::test]
+    async fn test_run_creates_a_missing_pidfile_parent_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let cfg_path = dir.path().join("mkdir.toml");
+        let pidfile = dir.path().join("state/run/snmp-agent.pid");
+
+        let probe = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let port = probe.local_addr().unwrap().port();
+        drop(probe);
+        std::fs::write(
+            &cfg_path,
+            format!("port = {port}\ncommunity = \"public\"\n"),
+        )
+        .unwrap();
+
+        let run_pid = pidfile.clone();
+        let (_tx, rx) = tokio::sync::mpsc::channel(1);
+        let handle = tokio::spawn(async move {
+            let _ = run(cfg_path, run_pid, rx).await;
+        });
+
+        wait_for_file(&pidfile, Duration::from_secs(2)).await;
+        handle.abort();
+        let _ = handle.await;
     }
 
     #[tokio::test]
