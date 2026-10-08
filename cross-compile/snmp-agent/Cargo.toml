@@ -15,7 +15,7 @@ toml = "1.1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "std"] }
 thiserror = "2.0"
-tokio = { version = "1", features = ["rt", "macros", "net", "signal", "time", "sync"] }
+tokio = { version = "1", features = ["rt", "macros", "net", "signal", "time", "sync", "fs"] }
 
 [dev-dependencies]
 tempfile = "3"
