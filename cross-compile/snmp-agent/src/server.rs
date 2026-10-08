@@ -160,6 +160,8 @@ pub async fn run(
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut agent = Agent::new(SnmpConfig::load(&config_path)?);
 
+    // std's create_dir_all returns Ok for an empty path (library/std/src/fs.rs),
+    // so a bare filename pidfile reaches here with Some("") and is a no-op.
     if let Some(parent) = pidfile.parent() {
         std::fs::create_dir_all(parent)?;
     }
