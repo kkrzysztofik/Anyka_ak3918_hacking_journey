@@ -6,7 +6,6 @@
 
 use std::collections::BTreeMap;
 use std::fs::OpenOptions;
-use std::mem::ManuallyDrop;
 use std::os::unix::process::{CommandExt, ExitStatusExt};
 use std::path::Path;
 use std::process::{Command, Stdio};
@@ -111,6 +110,25 @@ impl Default for RealSys {
     }
 }
 
+/// Write `bytes` to `path` via `<path>.tmp`, fsync, rename, then sync(2), so
+/// a power cut on the vfat/exFAT card leaves the old contents or the new,
+/// never a half-written file.
+pub fn atomic_write(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut tmp = path.as_os_str().to_owned();
+    tmp.push(".tmp");
+    let tmp = std::path::PathBuf::from(tmp);
+    {
+        let mut f = std::fs::File::create(&tmp)?;
+        f.write_all(bytes)?;
+        f.sync_all()?;
+    }
+    std::fs::rename(&tmp, path)?;
+    // SAFETY: sync(2) takes no arguments and cannot fail.
+    unsafe { libc::sync() };
+    Ok(())
+}
+
 impl Sys for RealSys {
     fn spawn(&self, spec: &SpawnSpec) -> Result<Pid, SysError> {
         let log = OpenOptions::new()
@@ -173,12 +191,9 @@ impl Sys for RealSys {
             exec: spec.exec.clone(),
             source,
         })?;
-        // The reaper thread owns reaping via waitpid(-1). Dropping Child would
-        // race that waitpid. Wrap in ManuallyDrop so Drop/wait never runs;
-        // do not into_inner — reaper owns waitpid(-1).
-        let child = ManuallyDrop::new(child);
-        let pid = child.id() as Pid;
-        Ok(pid)
+        // The reaper thread owns reaping via waitpid(-1). std's `Child` has no
+        // Drop that waits or kills, so letting the handle go cannot race it.
+        Ok(child.id() as Pid)
     }
 
     fn wait_any(&self) -> Result<Option<(Pid, ExitStatus)>, SysError> {
@@ -317,11 +332,9 @@ impl Sys for RealSys {
             exec: prog.to_string(),
             source,
         })?;
-        // Same ManuallyDrop pattern as spawn(): the reaper owns waitpid.
-        // Do not into_inner / drop — reaper owns waitpid(-1).
-        let child = ManuallyDrop::new(child);
-        let pid = child.id() as Pid;
-        Ok(pid)
+        // The reaper thread owns reaping via waitpid(-1). std's `Child` has no
+        // Drop that waits or kills, so letting the handle go cannot race it.
+        Ok(child.id() as Pid)
     }
 }
 
@@ -345,6 +358,24 @@ mod tests {
     /// A new test that spawns must take this lock too.
     static FORK_LOCK: Mutex<()> = Mutex::new(());
 
+    /// Poll `log` until the child has written to it, or panic after 5 s.
+    fn read_log_when_written(log: &Path) -> String {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            if let Ok(s) = std::fs::read_to_string(log)
+                && !s.is_empty()
+            {
+                return s;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "child never wrote to {}",
+                log.display()
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
     #[test]
     fn a_spawned_child_runs_in_its_executable_directory() {
         let _fork_guard = FORK_LOCK
@@ -367,19 +398,7 @@ mod tests {
         };
         let pid = RealSys::new().spawn(&spec).unwrap();
 
-        // Poll the log briefly: the child prints its working directory.
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-        let contents = loop {
-            if let Ok(s) = std::fs::read_to_string(&log)
-                && !s.is_empty()
-            {
-                break s;
-            }
-            if std::time::Instant::now() >= deadline {
-                panic!("child never wrote to {}", log.display());
-            }
-            std::thread::sleep(std::time::Duration::from_millis(20));
-        };
+        let contents = read_log_when_written(&log);
         assert!(
             contents.trim().starts_with(&*d.path().to_string_lossy()),
             "child CWD was {:?}, expected the executable's directory {}",
@@ -438,19 +457,7 @@ mod tests {
         };
         let pid = RealSys::new().spawn(&spec).unwrap();
 
-        // Poll the log briefly: the child prints the TZ it saw.
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-        let contents = loop {
-            if let Ok(s) = std::fs::read_to_string(&log)
-                && !s.is_empty()
-            {
-                break s;
-            }
-            if std::time::Instant::now() >= deadline {
-                panic!("child never wrote to {}", log.display());
-            }
-            std::thread::sleep(std::time::Duration::from_millis(20));
-        };
+        let contents = read_log_when_written(&log);
         // SAFETY: pid is the child this test spawned.
         let mut status: libc::c_int = 0;
         assert_eq!(unsafe { libc::waitpid(pid, &mut status, 0) }, pid);

@@ -86,7 +86,7 @@ impl Harness {
     fn start(cfg: Config) -> Self {
         let guard = serialize_waitpid_tests();
         let sys: Arc<dyn Sys> = Arc::new(RealSys::new());
-        let (tx, rx) = supervisor_loop::make_channel();
+        let (tx, rx) = std::sync::mpsc::channel();
         let stop = Arc::new(AtomicBool::new(false));
         let reaper = supervisor_loop::spawn_reaper(Arc::clone(&sys), tx.clone(), Arc::clone(&stop));
         let handle = std::thread::spawn(move || {

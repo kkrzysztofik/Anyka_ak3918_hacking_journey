@@ -11,27 +11,20 @@
 //! Every field is `Option` so that "the user never touched this" is
 //! distinguishable from "the user set this to false / to an empty list".
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
 use crate::config::WifiCfg;
 
 /// Overlay applied over `[wifi]` from `anyka.toml`.
-#[derive(Debug, Default, Clone, Deserialize, Serialize, PartialEq)]
+#[derive(Debug, Default, Clone, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct NetworkOverlay {
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub ssid: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub password: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub security: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub dhcp: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub address: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub gateway: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub dns: Option<Vec<String>>,
 }
 
@@ -71,44 +64,9 @@ impl NetworkOverlay {
         }
     }
 
-    /// True when any overlay key is present (file exists and parsed non-empty).
-    pub fn has_content(&self) -> bool {
-        self.ssid.is_some()
-            || self.password.is_some()
-            || self.security.is_some()
-            || self.dhcp.is_some()
-            || self.address.is_some()
-            || self.gateway.is_some()
-            || self.dns.is_some()
-    }
-
     /// Whether this overlay overrides Wi-Fi association inputs.
     pub fn overrides_association(&self) -> bool {
         self.ssid.is_some() || self.password.is_some() || self.security.is_some()
-    }
-
-    /// Validate overlay invariants before merge.
-    pub fn validate(&self) -> Result<(), crate::config::ConfigError> {
-        if let Some(sec) = &self.security
-            && !matches!(sec.as_str(), "wpa" | "wep" | "open")
-        {
-            return Err(crate::config::ConfigError::Invalid(format!(
-                "network overlay security = {sec:?} is not one of wpa, wep, open"
-            )));
-        }
-        if self.dhcp == Some(false) {
-            if self.address.is_none() {
-                return Err(crate::config::ConfigError::Invalid(
-                    "network overlay address is required when dhcp = false".into(),
-                ));
-            }
-            if self.gateway.is_none() {
-                return Err(crate::config::ConfigError::Invalid(
-                    "network overlay gateway is required when dhcp = false".into(),
-                ));
-            }
-        }
-        Ok(())
     }
 
     /// Read the overlay from `path`.

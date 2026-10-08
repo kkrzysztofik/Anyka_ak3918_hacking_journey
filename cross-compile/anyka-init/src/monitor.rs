@@ -22,45 +22,29 @@ pub fn parse_mem_kb(meminfo: &str) -> Option<u64> {
     field("MemAvailable:").or_else(|| field("MemFree:"))
 }
 
-pub fn parse_loadavg(src: &str) -> Option<f32> {
-    src.split_whitespace().next().and_then(|v| v.parse().ok())
-}
-
 fn sample() {
+    // No loadavg: on this SoC it counts D-state wifi threads and reads 3–15
+    // at 40 % idle CPU, so it misled every investigation that used it.
     let mem = std::fs::read_to_string("/proc/meminfo")
         .ok()
         .and_then(|s| parse_mem_kb(&s));
-    let load = std::fs::read_to_string("/proc/loadavg")
-        .ok()
-        .and_then(|s| parse_loadavg(&s));
-    tracing::info!(mem_avail_kb = mem, load1 = load, "sys");
+    tracing::info!(mem_avail_kb = mem, "sys");
 }
 
 fn sample_link(iface: &str, probe: bool) -> Health {
-    let oper = std::fs::read_to_string(format!("/sys/class/net/{iface}/operstate"))
-        .map(|s| netstat::parse_operstate(&s))
-        .unwrap_or(false);
-    let carrier = std::fs::read_to_string(format!("/sys/class/net/{iface}/carrier"))
-        .map(|s| s.trim() == "1")
-        .unwrap_or(false);
-    let carrier = oper && carrier;
-    let route = std::fs::read_to_string("/proc/net/route")
+    let carrier = std::fs::read_to_string(format!("/sys/class/net/{iface}/operstate"))
+        .is_ok_and(|s| netstat::parse_operstate(&s))
+        && std::fs::read_to_string(format!("/sys/class/net/{iface}/carrier"))
+            .is_ok_and(|s| s.trim() == "1");
+    let gw = std::fs::read_to_string("/proc/net/route")
         .ok()
-        .and_then(|s| netstat::parse_default_route(&s, iface))
-        .is_some();
-    let reachable = if carrier && route && probe {
-        if let Some(gw) = std::fs::read_to_string("/proc/net/route")
-            .ok()
-            .and_then(|s| netstat::parse_default_route(&s, iface))
-        {
-            netstat::gateway_reachable(&gw)
-        } else {
-            false
-        }
-    } else {
+        .and_then(|s| netstat::parse_default_route(&s, iface));
+    let route = gw.is_some();
+    let reachable = match &gw {
+        Some(gw) if carrier && probe => netstat::gateway_reachable(gw),
         // Without a probe, treat route presence as reachability so we do not
         // escalate on L3 alone when probing is disabled.
-        route
+        _ => route,
     };
     Health {
         carrier,
@@ -168,12 +152,7 @@ pub fn apply_video_actions(
         tracing::warn!(frames, ticks = *ticks, "video frames stalled");
     }
 
-    let policy = VideoPolicy {
-        restart_after_ticks: cfg.video_restart_after_ticks,
-        kill_after_ticks: cfg.video_kill_after_ticks,
-        reboot_after_ticks: cfg.video_reboot_after_ticks,
-    };
-    match video_decide(*ticks, &policy) {
+    match video_decide(*ticks, cfg) {
         VideoAction::Nothing => {}
         VideoAction::Restart => {
             let _ = tx.send(Msg::RestartService("vendor-daemon".into()));
@@ -194,13 +173,6 @@ pub fn apply_video_actions(
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct VideoPolicy {
-    pub restart_after_ticks: u32,
-    pub kill_after_ticks: u32,
-    pub reboot_after_ticks: u32,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VideoAction {
     Nothing,
     Restart,
@@ -214,23 +186,31 @@ pub enum VideoAction {
 /// cannot skip a rung. Three rungs rather than two because `RestartService`
 /// sends SIGTERM, which a wedged daemon can ignore; the reboot rung does not
 /// need the process to die at all.
-pub fn video_decide(stalled_ticks: u32, p: &VideoPolicy) -> VideoAction {
-    if stalled_ticks >= p.reboot_after_ticks {
+pub fn video_decide(stalled_ticks: u32, cfg: &MonitorCfg) -> VideoAction {
+    if stalled_ticks >= cfg.video_reboot_after_ticks {
         return VideoAction::Reboot;
     }
-    if stalled_ticks >= p.kill_after_ticks {
+    if stalled_ticks >= cfg.video_kill_after_ticks {
         return VideoAction::Kill;
     }
-    if stalled_ticks >= p.restart_after_ticks {
+    if stalled_ticks >= cfg.video_restart_after_ticks {
         return VideoAction::Restart;
     }
     VideoAction::Nothing
 }
 
+/// What `tick` carries from one iteration to the next.
+#[derive(Debug, Default)]
+pub struct TickState {
+    pub reset_done: bool,
+    pub wifi_ticks: u32,
+    pub video_last: Option<u64>,
+    pub video_ticks: u32,
+}
+
 /// One iteration of the sampling loop, including the storm-guard reset: once
 /// this process has been up longer than the configured threshold, the boot is
 /// considered good.
-#[allow(clippy::too_many_arguments)]
 pub fn tick(
     sys: &dyn Sys,
     cfg: &MonitorCfg,
@@ -238,13 +218,10 @@ pub fn tick(
     state_path: &str,
     reset_after: Duration,
     tx: &Sender<Msg>,
-    reset_done: &mut bool,
-    ticks: &mut u32,
-    video_last: &mut Option<u64>,
-    video_ticks: &mut u32,
+    st: &mut TickState,
 ) {
     sample();
-    if !*reset_done && sys.uptime() > reset_after {
+    if !st.reset_done && sys.uptime() > reset_after {
         // Reset only the crash-loop counter. wifi_reboots is cleared solely
         // by a successful wifi::bring_up (B4) — uptime alone would wipe it
         // before the link ever recovers.
@@ -254,17 +231,24 @@ pub fn tick(
             Ok(()) => tracing::info!("boot considered good; storm-guard counter reset"),
             Err(e) => tracing::warn!(error = %e, "failed to reset storm-guard state"),
         }
-        *reset_done = true;
+        st.reset_done = true;
     }
 
     if cfg.wifi {
         let h = sample_link(iface, cfg.wifi_probe);
-        apply_wifi_actions(sys, cfg, iface, state_path, tx, h, ticks);
+        apply_wifi_actions(sys, cfg, iface, state_path, tx, h, &mut st.wifi_ticks);
     }
 
     if cfg.video {
         let frames = read_heartbeat(&cfg.video_heartbeat_path);
-        apply_video_actions(sys, cfg, tx, frames, video_last, video_ticks);
+        apply_video_actions(
+            sys,
+            cfg,
+            tx,
+            frames,
+            &mut st.video_last,
+            &mut st.video_ticks,
+        );
     }
 }
 
@@ -278,23 +262,9 @@ pub fn run(
     tx: Sender<Msg>,
 ) {
     let interval = Duration::from_secs(cfg.interval_sec);
-    let mut reset_done = false;
-    let mut ticks: u32 = 0;
-    let mut video_last: Option<u64> = None;
-    let mut video_ticks: u32 = 0;
+    let mut st = TickState::default();
     loop {
-        tick(
-            sys,
-            cfg,
-            iface,
-            state_path,
-            reset_after,
-            &tx,
-            &mut reset_done,
-            &mut ticks,
-            &mut video_last,
-            &mut video_ticks,
-        );
+        tick(sys, cfg, iface, state_path, reset_after, &tx, &mut st);
         std::thread::sleep(interval);
     }
 }
@@ -315,11 +285,6 @@ mod tests {
     fn test_parse_mem_kb_falls_back_to_free() {
         let src = "MemTotal: 100\nMemFree: 10\n";
         assert_eq!(parse_mem_kb(src), Some(10));
-    }
-
-    #[test]
-    fn test_parse_loadavg_first_field() {
-        assert_eq!(parse_loadavg("0.42 0.35 0.30 1/100 1234\n"), Some(0.42));
     }
 
     fn healthy() -> Health {
@@ -508,8 +473,7 @@ mod tests {
         .save(state_path.to_str().expect("utf8"))
         .expect("seed storm state");
 
-        let mut reset_done = false;
-        let mut ticks = 0;
+        let mut st = TickState::default();
         tick(
             &sys,
             &cfg,
@@ -517,13 +481,10 @@ mod tests {
             state_path.to_str().expect("utf8"),
             Duration::from_secs(600),
             &tx,
-            &mut reset_done,
-            &mut ticks,
-            &mut None,
-            &mut 0,
+            &mut st,
         );
 
-        assert!(reset_done);
+        assert!(st.reset_done);
         let storm = crate::storm::StormState::load(state_path.to_str().expect("utf8"));
         assert_eq!(storm.fast_reboots, 0, "boot considered good");
         assert_eq!(
@@ -545,8 +506,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let state_path = dir.path().join("boot.json");
 
-        let mut reset_done = false;
-        let mut ticks = 0;
+        let mut st = TickState::default();
         tick(
             &sys,
             &cfg,
@@ -554,25 +514,14 @@ mod tests {
             state_path.to_str().expect("utf8"),
             Duration::from_secs(600),
             &tx,
-            &mut reset_done,
-            &mut ticks,
-            &mut None,
-            &mut 0,
+            &mut st,
         );
 
-        assert!(!reset_done);
+        assert!(!st.reset_done);
         assert!(
             !state_path.exists(),
             "nothing to persist before the threshold"
         );
-    }
-
-    fn video_policy() -> VideoPolicy {
-        VideoPolicy {
-            restart_after_ticks: 2,
-            kill_after_ticks: 3,
-            reboot_after_ticks: 5,
-        }
     }
 
     fn cfg_with_video() -> MonitorCfg {
@@ -652,24 +601,24 @@ mod tests {
 
     #[test]
     fn test_video_decide_does_nothing_while_frames_advance() {
-        assert_eq!(video_decide(0, &video_policy()), VideoAction::Nothing);
+        assert_eq!(video_decide(0, &cfg_with_video()), VideoAction::Nothing);
     }
 
     #[test]
     fn test_video_decide_restarts_at_the_restart_threshold() {
-        assert_eq!(video_decide(2, &video_policy()), VideoAction::Restart);
+        assert_eq!(video_decide(2, &cfg_with_video()), VideoAction::Restart);
     }
 
     #[test]
     fn test_video_decide_escalates_to_kill_then_reboot() {
-        assert_eq!(video_decide(3, &video_policy()), VideoAction::Kill);
-        assert_eq!(video_decide(4, &video_policy()), VideoAction::Kill);
-        assert_eq!(video_decide(5, &video_policy()), VideoAction::Reboot);
-        assert_eq!(video_decide(50, &video_policy()), VideoAction::Reboot);
+        assert_eq!(video_decide(3, &cfg_with_video()), VideoAction::Kill);
+        assert_eq!(video_decide(4, &cfg_with_video()), VideoAction::Kill);
+        assert_eq!(video_decide(5, &cfg_with_video()), VideoAction::Reboot);
+        assert_eq!(video_decide(50, &cfg_with_video()), VideoAction::Reboot);
     }
 
     #[test]
     fn test_video_decide_below_the_first_threshold_is_nothing() {
-        assert_eq!(video_decide(1, &video_policy()), VideoAction::Nothing);
+        assert_eq!(video_decide(1, &cfg_with_video()), VideoAction::Nothing);
     }
 }

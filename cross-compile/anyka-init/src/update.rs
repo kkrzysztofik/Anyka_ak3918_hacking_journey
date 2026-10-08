@@ -62,22 +62,12 @@ impl Slots {
         self.root.join("slots").join(slot.name())
     }
 
-    /// Write the pointer via temp + rename + sync, the same durability dance
-    /// `storm.rs:58-70` uses: a power cut leaves the old byte or the new one,
-    /// never an empty file that would read as slot A by accident.
+    /// Write the pointer via `sys::atomic_write`: a power cut leaves the old
+    /// byte or the new one, never an empty file that would read as slot A by
+    /// accident.
     pub fn set_active(&self, slot: Slot) -> std::io::Result<()> {
-        use std::io::Write;
         std::fs::create_dir_all(&self.root)?;
-        let tmp = self.root.join("active.tmp");
-        {
-            let mut f = std::fs::File::create(&tmp)?;
-            f.write_all(slot.name().as_bytes())?;
-            f.sync_all()?;
-        }
-        std::fs::rename(&tmp, self.pointer())?;
-        // SAFETY: sync(2) takes no arguments and cannot fail.
-        unsafe { libc::sync() };
-        Ok(())
+        crate::sys::atomic_write(&self.pointer(), slot.name().as_bytes())
     }
 
     /// Which slot an executable path sits in, if any.
@@ -396,14 +386,13 @@ pub fn effective_trial_ports(requested: &[u16], onvif_enabled: bool) -> Vec<u16>
 /// flow, so a broken vendor-daemon can pass. Add a frame-counter probe if a
 /// silent-no-video regression ever ships.
 pub fn evaluate_trial(
-    ports: &[u16],
     policy: &Policy,
     mut probe: impl FnMut(u16) -> bool,
     mut sleep: impl FnMut(std::time::Duration),
 ) -> Outcome {
     let mut held = 0u32;
     for _ in 0..policy.deadline_secs {
-        if ports.iter().all(|p| probe(*p)) {
+        if policy.ports.iter().all(|p| probe(*p)) {
             held += 1;
             if held >= policy.hold_secs {
                 return Outcome::Confirm;
@@ -414,6 +403,24 @@ pub fn evaluate_trial(
         sleep(std::time::Duration::from_secs(1));
     }
     Outcome::Revert
+}
+
+/// Point `active` back at `prev`, clear the marker, reboot.
+///
+/// Order matters: if power is lost between the first two steps the next boot
+/// repeats a revert that is already correct, whereas clearing the marker
+/// first would boot the broken slot with no marker and no way back. Returns
+/// false when the pointer could not be restored.
+fn revert(sys: &dyn crate::sys::Sys, root: &Path, slots: &Slots, prev: Slot) -> bool {
+    if let Err(e) = slots.set_active(prev) {
+        tracing::error!(error = %e, "could not restore the previous slot");
+        return false;
+    }
+    if let Err(e) = Trial::clear(root) {
+        tracing::error!(error = %e, "could not clear the trial marker");
+    }
+    let _ = sys.reboot();
+    true
 }
 
 /// Resolve an unconfirmed update, if there is one. Called once per boot, after
@@ -445,7 +452,7 @@ pub fn reconcile(
     // The trial evaluation sleeps through the whole window but touches no
     // shared state; only the confirm/revert tail below writes the pointer and
     // the marker, so the lock is taken there and held across the reboot.
-    match evaluate_trial(&policy.ports, &policy, probe, sleep) {
+    match evaluate_trial(&policy, probe, sleep) {
         Outcome::Confirm => {
             let _guard = lock
                 .lock()
@@ -474,21 +481,10 @@ pub fn reconcile(
                 "trial failed: reverting to slot {}",
                 prev.name()
             );
-            // Order matters. Restore the pointer, then clear the marker, then
-            // reboot: if power is lost between the first two the next boot
-            // repeats a revert that is already correct, whereas clearing first
-            // would boot the broken slot with no marker and no way back.
             let _guard = lock
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            if let Err(e) = slots.set_active(prev) {
-                tracing::error!(error = %e, "could not restore the previous slot");
-                return;
-            }
-            if let Err(e) = Trial::clear(root) {
-                tracing::error!(error = %e, "could not clear the trial marker");
-            }
-            let _ = sys.reboot();
+            revert(sys, root, &slots, prev);
         }
     }
 }
@@ -513,15 +509,7 @@ pub fn revert_now(sys: &dyn crate::sys::Sys, root: &Path) -> bool {
         prev = prev.name(),
         "safe mode with an unconfirmed update: reverting without a trial"
     );
-    if let Err(e) = slots.set_active(prev) {
-        tracing::error!(error = %e, "could not restore the previous slot");
-        return false;
-    }
-    if let Err(e) = Trial::clear(root) {
-        tracing::error!(error = %e, "could not clear the trial marker");
-    }
-    let _ = sys.reboot();
-    true
+    revert(sys, root, &slots, prev)
 }
 
 /// Is a complete bundle waiting?
@@ -620,14 +608,14 @@ fn stage_and_flip(
     remove_tree(sys, &staging)?;
     std::fs::create_dir_all(&staging)?;
 
+    // No `sh -c`: busybox dispatches on its first argument, so neither path
+    // passes through a shell (same as `remove_tree`).
     let untar = [
-        "sh".to_string(),
-        "-c".to_string(),
-        format!(
-            "busybox tar -xf {} -C {}",
-            shell_quote(&root.join("spool/bundle.tar")),
-            shell_quote(&staging)
-        ),
+        "tar".to_string(),
+        "-xf".to_string(),
+        root.join("spool/bundle.tar").to_string_lossy().into_owned(),
+        "-C".to_string(),
+        staging.to_string_lossy().into_owned(),
     ];
     match sys.run_to_completion("busybox", &untar) {
         Ok(st) if st.success() => {}
@@ -821,6 +809,11 @@ mod tests {
         true
     }
 
+    /// The `-C` target of a mocked `busybox tar -xf <tar> -C <dir>` call.
+    fn fake_untar_dir(args: &[String]) -> Option<String> {
+        (args.first().map(String::as_str) == Some("tar")).then(|| args[4].clone())
+    }
+
     #[test]
     fn verify_runs_sha256sum_in_the_slot_directory() {
         use crate::sys::MockSys;
@@ -889,7 +882,6 @@ mod tests {
     fn trial_passes_when_every_port_is_bound_for_the_hold() {
         let mut calls = 0;
         let outcome = evaluate_trial(
-            &[80, 554, 8080],
             &Policy {
                 hold_secs: 3,
                 deadline_secs: 10,
@@ -908,7 +900,6 @@ mod tests {
     #[test]
     fn trial_fails_when_one_port_never_binds() {
         let outcome = evaluate_trial(
-            &[80, 554, 8080],
             &Policy {
                 hold_secs: 3,
                 deadline_secs: 6,
@@ -924,11 +915,10 @@ mod tests {
     fn a_late_bind_still_confirms_inside_the_deadline() {
         let mut tick = 0;
         let outcome = evaluate_trial(
-            &[554],
             &Policy {
                 hold_secs: 2,
                 deadline_secs: 20,
-                ports: TRIAL_PORTS.to_vec(),
+                ports: vec![554],
             },
             |_| {
                 tick += 1;
@@ -943,11 +933,10 @@ mod tests {
     fn a_flapping_port_resets_the_hold_and_eventually_reverts() {
         let mut tick = 0;
         let outcome = evaluate_trial(
-            &[80],
             &Policy {
                 hold_secs: 3,
                 deadline_secs: 8,
-                ports: TRIAL_PORTS.to_vec(),
+                ports: vec![80],
             },
             |_| {
                 tick += 1;
@@ -1209,12 +1198,7 @@ mod tests {
                 if fake_rm(args) {
                     return Ok(exit_ok());
                 }
-                if let Some(cmd) = args.iter().find(|a| a.contains("tar -xf")) {
-                    let dir = cmd
-                        .split("-C ")
-                        .nth(1)
-                        .map(|s| s.trim().trim_matches('\'').to_string())
-                        .expect("untar -C dir");
+                if let Some(dir) = fake_untar_dir(args) {
                     std::fs::create_dir_all(&dir).unwrap();
                     std::fs::write(
                         std::path::Path::new(&dir).join("manifest.sha256"),
@@ -1267,12 +1251,7 @@ mod tests {
                 return Ok(exit_fail());
             }
             // Materialize the staged slot the sha256sum step will reject.
-            let cmd = args.iter().find(|a| a.contains("tar -xf")).unwrap();
-            let dir = cmd
-                .split("-C ")
-                .nth(1)
-                .map(|s| s.trim().trim_matches('\'').to_string())
-                .expect("untar -C dir");
+            let dir = fake_untar_dir(args).expect("untar -C dir");
             std::fs::create_dir_all(&dir).unwrap();
             std::fs::write(
                 std::path::Path::new(&dir).join("manifest.sha256"),
@@ -1321,12 +1300,7 @@ mod tests {
             if fake_rm(args) {
                 return Ok(exit_ok());
             }
-            if let Some(cmd) = args.iter().find(|a| a.contains("tar -xf")) {
-                let dir = cmd
-                    .split("-C ")
-                    .nth(1)
-                    .map(|s| s.trim().trim_matches('\'').to_string())
-                    .expect("untar -C dir");
+            if let Some(dir) = fake_untar_dir(args) {
                 std::fs::create_dir_all(&dir).unwrap();
                 std::fs::write(
                     std::path::Path::new(&dir).join("manifest.sha256"),
@@ -1411,12 +1385,7 @@ mod tests {
             if fake_rm(args) {
                 return Ok(exit_ok());
             }
-            if let Some(cmd) = args.iter().find(|a| a.contains("tar -xf")) {
-                let dir = cmd
-                    .split("-C ")
-                    .nth(1)
-                    .map(|s| s.trim().trim_matches('\'').to_string())
-                    .expect("untar -C dir");
+            if let Some(dir) = fake_untar_dir(args) {
                 std::fs::create_dir_all(&dir).unwrap();
                 std::fs::write(
                     std::path::Path::new(&dir).join("manifest.sha256"),
@@ -1473,12 +1442,7 @@ mod tests {
                 }
                 return Ok(exit_fail());
             }
-            if let Some(cmd) = args.iter().find(|a| a.contains("tar -xf")) {
-                let dir = cmd
-                    .split("-C ")
-                    .nth(1)
-                    .map(|s| s.trim().trim_matches('\'').to_string())
-                    .expect("untar -C dir");
+            if let Some(dir) = fake_untar_dir(args) {
                 std::fs::create_dir_all(&dir).unwrap();
                 std::fs::write(
                     std::path::Path::new(&dir).join("manifest.sha256"),

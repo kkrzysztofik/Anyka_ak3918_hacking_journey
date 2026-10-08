@@ -163,9 +163,6 @@ pub enum Action {
 /// host.
 pub fn parse_local_ipv4(fib_trie: &str, route: &str, iface: &str) -> Option<String> {
     let subnets = iface_subnets(route, iface);
-    if subnets.is_empty() {
-        return None;
-    }
     for addr in local_host_addresses(fib_trie) {
         if addr.octets()[0] == 127 {
             continue;

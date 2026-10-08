@@ -11,7 +11,6 @@
 
 use crate::config::TimeCfg;
 use crate::sys::Sys;
-use std::io::Read;
 use std::net::{ToSocketAddrs, UdpSocket};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -96,37 +95,12 @@ pub fn parse_response(
     Ok(UNIX_EPOCH + Duration::new(unix, frac_nanos))
 }
 
-/// Read a 64-bit nonce from `/dev/urandom`. Falls back to a mixed
-/// wall-clock / pid / counter value if unavailable — weaker than urandom,
-/// but `Instant::now().elapsed()` is ~0 and must not be used alone.
+/// A 64-bit nonce from std's OS-seeded `RandomState` (getrandom, falling back
+/// to /dev/urandom). Panics only on a system with no randomness source at
+/// all, where the old hand-mixed fallback would have been guessable anyway.
 pub fn random_nonce() -> u64 {
-    let mut buf = [0u8; 8];
-    if let Ok(mut f) = std::fs::File::open("/dev/urandom")
-        && f.read_exact(&mut buf).is_ok()
-    {
-        return u64::from_be_bytes(buf);
-    }
-    fallback_nonce()
-}
-
-/// Non-urandom nonce: wall clock, pid, and a process-local counter so
-/// successive calls differ even when the clock resolution is coarse.
-fn fallback_nonce() -> u64 {
-    // AtomicU64 is unavailable on ARMv5 (no 64-bit atomics); u32 is enough
-    // to keep successive fallbacks distinct when mixed with wall/pid.
-    use std::sync::atomic::{AtomicU32, Ordering};
-    static COUNTER: AtomicU32 = AtomicU32::new(0);
-    let wall = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos() as u64)
-        .unwrap_or(0);
-    let pid = u64::from(std::process::id());
-    let n = u64::from(COUNTER.fetch_add(1, Ordering::Relaxed));
-    let stack_mix = std::ptr::from_ref(&COUNTER) as u64;
-    wall.wrapping_mul(0x9E37_79B9_7F4A_7C15)
-        .wrapping_add(pid.wrapping_shl(32))
-        .wrapping_add(n.wrapping_mul(0xBF58_476D_1CE4_E5B9))
-        .wrapping_add(stack_mix)
+    use std::hash::{BuildHasher, RandomState};
+    RandomState::new().hash_one(())
 }
 
 /// `server` is a bare host (the default NTP port 123 is appended) or, for
@@ -275,11 +249,8 @@ pub fn sync_once(
             return None;
         }
         let timeout = remaining
-            .map(|left| left.min(Duration::from_secs(5)))
-            .unwrap_or(Duration::from_secs(5));
-        if timeout.is_zero() {
-            return None;
-        }
+            .unwrap_or(Duration::from_secs(5))
+            .min(Duration::from_secs(5));
         match query(server, timeout, &bounds) {
             Ok(t) => {
                 let before = sys.realtime();
@@ -329,17 +300,9 @@ pub fn first_sync(sys: &dyn Sys, cfg: &TimeCfg, ntp_disabled: &Path) -> bool {
         if sync_once(sys, cfg, Some(remaining), ntp_disabled).is_some() {
             return true;
         }
+        // Bounded by `deadline`; the check above ends the loop once it
+        // passes, so a retry_interval longer than the timeout means one attempt.
         let left = deadline.saturating_duration_since(sys.now());
-        if left.is_zero() {
-            tracing::warn!(
-                timeout_sec = cfg.first_sync_timeout_sec,
-                "no NTP sync before boot deadline; continuing with a wrong clock. \
-                 Authenticated ONVIF requests will fail until the resync thread succeeds."
-            );
-            return false;
-        }
-        // Bounded by `deadline` above, so a retry_interval longer than the
-        // timeout simply means one attempt.
         sys.sleep(Duration::from_secs(cfg.retry_interval_sec.min(2)).min(left));
     }
 }
@@ -559,19 +522,9 @@ mod nonce_tests {
     use super::*;
 
     #[test]
-    fn test_fallback_nonce_successive_calls_differ() {
-        let a = fallback_nonce();
-        let b = fallback_nonce();
-        let c = fallback_nonce();
-        assert_ne!(a, b, "counter must advance the fallback nonce");
-        assert_ne!(b, c, "counter must advance the fallback nonce");
-        assert_ne!(a, c);
-    }
-
-    #[test]
     fn test_random_nonce_returns_nonzero_entropy() {
-        // On the host this usually hits /dev/urandom; either path must not
-        // collapse to the old Instant::elapsed() ~0 constant.
+        // std seeds RandomState from the OS; successive nonces must still
+        // differ.
         let samples: Vec<u64> = (0..8).map(|_| random_nonce()).collect();
         assert!(
             samples.iter().any(|&n| n != 0),

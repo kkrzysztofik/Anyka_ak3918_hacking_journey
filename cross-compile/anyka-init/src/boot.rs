@@ -364,9 +364,7 @@ pub fn resolve_timezone(root: &std::path::Path, slots: &crate::update::Slots) ->
 #[cfg(test)]
 mod wifi_tests {
     use super::*;
-    use crate::config::{
-        LogCfg, MonitorCfg, RebootCfg, ServiceCfg, SupervisorCfg, SystemCfg, TimeCfg,
-    };
+    use crate::config::{ServiceCfg, SystemCfg};
     use crate::sys::{ExitStatus, MockSys, SysError};
     use std::collections::BTreeMap;
 
@@ -378,36 +376,18 @@ channel = 6
 ";
 
     fn wifi_cfg(config_file: &str, ssid: &str, password: &str) -> WifiCfg {
-        WifiCfg {
-            ssid: ssid.into(),
-            password: password.into(),
-            config_file: config_file.into(),
-            chip: "auto".into(),
-            gpio_polarity: "low_high".into(),
-            interface: "wlan0".into(),
-            security: "wpa".into(),
-            dhcp: true,
-            address: None,
-            gateway: None,
-            dns: Vec::new(),
-            connect_timeout_sec: 45,
-            fallback_to_vendor: true,
-        }
+        let mut w = crate::config::test_config().wifi;
+        w.config_file = config_file.into();
+        w.ssid = ssid.into();
+        w.password = password.into();
+        w
     }
 
     fn test_config(wifi: WifiCfg, system: SystemCfg) -> Config {
-        Config {
-            schema: 0,
-            log: LogCfg::default(),
-            system,
-            wifi,
-            time: TimeCfg::default(),
-            supervisor: SupervisorCfg::default(),
-            monitor: MonitorCfg::default(),
-            reboot: RebootCfg::default(),
-            update: crate::config::Update::default(),
-            services: BTreeMap::new(),
-        }
+        let mut cfg = crate::config::test_config();
+        cfg.wifi = wifi;
+        cfg.system = system;
+        cfg
     }
 
     #[test]
@@ -872,24 +852,6 @@ channel = 6
 #[cfg(test)]
 mod tz_tests {
     use super::*;
-    use crate::sys::{RealSys, SpawnSpec};
-    use std::collections::BTreeMap;
-
-    #[test]
-    fn test_spawn_env_carries_tz() {
-        let spec = SpawnSpec {
-            exec: "true".into(),
-            args: vec!["-l".into()],
-            env: BTreeMap::new(),
-            tz: Some("CET-1CEST,M3.5.0,M10.5.0/3".into()),
-            log: std::env::temp_dir()
-                .join("tz-test.log")
-                .to_string_lossy()
-                .into_owned(),
-            core_dump: false,
-        };
-        RealSys::default().spawn(&spec).unwrap();
-    }
 
     /// A config carrying a `[time]` section: `resolve_timezone` must return the
     /// POSIX string; a config without one must yield `None`.

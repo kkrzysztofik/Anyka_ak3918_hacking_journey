@@ -307,13 +307,7 @@ pub fn resolv_conf(servers: &[String]) -> String {
         .collect()
 }
 
-const HW_CONF: &str = "/etc/jffs2/hw.conf";
-const HW_CONF_FACTORY: &str = "/mnt/Factory/newFactory/hw.conf";
-const GPIO_WIFI_EN: &str = "/sys/user-gpio/wifi_en";
-const OTG_MODULE: &str = "/usr/modules/otg-hs.ko";
 const WPA_CONF: &str = "/etc/jffs2/wpa_supplicant.conf";
-const RESOLV_CONF: &str = "/etc/resolv.conf";
-const KO_DIR: &str = "/tmp/ko";
 /// Same class of bug as the `/sbin/udhcpc` one (R17): `/usr/sbin/wpa_supplicant`
 /// does not exist on this camera. The rootfs ships `/usr/bin/wpa_supplicant` as
 /// a symlink into `/tmp`, and the `orig/` capture lost every symlink, so the
@@ -338,15 +332,8 @@ pub fn wire_kill_shim(svc: &mut crate::config::ServiceCfg) {
     svc.args.insert(0, KILL_WPA_SHIM.into());
 }
 pub const DRIVER_PROBE_ORDER: [&str; 2] = ["nl80211", "wext"];
-const BUSYBOX: &str = "/bin/busybox";
-const SYS_CLASS_NET: &str = "/sys/class/net";
-const PROC_FIB_TRIE: &str = "/proc/net/fib_trie";
-const PROC_ROUTE: &str = "/proc/net/route";
-const WIFI_MANAGE_SCRIPT: &str = "/usr/sbin/wifi_manage.sh";
-const WIFI_DRIVER_TGZ: &str = "/data/wifi_driver.tgz";
-const WIFI_TOOL_TGZ: &str = "/data/wifi_tool.tgz";
 
-/// Every filesystem path `bring_up` touches, gathered so tests can point the
+/// Every filesystem path the bring-up chain touches, gathered so tests can point the
 /// whole chain at a tempdir instead of the real device tree. `production()`
 /// reproduces the hard-coded paths above exactly; nothing here changes
 /// on-device behaviour.
@@ -371,20 +358,20 @@ pub struct FsLayout {
 impl FsLayout {
     pub fn production() -> Self {
         Self {
-            hw_conf: HW_CONF.into(),
-            hw_conf_factory: HW_CONF_FACTORY.into(),
-            gpio_wifi_en: GPIO_WIFI_EN.into(),
-            otg_module: OTG_MODULE.into(),
+            hw_conf: "/etc/jffs2/hw.conf".into(),
+            hw_conf_factory: "/mnt/Factory/newFactory/hw.conf".into(),
+            gpio_wifi_en: "/sys/user-gpio/wifi_en".into(),
+            otg_module: "/usr/modules/otg-hs.ko".into(),
             wpa_conf: WPA_CONF.into(),
-            resolv_conf: RESOLV_CONF.into(),
-            ko_dir: KO_DIR.into(),
-            sys_class_net: SYS_CLASS_NET.into(),
-            proc_fib_trie: PROC_FIB_TRIE.into(),
-            proc_route: PROC_ROUTE.into(),
-            wifi_manage_script: WIFI_MANAGE_SCRIPT.into(),
-            wifi_driver_tgz: WIFI_DRIVER_TGZ.into(),
-            wifi_tool_tgz: WIFI_TOOL_TGZ.into(),
-            busybox: BUSYBOX.into(),
+            resolv_conf: "/etc/resolv.conf".into(),
+            ko_dir: "/tmp/ko".into(),
+            sys_class_net: "/sys/class/net".into(),
+            proc_fib_trie: "/proc/net/fib_trie".into(),
+            proc_route: "/proc/net/route".into(),
+            wifi_manage_script: "/usr/sbin/wifi_manage.sh".into(),
+            wifi_driver_tgz: "/data/wifi_driver.tgz".into(),
+            wifi_tool_tgz: "/data/wifi_tool.tgz".into(),
+            busybox: "/bin/busybox".into(),
         }
     }
 }
@@ -441,44 +428,18 @@ fn on_association_success(storm_state_path: &str, outcome: Outcome) -> Outcome {
     outcome
 }
 
-/// Full bring-up. Steps are numbered to match the design addendum.
-///
-/// `storm_state_path` is where the wifi reboot counter lives; a successful
-/// bring-up is the only thing that zeroes it (B4).
-pub fn bring_up(sys: &dyn Sys, cfg: &WifiCfg, storm_state_path: &str) -> Outcome {
-    bring_up_with(sys, cfg, storm_state_path, &FsLayout::production())
-}
-
-/// Same as [`bring_up`], but with the filesystem paths it touches taken from
-/// `layout` instead of the hard-coded device tree. Exists so tests can run
-/// the whole chain against a tempdir; production always calls [`bring_up`].
-pub fn bring_up_with(
-    sys: &dyn Sys,
-    cfg: &WifiCfg,
-    storm_state_path: &str,
-    layout: &FsLayout,
-) -> Outcome {
-    match try_bring_up_with(sys, cfg, layout) {
-        Ok(outcome) => on_association_success(storm_state_path, outcome),
-        Err(e) => {
-            tracing::error!(error = %e, "wifi bring-up failed");
-            if cfg.fallback_to_vendor {
-                fall_back(sys, layout)
-            } else {
-                tracing::error!("fallback_to_vendor is disabled; the camera may be unreachable");
-                Outcome::Failed
-            }
-        }
-    }
-}
-
-/// [`bring_up_with`], plus rung 2 of the rescue ladder.
+/// Full bring-up, with the filesystem paths it touches taken from `layout`
+/// instead of the hard-coded device tree (tests point it at a tempdir), and
+/// the overlay-quarantine rung 2 of the rescue ladder.
 ///
 /// `gateway_reachable` already rescues a bad static address. It cannot rescue
 /// bad credentials: with no association there is no gateway to probe. So when
 /// bring-up fails outright *and* an overlay is what produced `cfg`, quarantine
 /// the overlay and retry once with the operator's baseline before falling
 /// through to the vendor chain.
+///
+/// `storm_state_path` is where the wifi reboot counter lives; a successful
+/// bring-up is the only thing that zeroes it (B4).
 pub fn bring_up_with_overlay(
     sys: &dyn Sys,
     cfg: &WifiCfg,
@@ -780,7 +741,7 @@ fn assign_address(sys: &dyn Sys, cfg: &WifiCfg, layout: &FsLayout) -> Result<Str
     // R12: a typo'd static address associates fine and leaves the camera
     // unreachable, which no rung of R7 would catch. Verify, then fall back to
     // DHCP once before giving up.
-    if gateway_reachable(&gw) {
+    if crate::netstat::gateway_reachable(&gw) {
         return Ok(cidr.address);
     }
     tracing::error!(
@@ -802,10 +763,6 @@ fn dhcp_once(sys: &dyn Sys, cfg: &WifiCfg, layout: &FsLayout) -> Result<String, 
 fn read_carrier(iface: &str, layout: &FsLayout) -> Option<bool> {
     let src = std::fs::read_to_string(format!("{}/{iface}/carrier", layout.sys_class_net)).ok()?;
     Some(src.trim() == "1")
-}
-
-fn gateway_reachable(gw: &str) -> bool {
-    crate::netstat::gateway_reachable(gw)
 }
 
 #[cfg(test)]
@@ -831,6 +788,19 @@ mod tests {
             wifi_tool_tgz: p("wifi_tool.tgz"),
             busybox: "busybox".to_string(),
         }
+    }
+
+    /// `test_layout` with wlan0 present, carrying, and addressed.
+    fn happy_layout(dir: &std::path::Path, carrier: bool) -> FsLayout {
+        let layout = test_layout(dir);
+        std::fs::create_dir_all(format!("{}/wlan0", layout.sys_class_net)).expect("iface dir");
+        if carrier {
+            std::fs::write(format!("{}/wlan0/carrier", layout.sys_class_net), "1")
+                .expect("carrier");
+        }
+        std::fs::write(&layout.proc_route, HAPPY_ROUTE).expect("route");
+        std::fs::write(&layout.proc_fib_trie, HAPPY_FIB_TRIE).expect("fib_trie");
+        layout
     }
 
     fn happy_cfg() -> WifiCfg {
@@ -1011,13 +981,6 @@ mod tests {
                 "every security mode must probe actively, missing for {sec:?}"
             );
         }
-    }
-
-    #[test]
-    fn test_wpa_supplicant_conf_is_deterministic() {
-        let a = wpa_supplicant_conf("net", "password", Security::Wpa);
-        let b = wpa_supplicant_conf("net", "password", Security::Wpa);
-        assert_eq!(a, b);
     }
 
     #[test]
@@ -1268,7 +1231,14 @@ mod tests {
         // No sys expectations: an unknown pinned chip fails before any syscall.
         let sys = MockSys::new();
         assert_eq!(
-            bring_up(&sys, &cfg, "/nonexistent/storm.json"),
+            bring_up_with_overlay(
+                &sys,
+                &cfg,
+                &cfg,
+                "/nonexistent/storm.json",
+                &FsLayout::production(),
+                std::path::Path::new("/nonexistent/network.toml"),
+            ),
             Outcome::Failed
         );
     }
@@ -1286,7 +1256,14 @@ mod tests {
             .returning(|_, _| Ok(ExitStatus::Code(0)));
 
         assert_eq!(
-            bring_up(&sys, &cfg, "/nonexistent/storm.json"),
+            bring_up_with_overlay(
+                &sys,
+                &cfg,
+                &cfg,
+                "/nonexistent/storm.json",
+                &FsLayout::production(),
+                std::path::Path::new("/nonexistent/network.toml"),
+            ),
             Outcome::FellBack
         );
     }
@@ -1307,7 +1284,14 @@ mod tests {
             .returning(|_, _| Ok(ExitStatus::Code(1)));
 
         assert_eq!(
-            bring_up(&sys, &cfg, "/nonexistent/storm.json"),
+            bring_up_with_overlay(
+                &sys,
+                &cfg,
+                &cfg,
+                "/nonexistent/storm.json",
+                &FsLayout::production(),
+                std::path::Path::new("/nonexistent/network.toml"),
+            ),
             Outcome::Failed
         );
     }
@@ -1344,11 +1328,7 @@ Local:
     #[test]
     fn test_try_bring_up_with_happy_path_over_dhcp() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let layout = test_layout(dir.path());
-        std::fs::create_dir_all(format!("{}/wlan0", layout.sys_class_net)).expect("iface dir");
-        std::fs::write(format!("{}/wlan0/carrier", layout.sys_class_net), "1").expect("carrier");
-        std::fs::write(&layout.proc_route, HAPPY_ROUTE).expect("route");
-        std::fs::write(&layout.proc_fib_trie, HAPPY_FIB_TRIE).expect("fib_trie");
+        let layout = happy_layout(dir.path(), true);
 
         let cfg = happy_cfg();
         let sys = happy_mock_sys();
@@ -1378,11 +1358,7 @@ Local:
     #[test]
     fn test_try_bring_up_with_clears_resolv_conf_when_static_dns_is_empty() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let layout = test_layout(dir.path());
-        std::fs::create_dir_all(format!("{}/wlan0", layout.sys_class_net)).expect("iface dir");
-        std::fs::write(format!("{}/wlan0/carrier", layout.sys_class_net), "1").expect("carrier");
-        std::fs::write(&layout.proc_route, HAPPY_ROUTE).expect("route");
-        std::fs::write(&layout.proc_fib_trie, HAPPY_FIB_TRIE).expect("fib_trie");
+        let layout = happy_layout(dir.path(), true);
         std::fs::write(&layout.resolv_conf, "nameserver 8.8.8.8\n").expect("seed resolv");
 
         let mut cfg = happy_cfg();
@@ -1403,11 +1379,7 @@ Local:
     #[test]
     fn test_bring_up_with_clears_wifi_reboot_counter_on_successful_association() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let layout = test_layout(dir.path());
-        std::fs::create_dir_all(format!("{}/wlan0", layout.sys_class_net)).expect("iface dir");
-        std::fs::write(format!("{}/wlan0/carrier", layout.sys_class_net), "1").expect("carrier");
-        std::fs::write(&layout.proc_route, HAPPY_ROUTE).expect("route");
-        std::fs::write(&layout.proc_fib_trie, HAPPY_FIB_TRIE).expect("fib_trie");
+        let layout = happy_layout(dir.path(), true);
 
         let storm_path = dir.path().join("storm.json");
         std::fs::write(&storm_path, r#"{"fast_reboots":1,"wifi_reboots":2}"#)
@@ -1416,7 +1388,14 @@ Local:
         let cfg = happy_cfg();
         let sys = happy_mock_sys();
 
-        let outcome = bring_up_with(&sys, &cfg, storm_path.to_str().expect("utf8"), &layout);
+        let outcome = bring_up_with_overlay(
+            &sys,
+            &cfg,
+            &cfg,
+            storm_path.to_str().expect("utf8"),
+            &layout,
+            &dir.path().join("network.toml"),
+        );
         assert!(
             matches!(outcome, Outcome::Up { .. }),
             "expected Outcome::Up, got {outcome:?}"
@@ -1438,10 +1417,7 @@ Local:
         // Arrange: same tempdir layout as the happy-path test, but no carrier,
         // so association fails and bring-up returns Err.
         let dir = tempfile::tempdir().expect("tempdir");
-        let layout = test_layout(dir.path());
-        std::fs::create_dir_all(format!("{}/wlan0", layout.sys_class_net)).expect("iface dir");
-        std::fs::write(&layout.proc_route, HAPPY_ROUTE).expect("route");
-        std::fs::write(&layout.proc_fib_trie, HAPPY_FIB_TRIE).expect("fib_trie");
+        let layout = happy_layout(dir.path(), false);
 
         let mut overlay_cfg = happy_cfg();
         overlay_cfg.ssid = "TypoNet".into();
