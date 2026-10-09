@@ -171,7 +171,9 @@ Before ANY task, load every document below whose topic matches the task (multi-a
 **An implementation plan is a working artifact, not documentation.** Commit it while the
 work is in flight; delete it in the commit that ships the work, moving anything the design
 got wrong into that design's `## Implementation outcome` section. The design is the durable
-document; the plan stays recoverable from git history, so deleting it loses nothing.
+document; the plan stays recoverable from git history, so deleting it loses nothing. If the
+plan has no matching design, put its durable findings in another durable document instead —
+usually `docs/reference/`.
 
 | Kind | Location |
 |---|---|
@@ -241,7 +243,7 @@ Reusable checklists/prompts (manual reference):
 6. **🔍 QUALITY CHECK** → `$CARGO clippy -- -D warnings` and `$CARGO fmt --check`
 7. **📝 DOCUMENT** → `$CARGO doc --no-deps`
 8. **👀 SELF-REVIEW** → `ponytail-review` your own diff first (cut bloat), then follow [Quality Gates](.serena/memories/quality-gates.md)
-9. **🧹 RETIRE THE PLAN** → delete the `docs/plans/<topic>.md` you just shipped and fold its deviations into `<topic>-design.md` under `## Implementation outcome`
+9. **🧹 RETIRE THE PLAN** → delete the `docs/plans/<topic>.md` you just shipped and fold its deviations into `<topic>-design.md` under `## Implementation outcome` — or into `docs/reference/` if there is no matching design
 10. **🚀 DEPLOY** → Test via SD card payload
 
 **NO SHORTCUTS, NO SKIPPING TESTS, NO BYPASSING LINTING, NO SKIPPING DOCUMENTATION.** The task is only complete when every step above is green.

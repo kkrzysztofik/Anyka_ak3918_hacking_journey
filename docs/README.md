@@ -22,9 +22,14 @@ true after the work ships. Sort by that test.
 A `-design.md` file is the approved shape and the **durable** document. The matching plain
 file is the task-by-task implementation plan: a working artifact, committed while the work
 is in flight and deleted in the commit that ships it, with anything the design got wrong
-moved into that design's `## Implementation outcome` section.
+moved into that design's `## Implementation outcome` section. If the plan has no matching
+design, its durable findings go in `docs/reference/` instead.
 
-Recover any deleted plan with `git log --diff-filter=D -- docs/plans/<name>.md`.
+Recover a deleted plan (the deletion commit's parent still holds it):
+
+```bash
+git show "$(git log --diff-filter=D --format=%H -1 -- docs/plans/<name>.md)^:docs/plans/<name>.md"
+```
 
 `ls docs/plans/` is the index. A hand-maintained table used to live here; it drifted to 17
 rows against 64 designs and was deleted rather than repaired.

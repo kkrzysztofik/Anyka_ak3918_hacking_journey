@@ -1,7 +1,8 @@
 # Fleet rollout of `a013f167` to all four cameras
 
 Date: 2026-08-23
-Status: design approved, plan pending
+Status: **superseded** by `2026-08-29-fleet-rollout-6afa26f4-design.md`, which replaced this
+approach. This rollout was never recorded as executed.
 
 ## Goal
 
