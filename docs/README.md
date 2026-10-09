@@ -23,12 +23,15 @@ A `-design.md` file is the approved shape and the **durable** document. The matc
 file is the task-by-task implementation plan: a working artifact, committed while the work
 is in flight and deleted in the commit that ships it, with anything the design got wrong
 moved into that design's `## Implementation outcome` section. If the plan has no matching
-design, its durable findings go in `docs/reference/` instead.
+design, its durable findings go in `docs/reference/` instead. A plan that was superseded, or
+that can no longer be executed as written, retires the same way — say so in the design.
 
-Recover a deleted plan (the deletion commit's parent still holds it):
+Recover a deleted plan (the deletion commit's parent still holds it). Set `p` to the plan
+path; keep it quoted, an unquoted `<name>` placeholder is a redirection:
 
 ```bash
-git show "$(git log --diff-filter=D --format=%H -1 -- docs/plans/<name>.md)^:docs/plans/<name>.md"
+p=docs/plans/2026-08-12-firmware-upgrade-path.md
+git show "$(git log --diff-filter=D --format=%H -1 -- "$p")^:$p"
 ```
 
 `ls docs/plans/` is the index. A hand-maintained table used to live here; it drifted to 17

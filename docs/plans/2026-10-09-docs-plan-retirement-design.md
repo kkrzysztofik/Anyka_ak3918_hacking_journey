@@ -35,8 +35,8 @@ Three defects follow.
 ## Non-goals
 
 - **No git history rewrite.** The 2.0 MB is noise against a 525 MB `.git` filled
-  with ARM binaries, and a deleted plan restores byte-for-byte with
-  `git show "$(git log --diff-filter=D --format=%H -1 -- docs/plans/<file>)^:docs/plans/<file>"`.
+  with ARM binaries, and a deleted plan restores byte-for-byte. The recovery command lives
+  in `docs/README.md` rather than being duplicated here.
 - **No renaming or moving of designs.** 64 renames churns history to fix a name.
 - `docs/reference/`, `docs/design/`, `docs/archive/` content is untouched except the
   two lines that link at a plan being deleted.
@@ -97,7 +97,7 @@ No findings → no section. Never summarise the task list; that is what git keep
 - no markdown link resolves to a deleted plan, apart from deliberate historical prose
   (see Outcome)
 - `scripts/ci/check_agent_config.py` still passes
-- a deleted plan restores byte-for-byte via the `git show` command in Decision 1
+- a deleted plan restores byte-for-byte via the command in `docs/README.md`
 
 ## Flagged, not in scope
 
@@ -140,9 +140,12 @@ No findings → no section. Never summarise the task list; that is what git keep
   `6afa26f4` design, and a rollout plan targets one exact commit — once `main` moves past it,
   the plan cannot be executed as written, so it is dead rather than in flight. Unlike a
   feature plan, its expiry date is the next merge.
-- **Review round corrections.** Three of the findings were right and are fixed: the documented
+- **Review round corrections.** Four of the findings were right and are fixed: the documented
   recovery command was wrong (`--diff-filter=D` locates the deletion commit but never shows
-  the file); the frozen `docs/archive/README.md` was reverted, accepting a historical
-  reference over editing a frozen file; and `git add -A docs` swept an unrelated untracked
-  reference doc into the PR, since removed. One finding was wrong: the `a013f167` plan was
-  not pending but superseded, which is now recorded in that design as well as its successor.
+  the file), and its `<name>` placeholder was a redirection that breaks on paste; the frozen
+  `docs/archive/README.md` was reverted, accepting a historical reference over editing a frozen
+  file; `git add -A docs` swept an unrelated untracked reference doc into the PR, since
+  removed; and the rule only covered plans that ship, so the superseded-plan case above is now
+  written into `AGENTS.md` step 9 and `docs/README.md`. One finding was wrong: the `a013f167`
+  plan was not pending but superseded, which is now recorded in that design as well as
+  its successor.
