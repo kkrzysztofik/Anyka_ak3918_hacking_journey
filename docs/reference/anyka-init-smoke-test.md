@@ -6,7 +6,6 @@ boot chain, or the ONVIF auth path — everything below exists because it can
 only be proven on hardware.
 
 Design: `docs/plans/2026-08-01-boot-runtime-rust-design.md`
-Plan: `docs/plans/2026-08-01-boot-runtime-rust.md`
 
 ## Preparing the card
 

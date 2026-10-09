@@ -1,7 +1,7 @@
 # PR #55 Coverage Improvement — Design
 
 Date: 2026-08-05
-Status: approved; implementation plan at `docs/plans/2026-08-05-pr55-coverage-improvement.md`
+Status: approved
 Branch context: `feat/ir-led-support` (PR #55)
 Sonar: [new coverage list](https://sonarcloud.io/component_measures?id=kkrzysztofik_Anyka_ak3918_hacking_journey&pullRequest=55&metric=new_coverage&view=list)
 

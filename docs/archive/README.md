@@ -17,5 +17,5 @@ artifacts were kept; only the engines were deleted.
 
 `docs/plans/2026-07-30-speckit-removal-design.md` says the spec-kit artifacts were kept at
 `docs/specs/**`. They were moved here on 2026-08-01 by
-`docs/plans/2026-08-01-docs-consolidation.md`. That design doc was deliberately not
+`docs/plans/2026-08-01-docs-consolidation-design.md`. That design doc was deliberately not
 rewritten — it records what was true when it was written.

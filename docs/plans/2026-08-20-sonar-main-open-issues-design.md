@@ -104,7 +104,3 @@ Removing forget without a replacement ownership model would reintroduce races or
 - Broad clippy cleanups beyond the open issue list
 - Sonar property multicriteria for SHA-1 or forget
 - Unrelated refactors or new features
-
-## Implementation plan
-
-Follow-up: `docs/plans/2026-08-20-sonar-main-open-issues.md`

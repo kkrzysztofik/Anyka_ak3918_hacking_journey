@@ -1,7 +1,7 @@
 # go2rtc SDP Direction — Design
 
 Date: 2026-08-05
-Status: approved; implementation plan at `docs/plans/2026-08-05-go2rtc-sdp-direction.md`
+Status: approved; implemented
 Branch context: `feat/ir-led-support` (unrelated to IR; camera `.198` feeds Frigate on `.6`)
 
 ## Problem
