@@ -75,3 +75,8 @@ Vitest + `data-testid`, mock upload/diagnostics:
 
 - `// ponytail: native <progress>; add shadcn Progress only if another screen needs the styled primitive.`
 - `// ponytail: version-string equality for outcome; richer trial status API if false “reverted” reports show up.`
+
+## Implementation outcome
+
+- **Left undone:** the upload XHR `PUT` has no timeout. The notes above list the other two
+  ceilings but omit this one; add it if hung uploads become a support issue.

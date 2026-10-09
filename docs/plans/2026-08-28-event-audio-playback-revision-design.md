@@ -321,3 +321,12 @@ worked with them — but they were not what the original symptom was about.
   (`copy_for_dual_channel` :66, `wait_play_finished` :80, setup :149-159)
 - AO API and ranges: `cross-compile/anyka_reference/platform/libplat/include/ak_ao.h`
 - Superseded design: `docs/plans/2026-08-26-event-audio-playback-design.md`
+
+## Implementation outcome
+
+- **The clamp was not widened.** "Widen the clamp" above was the design's call, but
+  `ak_ao.h:114-120` documents `ak_ao_set_dac_volume` as 0–6 and assigns 0–12 to the combined
+  `ak_ao_set_volume` macro. `SOUND_VOLUME_MAX` in `config/sound.rs` stays at 6 — do not widen
+  it on the strength of a demo comment.
+- The `HOST_TESTS` Makefile refactor and the Rust `exe_dir()` clip-path resolution were
+  deliberately kept from the workaround branch; the rest of the shell-out workaround went.

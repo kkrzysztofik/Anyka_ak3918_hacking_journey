@@ -38,6 +38,8 @@ rows against 64 designs and was deleted rather than repaired.
 | `docs/reference/video-flow.md` | Video path from sensor to client |
 | `docs/reference/hack-process.md` | Reverse-engineering narrative for the camera |
 | `docs/reference/juan-flash-dump.md` | Stock JUAN AK3918EV200 flash dump (`juan-flash-dump.bin`) vs. our firmware; V500 `ak_motor.ko` ABI |
+| `docs/reference/wifi-bring-up-findings.md` | Vendor wifi script defects (W1/W3/W6) and the findings that read as success (F1–F5) |
+| `docs/reference/camera-cutover-traps.md` | Misdiagnoses and traps from the `.127` / `.146` anyka-init cutover |
 
 ## Design
 

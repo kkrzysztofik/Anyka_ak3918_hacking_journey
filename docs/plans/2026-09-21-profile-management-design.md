@@ -191,3 +191,12 @@ attaches it and waits for PTZ-status metadata gets silence. This will carry a
 `ponytail:` comment naming the ceiling and the upgrade path.
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+## Implementation outcome
+
+- **Shipped a per-profile flag, not a schema migration** (PR #120): `StoredProfile.ptz_detached:
+  bool` replaces the global `schema_version` migration sketched above. `true` means "PTZ
+  explicitly removed"; `false` is the legacy default meaning "file predates the field". The
+  flag is load-bearing because `stored_to_profile` re-attaches the default PTZ configuration
+  to every profile when `ptz.enabled`, ignoring `stored.ptz_config` — without it a
+  `RemovePTZConfiguration` would come back on the next boot.

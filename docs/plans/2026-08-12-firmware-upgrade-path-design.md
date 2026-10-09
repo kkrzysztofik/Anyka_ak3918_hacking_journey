@@ -34,8 +34,7 @@ Four goals, all in scope:
 The manifest is `manifest.sha256` in `sha256sum -c` format plus a
 `manifest.meta` of `key=value` lines, not JSON: `anyka-init` has no
 `serde_json`, and `sha256sum -c` does the whole verify in one exit status using
-a busybox applet already on the device. See the implementation plan's
-"Deviation from the design doc" for the full reasoning.
+a busybox applet already on the device.
 
 `lib/` (31 MB of uClibc runtime) stays outside the slots and outside the bundle.
 A toolchain bump becomes a deliberate separate step; a mismatch surfaces as a
@@ -258,3 +257,10 @@ Host-side, no hardware:
   applier has no such excuse.
 - **Signing.** Both entry points already require admin auth, and admin on this
   camera already implies telnet.
+
+## Implementation outcome
+
+- **Both hardware gates are resolved** (2026-08-12, `192.168.2.198`), verified end to end
+  including the corrupt and missing-file cases: busybox ships `sha256sum -c` and `tar -C`,
+  and `core_pattern` is absolute, so per-service `current_dir` cannot relocate coredumps.
+  Neither needs re-checking.

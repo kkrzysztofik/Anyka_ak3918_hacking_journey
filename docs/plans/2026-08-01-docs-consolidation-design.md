@@ -182,3 +182,13 @@ User approved the design as presented on 2026-08-01 ("yes"), including freezing
 
 User approved the `.ai/` addendum on 2026-08-01, selecting "Move all of .ai/ to
 docs/design/" after the scanning-coverage risk was stated.
+
+## Implementation outcome
+
+- **A directory move must grep the path as a write target, not only as a reference.** The
+  stale-reference grep missed `.ai/export_figma_screenshots.py`, which names `.ai/img` as an
+  output path; fixed to `Path('docs/design/img')` in commit `47d3c561`.
+- Two verification expectations were wrong during execution (commit `6ddf4574`) and neither
+  affected the migration: the file count under `docs/specs` was 39 by `git ls-tree`, not the
+  ~35 assumed here, and the `docs/superpowers` grep also matches the consolidation documents
+  themselves.
