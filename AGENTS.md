@@ -243,7 +243,7 @@ Reusable checklists/prompts (manual reference):
 6. **🔍 QUALITY CHECK** → `$CARGO clippy -- -D warnings` and `$CARGO fmt --check`
 7. **📝 DOCUMENT** → `$CARGO doc --no-deps`
 8. **👀 SELF-REVIEW** → `ponytail-review` your own diff first (cut bloat), then follow [Quality Gates](.serena/memories/quality-gates.md)
-9. **🧹 RETIRE THE PLAN** → delete the `docs/plans/<topic>.md` you just shipped and fold its deviations into `<topic>-design.md` under `## Implementation outcome` — or into `docs/reference/` if there is no matching design. A plan that was superseded, or that can no longer be executed as written, retires the same way; say so in the design.
+9. **🧹 RETIRE THE PLAN** → delete the `docs/plans/<topic>.md` you just shipped and fold its deviations into `<topic>-design.md` under `## Implementation outcome` — or into `docs/reference/` if there is no matching design. A plan that was superseded, or that can no longer be executed as written, retires the same way; say so in the design, or in the reference doc when there is none.
 10. **🚀 DEPLOY** → Test via SD card payload
 
 **NO SHORTCUTS, NO SKIPPING TESTS, NO BYPASSING LINTING, NO SKIPPING DOCUMENTATION.** The task is only complete when every step above is green.

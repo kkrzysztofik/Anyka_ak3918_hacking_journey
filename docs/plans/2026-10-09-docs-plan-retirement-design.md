@@ -65,9 +65,9 @@ Lands in three places:
 
 | File | Change |
 |---|---|
-| `AGENTS.md` | "Documentation Layout" row + workflow step 8 gains "delete the shipped plan" |
+| `AGENTS.md` | "Documentation Layout" row + workflow step 9 gains "delete the shipped plan" |
 | `docs/README.md` | routing table row, new rule paragraph, plans table deleted |
-| `docs/archive/README.md` | the pointer line that says "design and plan docs" |
+| `docs/archive/README.md` | **untouched** — declared frozen; its stale pointer is historical prose |
 
 ## `## Implementation outcome` section
 

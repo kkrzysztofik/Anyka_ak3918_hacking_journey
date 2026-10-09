@@ -24,7 +24,8 @@ file is the task-by-task implementation plan: a working artifact, committed whil
 is in flight and deleted in the commit that ships it, with anything the design got wrong
 moved into that design's `## Implementation outcome` section. If the plan has no matching
 design, its durable findings go in `docs/reference/` instead. A plan that was superseded, or
-that can no longer be executed as written, retires the same way — say so in the design.
+that can no longer be executed as written, retires the same way — say so in the design, or in
+the reference doc when there is none.
 
 Recover a deleted plan (the deletion commit's parent still holds it). Set `p` to the plan
 path; keep it quoted, an unquoted `<name>` placeholder is a redirection:
