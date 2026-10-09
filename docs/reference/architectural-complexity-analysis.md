@@ -975,3 +975,16 @@ sequenceDiagram
     F->>F: update_video_metadata()
     F->>F: fanout_frame() → RTSP + HTTP-FLV
 ```
+
+## Deferred decisions
+
+Recorded 2026-10-09 from the retired `2026-07-25-async-hardware-separation` plan, which had
+no design doc, so this rationale lived nowhere else.
+
+- **`SetVideoEncoderConfiguration` is config-only until restart.** Applying it live was left
+  undone as YAGNI, and `media/defaults.rs` carries a `ponytail:` comment saying so. Whoever
+  wires it: the restart path (`stop_streaming` in `platform/anyka/video_encoder.rs` —
+  grace-period sleeps plus thread joins) must run behind an owner thread, never in a handler.
+- **Tokio thread counts are fixed, not tuned at runtime.** The AK3918 budget is 2 worker
+  threads, 16 blocking threads, 32 MB RAM. Two workers is right once blocking work is off
+  the executor; runtime tuning was left undone as YAGNI.

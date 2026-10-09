@@ -269,3 +269,20 @@ so the SDK tolerates or clamps it. Noted rather than acted on: 16 kHz yields
 64 ms, inside the documented range, and is a config-value change with no code
 change if 8 kHz misbehaves. Check the return code of
 `ak_ai_set_frame_interval` and log it rather than ignoring it.
+
+## Implementation outcome
+
+Found by device validation, not anticipated above:
+
+- The push loop busy-spun when `ak_aenc_get_stream` returned 0 with an empty list, starving
+  the SDK's `read_pcm_thread`; pacing each iteration fixed it. The suspected 128 ms
+  out-of-range frame interval was **not** the cause.
+- `handle_pushed_frame` dropped `StreamId::Audio` frames before the bridge.
+- Audio RTP timestamps were milliseconds read as sample units — RFC 3640 wants samples — so
+  audio ran ~16× slow. RTP-Info also advertised a random `init_timestamp` that never matched
+  the 0-based first packet, stalling strict clients.
+- The RTCP SR always reported timestamp 0 because the pull path never fed sent packets into
+  the track's `RtcpContext`.
+
+`start_streaming` runs after bridge registration via the `AudioEncoder` trait; the plan's
+sync `venc-read` thread cannot host an async bridge-aware call.

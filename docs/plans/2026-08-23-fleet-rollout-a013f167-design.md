@@ -1,7 +1,8 @@
 # Fleet rollout of `a013f167` to all four cameras
 
 Date: 2026-08-23
-Status: design approved, plan pending
+Status: **superseded** by `2026-08-29-fleet-rollout-6afa26f4-design.md`, which replaced this
+approach. This rollout was never recorded as executed.
 
 ## Goal
 
@@ -175,3 +176,13 @@ Per camera, all must hold before moving on:
 ## Out of scope
 
 Leftover `slots/*.aside*` and `*.preidr` directories on `.198` — it has none.
+
+## Implementation outcome
+
+- **The rollout outcome was never recorded.** The plan required a "Rollout log" section here
+  and none was ever written. The 2026-08-29 survey
+  (`2026-08-29-fleet-rollout-6afa26f4-design.md`) still found all four cameras on
+  `a1660798-dirty`, so nothing proves the fleet ever reached a clean `a013f167`.
+- **The build gate failed before any camera was touched:** `main` could not build a bundle at
+  all — the WebUI type-check fails under TS 7 and no CI workflow runs it — which is why
+  `fix/www-typecheck-ts7` had to ride along in the shipped version.

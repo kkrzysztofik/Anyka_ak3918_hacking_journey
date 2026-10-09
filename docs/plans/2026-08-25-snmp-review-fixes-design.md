@@ -3,7 +3,7 @@
 Date: 2026-08-25
 Status: implemented
 Branch / worktree: `feat/snmp` @ `.worktrees/snmp`
-Follows: `docs/plans/2026-08-25-snmp-integration-design.md`, `docs/plans/2026-08-25-snmp-integration.md`
+Follows: `docs/plans/2026-08-25-snmp-integration-design.md`
 
 ## Problem
 

@@ -433,3 +433,13 @@ committing R1's value.
 - JLCPCB **two-layer FR4** fab package and BOM with LCSC part numbers.
 - `plan()` change in `onvif-rust` to drive `Node::WhiteLed` on the night
   transition.
+
+## Implementation outcome
+
+- **Board rules raised to JLCPCB's 2 oz limits** — 0.16/0.16 mm track and space and a
+  0.254 mm PTH ring in `kicad/ir-ring.kicad_dru`. The board had been drawn to 0.15 mm.
+- **J1 needed a custom footprint** (`..._Ring0.275`): KiCad's stock PicoBlade pads leave a
+  0.15 mm ring on the 0.5 mm hole, under JLCPCB's floor even at 1 oz. J1 is `C588276`
+  (genuine Molex 530480510), assembled by JLCPCB as a THT part.
+- Restoring white-light night mode stays out of scope; the all-IR decision was taken with the
+  36× luma measurement on the table.

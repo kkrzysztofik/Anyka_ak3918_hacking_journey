@@ -168,15 +168,22 @@ Before ANY task, load every document below whose topic matches the task (multi-a
 `YYYY-MM-DD-<topic>.md`. These are the paths the superpowers `brainstorming` and
 `writing-plans` skills already write to — do not invent a new location.
 
+**An implementation plan is a working artifact, not documentation.** Commit it while the
+work is in flight; delete it in the commit that ships the work, moving anything the design
+got wrong into that design's `## Implementation outcome` section. The design is the durable
+document; the plan stays recoverable from git history, so deleting it loses nothing. If the
+plan has no matching design, put its durable findings in another durable document instead —
+usually `docs/reference/`.
+
 | Kind | Location |
 |---|---|
-| Designs and implementation plans | `docs/plans/` |
+| Designs (durable) + in-flight implementation plans | `docs/plans/` |
 | Durable analyses and investigations | `docs/reference/` |
 | WebUI design source (Figma, exports, screenshots) | `docs/design/` |
 | Superseded conventions | `docs/archive/` — frozen, never add, never edit |
 | User-facing documentation | `wiki/` — published to the GitHub Wiki |
 
-A plan has an end date; reference does not. See `docs/README.md` for the index.
+A plan has an end date; reference does not. `ls docs/plans/` is the index.
 
 ## Key Development Areas
 
@@ -236,7 +243,8 @@ Reusable checklists/prompts (manual reference):
 6. **🔍 QUALITY CHECK** → `$CARGO clippy -- -D warnings` and `$CARGO fmt --check`
 7. **📝 DOCUMENT** → `$CARGO doc --no-deps`
 8. **👀 SELF-REVIEW** → `ponytail-review` your own diff first (cut bloat), then follow [Quality Gates](.serena/memories/quality-gates.md)
-9. **🚀 DEPLOY** → Test via SD card payload
+9. **🧹 RETIRE THE PLAN** → delete the `docs/plans/<topic>.md` you just shipped and fold its deviations into `<topic>-design.md` under `## Implementation outcome` — or into `docs/reference/` if there is no matching design. A plan that was superseded, or that can no longer be executed as written, retires the same way; say so in the design, or in the reference doc when there is none.
+10. **🚀 DEPLOY** → Test via SD card payload
 
 **NO SHORTCUTS, NO SKIPPING TESTS, NO BYPASSING LINTING, NO SKIPPING DOCUMENTATION.** The task is only complete when every step above is green.
 

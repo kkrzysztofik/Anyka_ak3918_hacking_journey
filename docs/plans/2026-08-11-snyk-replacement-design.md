@@ -170,3 +170,10 @@ Security coverage increases: Rust crate advisories go from unscanned to gated, a
 dependency updates go from security-only to all four ecosystems.
 
 The repo drops a vendor account, an API token, and a dashboard from its supply chain.
+
+## Implementation outcome
+
+- **Left undone:** `.github/workflows/quality-gates.yml` and `reporting.yml` are dead
+  `workflow_call` reusable workflows — nothing calls them
+  (`rg 'uses:.*\.github/workflows'` returns nothing). Only the Snyk-specific parts were
+  touched; deleting them wholesale is a separate cleanup.

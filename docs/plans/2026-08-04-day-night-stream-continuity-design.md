@@ -1,7 +1,7 @@
 # Day/Night Stream Continuity — Design
 
 Date: 2026-08-04
-Status: approved; implementation plan at `docs/plans/2026-08-04-day-night-stream-continuity.md`
+Status: approved
 Branch context: `feat/ir-led-support` (live RTSP must survive ISP day/night)
 
 ## Problem

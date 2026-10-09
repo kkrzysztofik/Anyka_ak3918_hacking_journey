@@ -446,8 +446,8 @@ int handle_isp_get_awb_stat(int fd, const uint8_t *req, uint32_t req_len)
     return send_response(fd, STATUS_OK, resp, sizeof(resp));
 }
 
-/* AE run-info command (docs/plans/2026-09-21-imaging-tab-completion.md
- * Task 10): appended at 120 after the Phase-3 effect commands (115-117)
+/* AE run-info command (docs/plans/2026-09-21-imaging-tab-completion-design.md):
+ * appended at 120 after the Phase-3 effect commands (115-117)
  * and GET_BLC (118) — the wire protocol is append-only, and 109 (originally
  * proposed for the AE set-attr) was left unused rather than reclaimed.
  * The AE world runs in the kernel (aec_* threads); the run-info ioctl reads

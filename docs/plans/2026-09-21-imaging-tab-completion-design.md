@@ -250,3 +250,21 @@ which `/api/diagnostics` already returns.
 | Exposure calibration yields no clean conversion | Phase 2b ships Mode only; limits stay unexposed |
 | An apply storm hits the main stream | commit-on-release, and the `main-keyframes-exceed-shm-slot` ceiling is a known separate defect |
 | A new `[imaging]` key breaks A/B rollback | code defaults, no new required section |
+
+## Implementation outcome
+
+Hardware contradicted three of the decisions above on the GC1084 build:
+
+- **WDR is genuinely unsupported.** `AK_ISP_set_wdr_attr` is rejected at runtime, so
+  `store.validate_settings` returns `400 InvalidArgVal` ("WideDynamicRange is not supported
+  on this device") when `wdr_supported` is false, and the DoD gate became "marked unavailable".
+- **Manual white balance does nothing.** Gate FAILED 2026-09-21 on firmware `0152b67c`,
+  `.198`: MANUAL cr=3.0/4.0, cb=1.0 left mean U/V identical to AUTO (U≈93, V≈54). Values
+  reach the kernel ISP `mwb_para` but never the pipeline, so the card keeps its stub.
+- **Anti-flicker is unreachable.** This `libplat_vpss.so` does not implement `VPSS_POWER_HZ`
+  (enum 7) at all — `[ak_vpss_effect_set:78] error type: 7`. 60 returns an honest 500; 50 is
+  the fixed SDK default (no-op, 200). Neither value is reachable as designed.
+
+Slot 109 was never reclaimed — the IPC protocol is append-only — so the AE commands were
+appended at 119-121: 120 `GET_RUN_INFO` is permanent, 119 and 121 were temporary. See
+`docs/reference/anyka-ae-units.md`.
