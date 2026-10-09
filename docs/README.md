@@ -27,11 +27,11 @@ design, its durable findings go in `docs/reference/` instead. A plan that was su
 that can no longer be executed as written, retires the same way — say so in the design, or in
 the reference doc when there is none.
 
-Recover a deleted plan (the deletion commit's parent still holds it). Set `p` to the plan
-path; keep it quoted, an unquoted `<name>` placeholder is a redirection:
+Recover a deleted plan (the deletion commit's parent still holds it). Substitute the plan
+path into `p`; keep it quoted, an unquoted `<name>` placeholder is a redirection:
 
 ```bash
-p=docs/plans/2026-08-12-firmware-upgrade-path.md
+p='docs/plans/YYYY-MM-DD-topic.md'
 git show "$(git log --diff-filter=D --format=%H -1 -- "$p")^:$p"
 ```
 
