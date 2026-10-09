@@ -107,3 +107,29 @@ No findings → no section. Never summarise the task list; that is what git keep
 - The three newest plans (`2026-09-28-juan-board-support`, `2026-10-04-anyka-init-…`,
   `2026-10-04-snmp-agent-…`) retire cleanly: the two cleanups shipped as PRs #131/#132,
   and the JUAN plan lives on in its own worktree.
+
+## Implementation outcome
+
+- **63 deleted, not 64.** `2026-09-28-juan-board-support.md` was kept because its work is
+  still on the unmerged `feature/juan-board-support` branch and the rule deletes a plan when
+  the work *ships*. Applying the rule on its first day amended this design.
+- **Residue rate: 16 of 64 (25%).** 48 plans said nothing their design did not already say.
+  Ten designs gained an `## Implementation outcome` section; three plans had no design to
+  inherit their findings, becoming `docs/reference/wifi-bring-up-findings.md`,
+  `docs/reference/camera-cutover-traps.md`, and a "Deferred decisions" section in
+  `docs/reference/architectural-complexity-analysis.md`.
+- **Two designs already recorded their own findings** and were dropped: `vendor-daemon-restart-resilience`
+  already carried the R4 deferral, and `day-night-gaps` already carried the `.127` oscillation,
+  the "all N samples agree on the same lie" conclusion, and both out-of-scope items. The
+  "does the design already say it" filter, not the extraction, is where the value is.
+- **Nine designs pointed at their own deleted plan**, mostly
+  `Status: approved; implementation plan at <plan>`. `2026-08-12-firmware-upgrade-path-design.md`
+  went further and deferred "the full reasoning" to a plan section. A future run must grep for
+  self-references, not only for inbound links from elsewhere.
+- **The marker scan is triage, not verdict.** It found 17 of the 31 real candidates but
+  missed `wifi-findings-remediation` outright (its findings are headed `## F1 — BLOCKING`),
+  while producing false positives from task titles containing "outcome" and "results".
+- **Delegating the read pass cost more than it returned.** Lanes of 8 plans
+  lost everything to a 30-minute per-child cap because output was bound rather than written as
+  they went; writing each verdict to disk immediately salvaged 13 plans. The remaining 18 were
+  faster done in-parent from a marker map than by another fan-out.
