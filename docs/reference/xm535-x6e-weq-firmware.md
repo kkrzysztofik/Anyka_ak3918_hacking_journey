@@ -460,6 +460,18 @@ cd /tmp/opc && md5sum -c *.md5sum      # both must report OK
 
 Serve with `scripts/tftp_serve.py <dir>`. Things that bite, learned the hard way:
 
+- **Conformance to the upstream guide.** `en/install-xm530.md` is what the openipc.org form
+  renders (the page itself only serves the form; `/api/v1/wizard/xm530` 404s with params). Our
+  procedure matches it on `bootargs`, `bootcmd`, load address `0x81000000`, erase/write offsets
+  (`0x50000`/`0x200000` and `0x250000`/`0x500000`) and `osmem`/`totalmem`. Three deliberate
+  deltas: `bootcmd` is set as `run b1 b2 b3` with one command per variable, because this U-Boot
+  mishandles `;` inside `setenv`; `saveenv` happens **after** the writes rather than before, so a
+  failed download cannot leave a boot loop (the guide's order does exactly that); and filenames
+  are passed explicitly instead of via `${soc}`/`bootfile`. Also `setenv soc xm530`, which the
+  guide does — unused when filenames are explicit, but free.
+- **The guide's `64k(env)` at `0x40000` is not U-Boot's env storage.** The stock layout puts the
+  kernel at `0x40000`, so the real env lives in the `0x2F800`..`0x40000` gap — the one region
+  never dumped. `saveenv` is the only thing that writes it.
 - **`tftp_serve.py` must send a terminating short block.** 262144 is an exact multiple of 512, so
   without the empty final block U-Boot ACKs all 512 blocks and then waits forever —
   `Retry count exceeded`, then it restarts the RRQ from scratch. Fixed and tested.
