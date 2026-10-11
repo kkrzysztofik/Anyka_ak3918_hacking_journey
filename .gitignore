@@ -288,3 +288,8 @@ SD_card_contents/anyka_hack/onvif/www/
 # output that a fully-staged `git add` would otherwise sweep in.
 bundle.tar
 *.bundle.tar
+
+# XiongMai OTA packages for the XM535 board: 44 MB of vendor firmware, and local
+# input data for the dump in docs/reference/xm535-flash-dump/. Not ours to
+# redistribute, and a fully-staged `git add` would otherwise sweep it in.
+Firmwares X6E-WEQ/
