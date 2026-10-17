@@ -18,6 +18,12 @@ on:
     - cron: "0 6 * * 1"
   workflow_dispatch:
 
+# Scheduled and manual runs share the fixed branch ci/cargo-update and push
+# with --force; queue them instead of letting two runs overwrite each other.
+concurrency:
+  group: cargo-update
+  cancel-in-progress: false
+
 permissions:
   contents: write
   pull-requests: write
@@ -26,15 +32,25 @@ jobs:
   cross-compile:
     name: Update cross-compile lockfile
     runs-on: ubuntu-latest
+    # Same full toolchain image the release build uses (Rust 1.97.1 plus the
+    # ARMv5TEJ cross toolchain), so cargo update cannot slip in a crate whose
+    # MSRV or ARM code breaks the build that actually ships. The -ci image is
+    # host-only: prepare-ci-toolchain.sh strips the ARM rust-std deliberately.
+    container:
+      image: kkrzysztofik/anyka-cross-compile:latest
+      options: --security-opt seccomp=unconfined
 
     steps:
       - name: Checkout Code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v6.0.0
-
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8  # v1
         with:
-          toolchain: stable
+          # Keep the token out of git config while Cargo build scripts and
+          # proc macros run; the push step authenticates explicitly instead.
+          persist-credentials: false
+
+      - name: Configure Git
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Generate patched crates
         working-directory: cross-compile/patches
@@ -47,6 +63,15 @@ jobs:
       - name: Verify the updated workspace
         working-directory: cross-compile
         run: cargo test --target x86_64-unknown-linux-gnu --workspace --lib
+
+      - name: Verify the ARM target
+        working-directory: cross-compile/onvif-rust
+        # cargo update can pull semver-compatible code that fails only on
+        # ARMv5TEJ (64-bit atomics - the reason the tower-http patch exists).
+        # Check the target that actually ships, as release.yml builds it.
+        run: |
+          ./scripts/setup-cargo-config.sh
+          cargo check --target armv5te-unknown-linux-uclibceabi
 
       - name: Open or update pull request
         env:
@@ -63,9 +88,16 @@ jobs:
           git checkout -b "$branch"
           git add cross-compile/Cargo.lock
           git commit -m "chore(deps): update cross-compile lockfile"
+          # Checkout persisted no credentials; authenticate the push here.
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           # Force so a still-open PR is refreshed rather than duplicated.
           git push --force origin "$branch"
-          gh pr create --base main --head "$branch" \
-            --title "chore(deps): update cross-compile lockfile" \
-            --body "Automated cargo update for the cross-compile workspace. The workspace tests ran in the generating workflow; the PR itself does not trigger CI because GITHUB_TOKEN-created pull requests are exempt. Dependabot cannot open this PR - see .github/workflows/cargo-update.yml." \
-            || echo "PR already open; branch updated."
+          # Create only when no PR exists; any other gh failure must fail the
+          # job, or a PR that was never opened looks successful.
+          if [ -n "$(gh pr list --head "$branch" --state open --json number --jq '.[].number')" ]; then
+            echo "PR already open; branch updated."
+          else
+            gh pr create --base main --head "$branch" \
+              --title "chore(deps): update cross-compile lockfile" \
+              --body "Automated cargo update for the cross-compile workspace. The workspace tests ran in the generating workflow; the PR itself does not trigger CI because GITHUB_TOKEN-created pull requests are exempt. Dependabot cannot open this PR - see .github/workflows/cargo-update.yml."
+          fi
