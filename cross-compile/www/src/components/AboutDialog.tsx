@@ -41,7 +41,7 @@ export function AboutDialog({ open, onOpenChange }: AboutDialogProps) {
           }
         }
       };
-      fetchData();
+      void fetchData();
       return () => controller.abort();
     }
   }, [open, deviceInfo]);

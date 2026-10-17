@@ -92,7 +92,7 @@ export function ChangePasswordDialog({ open, onOpenChange }: Readonly<ChangePass
       await setUser(username, data.newPassword, currentUser.userLevel);
 
       // 4. Update local credentials
-      login(username, data.newPassword);
+      await login(username, data.newPassword);
 
       toast.success('Password updated successfully');
       onOpenChange(false);
