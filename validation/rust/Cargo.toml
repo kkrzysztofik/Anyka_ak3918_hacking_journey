@@ -17,7 +17,9 @@ path = "src/main.rs"
 anyhow = "1.0"
 chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4", features = ["derive"] }
-ffmpeg-sidecar = "2"
+# default-features pulls in download_ffmpeg -> zip 4.x, which is unpatched for
+# RUSTSEC-2026-0367/0368/0369. We only spawn the system ffmpeg binary.
+ffmpeg-sidecar = { version = "2", default-features = false }
 futures-util = "0.3"
 retina = "0.4.19"
 serde = { version = "1.0", features = ["derive"] }
