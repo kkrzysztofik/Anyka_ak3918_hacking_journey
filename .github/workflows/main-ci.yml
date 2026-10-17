@@ -850,10 +850,19 @@ jobs:
         shell: bash
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           echo "### 🎯 SonarQube Issues Report"
+          # Unscoped, this returns the *default branch's* open issues. Uploaded
+          # from a pull_request run that misattributes them to the PR's ref, and
+          # they resurface as review comments on lines the PR already fixed.
+          # Scope the query to the revision actually under analysis.
+          SCOPE=""
+          if [ -n "${PR_NUMBER}" ]; then
+            SCOPE="&pullRequest=${PR_NUMBER}"
+          fi
           # Using environment variable to prevent code injection
-          ISSUES=$(curl -s -u "${SONAR_TOKEN}:" "https://sonarcloud.io/api/issues/search?componentKeys=kkrzysztofik_Anyka_ak3918_hacking_journey&resolved=false&ps=100")
+          ISSUES=$(curl -s -u "${SONAR_TOKEN}:" "https://sonarcloud.io/api/issues/search?componentKeys=kkrzysztofik_Anyka_ak3918_hacking_journey&resolved=false&ps=100${SCOPE}")
           COUNT=$(echo $ISSUES | jq '.total')
 
           cat > sonar-report.sarif <<EOF
