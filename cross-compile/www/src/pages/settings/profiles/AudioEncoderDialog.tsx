@@ -73,7 +73,7 @@ export function AudioEncoderDialog({
         }
       }
     };
-    loadData();
+    void loadData();
     return () => controller.abort();
   }, [encoderToken]);
 

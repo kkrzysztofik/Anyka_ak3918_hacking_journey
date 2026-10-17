@@ -70,7 +70,7 @@ export function VideoEncoderDialog({
         }
       }
     };
-    loadData();
+    void loadData();
     return () => controller.abort();
   }, [encoderToken]);
 
