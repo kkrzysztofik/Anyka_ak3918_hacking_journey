@@ -73,7 +73,7 @@ export default function LoginPage() {
       const result = await verifyCredentials(data.username, data.password);
 
       if (result.success) {
-        login(data.username, data.password);
+        await login(data.username, data.password);
         toast.success('Successfully signed in');
       } else {
         toast.error(result.error || 'Authentication failed');

@@ -264,6 +264,49 @@ describe('ChangePasswordDialog', () => {
       );
     });
 
+    it('should await credential storage before announcing success', async () => {
+      vi.mocked(verifyCredentials).mockResolvedValue({ success: true });
+
+      const pendingLogin = createControllablePromise<void>();
+      const loginMock = vi.fn(() => pendingLogin.promise);
+      vi.mocked(useAuth).mockReturnValue({
+        username: 'admin',
+        login: loginMock,
+        isAuthenticated: true,
+        logout: vi.fn(),
+        getCredentials: vi.fn(),
+        getBasicAuthHeader: vi.fn(),
+      });
+
+      const user = userEvent.setup();
+      renderWithProviders(<ChangePasswordDialog open={true} onOpenChange={vi.fn()} />);
+
+      await user.type(
+        screen.getByTestId('change-password-dialog-current-password-input'),
+        'oldpass',
+      );
+      await user.type(
+        screen.getByTestId('change-password-dialog-new-password-input'),
+        'newpass123',
+      );
+      await user.type(
+        screen.getByTestId('change-password-dialog-confirm-password-input'),
+        'newpass123',
+      );
+      await user.click(screen.getByTestId('change-password-dialog-submit-button'));
+
+      await waitFor(() => expect(loginMock).toHaveBeenCalledWith('admin', 'newpass123'));
+
+      // login() is still pending, so success must not be announced yet.
+      expect(mockToast.success).not.toHaveBeenCalledWith('Password updated successfully');
+
+      pendingLogin.resolve();
+
+      await waitFor(() =>
+        expect(mockToast.success).toHaveBeenCalledWith('Password updated successfully'),
+      );
+    });
+
     it('should reset form after successful password change', async () => {
       const user = userEvent.setup();
       const onOpenChange = vi.fn();

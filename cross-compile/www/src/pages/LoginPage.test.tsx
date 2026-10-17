@@ -129,6 +129,37 @@ describe('LoginPage', () => {
     });
   });
 
+  it('should persist credentials before announcing success', async () => {
+    vi.mocked(verifyCredentials).mockResolvedValue({ success: true });
+
+    const storageAtAnnouncement: (string | null)[] = [];
+    vi.mocked(mockToast.success).mockImplementationOnce((message) => {
+      if (message === 'Successfully signed in') {
+        storageAtAnnouncement.push(sessionStorage.getItem('onvif_camera_auth'));
+      }
+      return 'toast-id';
+    });
+
+    const user = userEvent.setup();
+    renderWithProviders(<LoginPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('login-form-username-input')).toBeInTheDocument();
+    });
+
+    await user.type(screen.getByTestId('login-form-username-input'), 'testuser');
+    await user.type(screen.getByTestId('login-form-password-input'), 'testpassword');
+    await user.click(screen.getByTestId('login-form-submit-button'));
+
+    await waitFor(() => {
+      expect(storageAtAnnouncement).toHaveLength(1);
+    });
+
+    // login() encrypts before it stores, so awaiting it is what lands the
+    // session first; fire-and-forget announces success with nothing stored.
+    expect(storageAtAnnouncement[0]).not.toBeNull();
+  });
+
   it('should show loading state during submission', async () => {
     vi.mocked(verifyCredentials).mockImplementation(() =>
       createDelayedPromise({ success: true }, 100),
