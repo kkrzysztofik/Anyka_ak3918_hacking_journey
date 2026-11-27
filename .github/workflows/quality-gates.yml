@@ -122,7 +122,7 @@ jobs:
       - name: SonarQube Scan
         id: sonar-scan
         continue-on-error: true
-        uses: sonarsource/sonarqube-scan-action@e805d875275f728fac1885b413934be6d7c63f65  # v8.4.1
+        uses: sonarsource/sonarqube-scan-action@70bad232163b09d998ea0707ee80c0ec80798c16  # v8.5.1
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 

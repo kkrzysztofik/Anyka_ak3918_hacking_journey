@@ -741,7 +741,7 @@ jobs:
       - name: SonarQube Scan
         id: sonar-scan
         continue-on-error: true
-        uses: sonarsource/sonarqube-scan-action@e805d875275f728fac1885b413934be6d7c63f65  # v8.4.1
+        uses: sonarsource/sonarqube-scan-action@70bad232163b09d998ea0707ee80c0ec80798c16  # v8.5.1
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
@@ -913,7 +913,7 @@ jobs:
           fi
 
       - name: Upload SonarCloud Scan Results to GitHub
-        uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066  # v4.0.0
+        uses: github/codeql-action/upload-sarif@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea  # v4.0.0
         # SHA: 0d579ffd059c29b07949a3cce3983f0780820c98
         continue-on-error: true
         with:
